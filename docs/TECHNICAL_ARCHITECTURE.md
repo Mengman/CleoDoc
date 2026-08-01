@@ -230,7 +230,7 @@ MyNovel.cleo/
 │  ├─ rules/
 │  ├─ events/
 │  └─ plot-threads/
-├─ research/
+├─ materials/
 ├─ reviews/
 ├─ sources/
 │  ├─ metadata/
@@ -344,6 +344,12 @@ Agent
 - 项目打开时执行轻量 `quick_check`，异常时进入只读恢复模式。
 - 备份必须使用 Backup API 或 `VACUUM INTO`，不能只复制打开中的主数据库文件。
 - `rebuild-index` 从 Markdown、JSON 和附件解析文本重建 Chunk、FTS、Embedding 和关系投影。
+
+### 7.5 v0.1 资料事实源与投影
+
+步骤 5 将资料正文保存为 `materials/<material-id>.txt|md`，并将对应的 `KnowledgeSource` 元数据保存为 `sources/metadata/<material-id>.json`。元数据包含项目 ID、标题、来源标签、原文件名、标签、格式、相对路径、内容哈希、字节数和时间。
+
+SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialService` 打开时读取并校验元数据、项目归属、路径、UTF-8 内容、字节数和哈希，然后同步 SQLite。添加、重命名和删除采用原子文件写入并在数据库失败时回滚当前操作；进程在文件与数据库更新之间中断时，下次打开以文件事实源校准投影。
 
 ## 8. 自研 RAG 架构
 
@@ -594,7 +600,9 @@ interface DocumentDiff {
 
 ### 12.1 v0.1 前台 Tool Loop
 
-v0.1 在 CLI 前台执行单任务 Tool Loop：模型可以请求检索资料或正文，Core 校验参数和项目作用域后执行工具，将结果及 `ContextManifest` 返回模型。循环必须设置最大轮数、上下文预算、超时和取消信号；生成结果只有经过用户明确的保存命令才写入作品文件。
+v0.1 在 CLI 前台执行单任务 Tool Loop：模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。Core 校验参数和项目作用域；任何写入均显示目标、内容长度和预览并由用户逐次确认，覆盖还要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
+
+Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
 CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料、对话记录和 `ContextManifest` 必须保持一致。
 

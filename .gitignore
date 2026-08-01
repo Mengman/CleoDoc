@@ -1,0 +1,11 @@
+.cleo/
+.env
+.env.*
+!.env.example
+coverage/
+dist/
+node_modules/
+.npm-cache/
+*.log
+.DS_Store
+Thumbs.db

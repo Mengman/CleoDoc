@@ -333,7 +333,7 @@ MyNovel.cleo/
 ├─ cleo.project.json
 ├─ manuscript/
 ├─ canon/
-├─ research/
+├─ materials/
 ├─ reviews/
 ├─ sources/
 └─ .cleo/

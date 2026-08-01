@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：开发计划基线  
+> 状态：实施中；v0.1 步骤 1–5 已完成，本地文档 Tool Loop 已提前交付
 > 日期：2026-08-01  
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -25,6 +25,18 @@ v0.1 的核心闭环是：
 ```
 
 在 v0.1 CLI 通过验收前，不开始 Electron Renderer、React 工作室或 TipTap 编辑器开发。
+
+### 当前实施进度
+
+| 步骤 | 状态 | 已交付 |
+| --- | --- | --- |
+| 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、迁移、写入队列和健康检查 |
+| 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类和 Fake Provider 测试 |
+| 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
+| 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
+| 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
+| 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -161,10 +173,15 @@ cleo document save-last <path>
 交互命令：
 
 ```text
+/resume <index-number>
+/history
+/new
 /save manuscript/chapter-001.md
 /read manuscript/chapter-001.md
 /documents
 ```
+
+进入聊天时展示最近 5 条记录；`/history` 在交互终端中使用上下键选择、Enter 恢复、`q` 返回聊天。
 
 验收门 A：
 
@@ -174,6 +191,8 @@ cleo document save-last <path>
 - LLM 和 CLI 均不能写出项目目录。
 
 ### 步骤 5：资料管理
+
+状态：已完成。资料正文保存于 `materials/<id>.txt|md`，元数据保存于 `sources/metadata/<id>.json`，SQLite `sources` 表作为可重建投影。当前限制为 UTF-8 文本、TXT 和 Markdown，单份资料不超过 10 MiB。
 
 工作内容：
 
@@ -282,6 +301,8 @@ cleo search <query> --hybrid --explain
 - 固定基准集的关键资料 Top-10 Recall 不低于 90%。
 
 ### 步骤 9：LLM 本地 RAG Tool
+
+其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
 
 工作内容：
 
@@ -431,4 +452,3 @@ flowchart LR
 - 超大资料库 ANN 后端。
 - 应用级全项目加密。
 - 自动重写 Git 历史的永久清除。
-

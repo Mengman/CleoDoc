@@ -1,0 +1,7 @@
+.cleo/
+AGENTS.md
+coverage/
+dist/
+docs/**/*.md
+node_modules/
+package-lock.json

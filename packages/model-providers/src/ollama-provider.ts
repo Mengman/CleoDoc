@@ -1,0 +1,236 @@
+import { z } from "zod";
+
+import type {
+  ChatMessage,
+  ModelEvent,
+  ModelProvider,
+  ModelRequest,
+  ProviderHealth,
+} from "../../contracts/src/index.js";
+import { AppError } from "../../contracts/src/index.js";
+import { mapProviderFailure, throwForProviderResponse, withTimeout } from "./http-errors.js";
+
+const tagsSchema = z
+  .object({
+    models: z.array(z.object({ name: z.string() }).passthrough()),
+  })
+  .passthrough();
+
+const chatChunkSchema = z
+  .object({
+    message: z
+      .object({
+        content: z.string().default(""),
+        tool_calls: z
+          .array(
+            z.object({
+              function: z.object({
+                name: z.string(),
+                arguments: z.union([z.string(), z.record(z.string(), z.unknown())]),
+              }),
+            }),
+          )
+          .optional(),
+      })
+      .optional(),
+    done: z.boolean().default(false),
+    done_reason: z.string().optional(),
+    prompt_eval_count: z.number().optional(),
+    eval_count: z.number().optional(),
+  })
+  .passthrough();
+
+export interface OllamaProviderOptions {
+  baseUrl?: string;
+  timeoutMs?: number;
+  fetchImplementation?: typeof fetch;
+}
+
+export class OllamaProvider implements ModelProvider {
+  readonly id = "ollama";
+  readonly displayName = "Ollama";
+  private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImplementation: typeof fetch;
+
+  constructor(options: OllamaProviderOptions = {}) {
+    this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
+    this.timeoutMs = options.timeoutMs ?? 120_000;
+    this.fetchImplementation = options.fetchImplementation ?? fetch;
+  }
+
+  async validateConfiguration(callerSignal?: AbortSignal): Promise<ProviderHealth> {
+    const requestSignal = withTimeout(callerSignal, Math.min(this.timeoutMs, 30_000));
+    try {
+      const response = await this.fetchImplementation(`${this.baseUrl}/api/tags`, {
+        signal: requestSignal,
+      });
+      if (!response.ok) {
+        await throwForProviderResponse(response);
+      }
+      const parsed = tagsSchema.safeParse(await response.json());
+      if (!parsed.success) {
+        throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 模型列表格式无效。");
+      }
+      return {
+        ok: true,
+        message: "连接成功。",
+        models: parsed.data.models.map((model) => model.name),
+      };
+    } catch (error) {
+      throw mapProviderFailure(error, callerSignal, requestSignal);
+    }
+  }
+
+  async *stream(request: ModelRequest, callerSignal: AbortSignal): AsyncIterable<ModelEvent> {
+    const requestSignal = withTimeout(callerSignal, this.timeoutMs);
+    try {
+      const response = await this.fetchImplementation(`${this.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { Accept: "application/x-ndjson", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: request.model,
+          messages: request.messages.map(toOllamaMessage),
+          stream: true,
+          options: {
+            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+            ...(request.maxTokens === undefined ? {} : { num_predict: request.maxTokens }),
+          },
+          ...(request.tools === undefined
+            ? {}
+            : {
+                tools: request.tools.map((tool) => ({
+                  type: "function",
+                  function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema,
+                  },
+                })),
+              }),
+        }),
+        signal: requestSignal,
+      });
+      if (!response.ok) {
+        await throwForProviderResponse(response);
+      }
+      if (response.body === null) {
+        throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 没有返回响应流。");
+      }
+
+      let toolIndex = 0;
+      for await (const line of readLines(response.body)) {
+        if (line.trim() === "") {
+          continue;
+        }
+        const parsedJson: unknown = JSON.parse(line);
+        const parsed = chatChunkSchema.safeParse(parsedJson);
+        if (!parsed.success) {
+          throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 流式响应格式无效。", {
+            details: { issues: parsed.error.issues },
+          });
+        }
+        if (parsed.data.message?.content) {
+          yield { type: "text-delta", text: parsed.data.message.content };
+        }
+        for (const toolCall of parsed.data.message?.tool_calls ?? []) {
+          yield {
+            type: "tool-call",
+            call: {
+              id: `ollama_tool_${toolIndex++}`,
+              name: toolCall.function.name,
+              argumentsJson:
+                typeof toolCall.function.arguments === "string"
+                  ? toolCall.function.arguments
+                  : JSON.stringify(toolCall.function.arguments),
+            },
+          };
+        }
+        if (parsed.data.done) {
+          if (parsed.data.prompt_eval_count !== undefined || parsed.data.eval_count !== undefined) {
+            const inputTokens = parsed.data.prompt_eval_count;
+            const outputTokens = parsed.data.eval_count;
+            yield {
+              type: "usage",
+              usage: {
+                inputTokens,
+                outputTokens,
+                totalTokens: (inputTokens ?? 0) + (outputTokens ?? 0),
+              },
+            };
+          }
+          yield {
+            type: "done",
+            ...(parsed.data.done_reason === undefined
+              ? {}
+              : { finishReason: parsed.data.done_reason }),
+          };
+        }
+      }
+    } catch (error) {
+      throw mapProviderFailure(error, callerSignal, requestSignal);
+    }
+  }
+}
+
+function toOllamaMessage(message: ChatMessage): Record<string, unknown> {
+  if (message.role === "assistant" && message.toolCalls !== undefined) {
+    return {
+      role: "assistant",
+      content: message.content,
+      tool_calls: message.toolCalls.map((call, index) => ({
+        type: "function",
+        function: {
+          index,
+          name: call.name,
+          arguments: parseToolArguments(call.argumentsJson),
+        },
+      })),
+    };
+  }
+
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      content: message.content,
+      ...(message.name === undefined ? {} : { tool_name: message.name }),
+    };
+  }
+
+  return {
+    role: message.role,
+    content: message.content,
+  };
+}
+
+function parseToolArguments(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string, void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) {
+        buffer += decoder.decode();
+        break;
+      }
+      buffer += decoder.decode(result.value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      yield* lines;
+    }
+    if (buffer !== "") {
+      yield buffer;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
