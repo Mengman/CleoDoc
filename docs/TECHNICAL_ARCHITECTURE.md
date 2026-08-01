@@ -598,6 +598,10 @@ interface DocumentDiff {
 
 ## 12. Agent 运行时
 
+会话 Session、自动上下文压缩、项目 AGENTS 快照和压缩前历史回查的详细方案见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。
+
+v0.1 已通过 SQLite migration v4 落地 `conversation_sessions`、`session_summaries`、`compaction_jobs`、`messages.session_id` 和 `conversation_message_fts`。`ChatService` 只组装当前 active Session；`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用，校验失败允许一次修复，并在一个事务中保存摘要、关闭旧 Session 和创建新 Session。进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+
 ### 12.1 v0.1 前台 Tool Loop
 
 v0.1 在 CLI 前台执行单任务 Tool Loop：模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。Core 校验参数和项目作用域；任何写入均显示目标、内容长度和预览并由用户逐次确认，覆盖还要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。

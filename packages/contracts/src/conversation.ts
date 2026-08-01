@@ -17,6 +17,7 @@ export interface ConversationSummary extends ConversationRecord {
 export interface StoredMessage extends ChatMessage {
   id: string;
   conversationId: string;
+  sessionId: string | null;
   sequence: number;
   createdAt: string;
 }

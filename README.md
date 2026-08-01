@@ -107,6 +107,8 @@ npm run cleo -- chat
 
 进入交互式聊天时会显示最近 5 条记录。输入 `/resume 1` 可以恢复列表中的第 1 条；输入 `/history` 会打开更多历史记录，在真实终端中使用上下键选择、按 Enter 恢复、按 `q` 返回聊天。使用 `/new` 开始新对话。
 
+长对话达到默认 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。模型上下文窗口默认 32768 Token，可通过 `--context-window-tokens` 或 `CLEODOC_MODEL_CONTEXT_TOKENS` 明确设置。
+
 API 超时只会终止本轮请求，不会退出聊天；CLI 会区分连接/首响应超时、响应流空闲、总生成时限和上游 HTTP 超时。本轮用户消息和此前记录已经写入项目，可以稍后继续尝试。
 
 也可以在聊天外查看全部历史：
@@ -174,4 +176,5 @@ npm run cleo -- material remove <material-id>
 - [产品需求](./docs/PRD.md)
 - [技术架构](./docs/TECHNICAL_ARCHITECTURE.md)
 - [开发计划](./docs/DEVELOPMENT_PLAN.md)
+- [会话上下文压缩设计](./docs/SESSION_COMPACTION_DESIGN.md)
 - [编码 Agent 指南](./AGENTS.md)

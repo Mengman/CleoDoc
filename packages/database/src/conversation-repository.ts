@@ -30,6 +30,7 @@ interface ConversationSummaryRow extends ConversationRow {
 interface MessageRow {
   id: string;
   conversation_id: string;
+  session_id: string | null;
   sequence: number;
   role: StoredMessage["role"];
   content: string;
@@ -151,7 +152,11 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
-  async addMessage(conversationId: string, message: ChatMessage): Promise<StoredMessage> {
+  async addMessage(
+    conversationId: string,
+    message: ChatMessage,
+    sessionId: string | null = null,
+  ): Promise<StoredMessage> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const sequence = await this.projectDatabase.transaction((database) => {
@@ -168,7 +173,7 @@ export class ConversationRepository {
         )
         .get(conversationId) as { next_sequence: number };
       const nextSequence = Number(row.next_sequence);
-      this.insertMessage(database, conversationId, message, nextSequence, now, id);
+      this.insertMessage(database, conversationId, message, nextSequence, now, id, sessionId);
       database
         .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
         .run(now, conversationId);
@@ -179,6 +184,7 @@ export class ConversationRepository {
       ...message,
       id,
       conversationId,
+      sessionId,
       sequence,
       createdAt: now,
     };
@@ -224,6 +230,7 @@ export class ConversationRepository {
     usage?: ModelUsage;
     errorCode?: string;
     addAssistantMessage?: boolean;
+    sessionId?: string;
   }): Promise<void> {
     const completedAt = new Date().toISOString();
     await this.projectDatabase.transaction((database) => {
@@ -261,6 +268,8 @@ export class ConversationRepository {
           { role: "assistant", content: input.content },
           Number(sequenceRow.next_sequence),
           completedAt,
+          undefined,
+          input.sessionId ?? null,
         );
         database
           .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
@@ -316,12 +325,13 @@ export class ConversationRepository {
     sequence: number,
     createdAt: string,
     id = randomUUID(),
+    sessionId: string | null = null,
   ): void {
     database
       .prepare(
         `INSERT INTO messages
-         (id, conversation_id, sequence, role, content, name, tool_call_id, tool_calls_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, sequence, role, content, name, tool_call_id, tool_calls_json, created_at, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -333,6 +343,7 @@ export class ConversationRepository {
         message.toolCallId ?? null,
         message.toolCalls === undefined ? null : JSON.stringify(message.toolCalls),
         createdAt,
+        sessionId,
       );
   }
 }
@@ -360,6 +371,7 @@ function mapMessage(row: MessageRow): StoredMessage {
   return {
     id: row.id,
     conversationId: row.conversation_id,
+    sessionId: row.session_id,
     sequence: Number(row.sequence),
     role: row.role,
     content: row.content,

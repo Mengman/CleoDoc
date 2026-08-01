@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import {
   ChatService,
+  ChatInputController,
   type ToolApprovalHandler,
   type ToolApprovalRequest,
 } from "../../../packages/agent/src/index.js";
@@ -398,6 +399,7 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
     "connect-timeout-ms",
     "stream-idle-timeout-ms",
     "generation-timeout-ms",
+    "context-window-tokens",
     "conversation",
     "new",
     "prompt",
@@ -416,6 +418,12 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
     throw new AppError("VALIDATION_ERROR", "请使用 --model 或 CLEODOC_MODEL 指定模型。");
   }
   const chat = await ChatService.open(project.root);
+  const contextWindowTokens =
+    optionPositiveInteger(parsed, "context-window-tokens") ??
+    parsePositiveEnvironmentInteger("CLEODOC_MODEL_CONTEXT_TOKENS");
+  if (contextWindowTokens !== undefined && contextWindowTokens < 2_048) {
+    throw new AppError("VALIDATION_ERROR", "模型上下文窗口不能小于 2048 Token。");
+  }
   try {
     const explicitConversationId = optionString(parsed, "conversation");
     const startNew = optionBoolean(parsed, "new");
@@ -431,7 +439,21 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
         model,
         prompt,
         conversationId: initialConversationId,
+        contextWindowTokens,
       });
+      const budget = chat.getContextStatus(result.conversationId, contextWindowTokens);
+      if (budget.softLimitReached) {
+        output.write("正在进行上下文压缩……\n");
+        await chat.compactConversation({
+          conversationId: result.conversationId,
+          provider,
+          model,
+          contextWindowTokens,
+          trigger: "automatic",
+          signal: new AbortController().signal,
+        });
+        output.write("上下文压缩完成。\n");
+      }
       const savePath = optionString(parsed, "save");
       if (savePath !== undefined) {
         const saved = await chat.saveGeneration(savePath, {
@@ -452,6 +474,7 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
       initialConversationId,
       createProvider: (selectedProviderId) => providerFromArguments(selectedProviderId, parsed),
       documents: new DocumentService(project.root),
+      contextWindowTokens,
     });
   } finally {
     await chat.close();
@@ -496,6 +519,7 @@ async function generateOnce(
     prompt: string;
     conversationId?: string;
     approveToolCall?: ToolApprovalHandler;
+    contextWindowTokens?: number;
   },
 ): Promise<ChatGenerationResult> {
   const controller = new AbortController();
@@ -529,12 +553,17 @@ async function interactiveChat(
     initialConversationId?: string;
     createProvider: (providerId: string) => ModelProvider;
     documents: DocumentService;
+    contextWindowTokens?: number;
   },
 ): Promise<void> {
   let readline = createInterface({ input, output });
   let conversationId = context.initialConversationId;
   let provider = context.provider;
   let model = context.model;
+  const inputController = new ChatInputController();
+  let compaction: { promise: Promise<void>; controller: AbortController; hard: boolean } | null =
+    null;
+  let hardBlocked = false;
   const recentConversations = chat.listConversations(context.projectId).slice(0, 5);
 
   output.write(`已连接 ${provider.displayName} / ${model}。输入 /help 查看命令。\n`);
@@ -554,9 +583,75 @@ async function interactiveChat(
     );
   };
 
+  const startCompaction = (trigger: "automatic" | "manual", hard: boolean): void => {
+    if (conversationId === undefined || compaction !== null) return;
+    inputController.setSubmissionBlocked("正在进行上下文压缩");
+    const targetConversationId = conversationId;
+    const controller = new AbortController();
+    const cancelCompaction = (): void => {
+      output.write("\n正在取消上下文压缩……\n");
+      controller.abort();
+    };
+    readline.once("SIGINT", cancelCompaction);
+    output.write("正在进行上下文压缩，你可以继续输入；压缩完成后再按 Enter 提交。\n");
+    const promise = chat
+      .compactConversation({
+        conversationId: targetConversationId,
+        provider,
+        model,
+        contextWindowTokens: context.contextWindowTokens,
+        trigger,
+        signal: controller.signal,
+      })
+      .then(() => {
+        hardBlocked = false;
+        inputController.allowSubmission();
+        output.write("\n上下文压缩完成，可以提交。\n");
+      })
+      .catch((error: unknown) => {
+        const appError = asAppError(error);
+        hardBlocked = hard;
+        if (!hard) inputController.allowSubmission();
+        if (hard) {
+          output.write(
+            "\n上下文已接近模型限制，压缩未能完成。当前输入已保留，请重试压缩或检查模型连接。\n",
+          );
+        } else {
+          output.write("\n上下文压缩失败，原会话仍然有效。当前输入已保留，系统稍后会重试压缩。\n");
+        }
+        output.write(`压缩错误 [${appError.code}]：${appError.message}\n`);
+      })
+      .finally(() => {
+        readline.off("SIGINT", cancelCompaction);
+        if (compaction?.promise === promise) compaction = null;
+      });
+    compaction = { promise, controller, hard };
+  };
+
   try {
     while (true) {
-      const line = (await readline.question("你：")).trim();
+      const question = readline.question("你：");
+      if (inputController.draft !== "" && input.isTTY) readline.write(inputController.draft);
+      const rawLine = await question;
+      inputController.captureDraft(rawLine);
+      const rawCommand = rawLine.trim();
+      const bypassBlock =
+        compaction === null &&
+        (rawCommand === "/retry-compact" ||
+          rawCommand === "/context" ||
+          rawCommand === "/sessions" ||
+          rawCommand.startsWith("/session "));
+      const submitted = inputController.submit({ bypassBlock });
+      if (submitted === null) {
+        inputController.preserveDraft();
+        output.write(
+          compaction === null
+            ? "上下文接近模型限制，当前输入已保留；请先使用 /retry-compact。\n"
+            : "上下文仍在压缩，当前输入已保留；完成后请再次按 Enter 提交。\n",
+        );
+        continue;
+      }
+      const line = submitted.trim();
       if (line === "") {
         continue;
       }
@@ -565,7 +660,7 @@ async function interactiveChat(
       }
       if (line === "/help") {
         output.write(
-          "/resume <序号>  /history  /new  /save <path>  /read <path>  /documents  /exit\n",
+          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /save <path>  /read <path>  /documents  /exit\n",
         );
         continue;
       }
@@ -585,6 +680,40 @@ async function interactiveChat(
       if (line === "/new") {
         conversationId = undefined;
         output.write("下一条消息将开始新对话。已有聊天记录不会被删除。\n");
+        continue;
+      }
+      if (line === "/compact" || line === "/retry-compact") {
+        if (conversationId === undefined) {
+          output.write("请先发送一条消息创建对话。\n");
+        } else {
+          startCompaction("manual", hardBlocked);
+        }
+        continue;
+      }
+      if (line === "/context") {
+        if (conversationId === undefined) {
+          output.write("请先发送一条消息创建对话。\n");
+        } else {
+          printContextStatus(chat.getContextStatus(conversationId, context.contextWindowTokens));
+        }
+        continue;
+      }
+      if (line === "/sessions") {
+        if (conversationId === undefined) output.write("请先发送一条消息创建对话。\n");
+        else printSessions(chat.getSessions(conversationId));
+        continue;
+      }
+      if (line.startsWith("/session ")) {
+        if (conversationId === undefined) {
+          output.write("请先发送一条消息创建对话。\n");
+          continue;
+        }
+        const ordinal = Number(line.slice(9).trim());
+        if (!Number.isInteger(ordinal) || ordinal <= 0) {
+          output.write("Session 序号必须是正整数。\n");
+          continue;
+        }
+        printSession(chat.getSessionDetails(conversationId, ordinal));
         continue;
       }
       if (line === "/history") {
@@ -615,6 +744,19 @@ async function interactiveChat(
         output.write(`已将 ${documentPath} 加入后续对话上下文。\n`);
         continue;
       }
+      if (conversationId !== undefined) {
+        const preflight = chat.getContextStatus(
+          conversationId,
+          context.contextWindowTokens,
+          undefined,
+          line,
+        );
+        if (preflight.hardLimitReached || hardBlocked) {
+          inputController.captureDraft(rawLine);
+          startCompaction("automatic", true);
+          continue;
+        }
+      }
       output.write("主笔：");
       try {
         const result = await generateOnce(chat, {
@@ -624,8 +766,11 @@ async function interactiveChat(
           prompt: line,
           ...(conversationId === undefined ? {} : { conversationId }),
           approveToolCall: (request) => approveProjectWrite(readline, request),
+          contextWindowTokens: context.contextWindowTokens,
         });
         conversationId = result.conversationId;
+        const budget = chat.getContextStatus(conversationId, context.contextWindowTokens);
+        if (budget.softLimitReached) startCompaction("automatic", budget.hardLimitReached);
       } catch (error) {
         const appError = asAppError(error);
         const failedConversationId = appError.details?.conversationId;
@@ -640,8 +785,50 @@ async function interactiveChat(
       }
     }
   } finally {
+    const pendingCompaction = compaction as {
+      promise: Promise<void>;
+      controller: AbortController;
+      hard: boolean;
+    } | null;
+    if (pendingCompaction !== null) {
+      pendingCompaction.controller.abort();
+      await pendingCompaction.promise;
+    }
     readline.close();
     output.write("聊天记录已保存在当前项目中。\n");
+  }
+}
+
+function printContextStatus(status: ReturnType<ChatService["getContextStatus"]>): void {
+  output.write(`预计输入：${status.estimatedInputTokens} tokens\n`);
+  output.write(`可用预算：${status.effectiveLimitTokens} tokens\n`);
+  output.write(`占用比例：${(status.ratio * 100).toFixed(1)}%\n`);
+  output.write(
+    `状态：${status.hardLimitReached ? "硬限制" : status.softLimitReached ? "需要压缩" : "正常"}\n`,
+  );
+}
+
+function printSessions(sessions: ReturnType<ChatService["getSessions"]>): void {
+  for (const session of sessions) {
+    output.write(
+      `[${session.ordinal}] ${session.status} | ${session.trigger} | ${session.startedAt}${session.closedAt === null ? "" : ` → ${session.closedAt}`}\n`,
+    );
+  }
+}
+
+function printSession(details: ReturnType<ChatService["getSessionDetails"]>): void {
+  const { session } = details;
+  output.write(`Session ${session.ordinal} (${session.status})\n`);
+  output.write(`ID：${session.id}\n触发：${session.trigger}\n开始：${session.startedAt}\n`);
+  output.write(`结束：${session.closedAt ?? "未结束"}\n`);
+  output.write(`AGENTS：${session.projectInstructionsPath ?? "未加载"}\n`);
+  output.write(`AGENTS SHA-256：${session.projectInstructionsHash ?? "无"}\n`);
+  output.write(`继承摘要：${session.inheritedSummaryId ?? "无"}\n`);
+  output.write(
+    `消息范围：${details.firstMessageId ?? "无"} → ${details.lastMessageId ?? "无"}（${details.messageCount} 条）\n`,
+  );
+  if (details.summary !== null) {
+    output.write(`累计摘要：${details.summary.content.handoffBrief}\n`);
   }
 }
 
@@ -866,12 +1053,26 @@ function optionPositiveInteger(parsed: ParsedArguments, name: string): number | 
   if (value === undefined) {
     return undefined;
   }
+  const label = name.endsWith("-ms") ? "正整数毫秒数" : "正整数";
   if (!/^\d+$/.test(value)) {
-    throw new AppError("VALIDATION_ERROR", `--${name} 必须是正整数毫秒数。`);
+    throw new AppError("VALIDATION_ERROR", `--${name} 必须是${label}。`);
   }
   const parsedValue = Number(value);
   if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
-    throw new AppError("VALIDATION_ERROR", `--${name} 必须是正整数毫秒数。`);
+    throw new AppError("VALIDATION_ERROR", `--${name} 必须是${label}。`);
+  }
+  return parsedValue;
+}
+
+function parsePositiveEnvironmentInteger(name: string): number | undefined {
+  const value = process.env[name];
+  if (value === undefined || value.trim() === "") return undefined;
+  if (!/^\d+$/.test(value)) {
+    throw new AppError("VALIDATION_ERROR", `${name} 必须是正整数。`);
+  }
+  const parsedValue = Number(value);
+  if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
+    throw new AppError("VALIDATION_ERROR", `${name} 必须是正整数。`);
   }
   return parsedValue;
 }

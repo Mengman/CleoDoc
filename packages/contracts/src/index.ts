@@ -3,3 +3,4 @@ export * from "./errors.js";
 export * from "./knowledge-source.js";
 export * from "./model.js";
 export * from "./project.js";
+export * from "./session.js";

@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5 已完成，本地文档 Tool Loop 已提前交付
+> 状态：实施中；v0.1 步骤 1–5.5 已完成，本地文档 Tool Loop 已提前交付
 > 日期：2026-08-01  
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -35,6 +35,7 @@ v0.1 的核心闭环是：
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
+| 5.5 会话上下文管理 | 已完成 | Session 压缩、AGENTS 快照、历史回查 Tool、分层压缩和可编辑草稿提交门 |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
@@ -219,6 +220,30 @@ cleo material remove <material-id>
 - 重复导入不会生成重复资料。
 - 删除资料后不再进入当前检索。
 - 原始文件、资料元数据和 SQLite 投影保持一致。
+
+### 步骤 5.5：会话上下文管理
+
+详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
+
+实施状态：已完成。数据库 migration v4 会为旧 Conversation 创建 legacy Session；CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
+
+工作内容：
+
+- 在用户可见 Conversation 内建立有边界的内部 Session。
+- 在完整 Agent 回合结束后，根据 Token 预算触发独立 LLM 压缩调用。
+- 新 Session 按 Core System Prompt、项目 AGENTS、累计摘要、当前消息的顺序组装上下文。
+- 压缩期间允许用户编辑草稿，但 Enter 和发送按钮不能提交；草稿不清空、不排队、不自动发送。
+- 建立压缩前历史消息的搜索和精确读取 Tool。
+- 保存摘要引用、模型参数、用量、AGENTS 快照和可恢复 CompactionJob。
+
+验收：
+
+- 达到阈值后不再向主笔发送已关闭 Session 的全部原文。
+- 正常压缩只使用一次独立 LLM 调用，并输出经过 Schema 校验的累计摘要。
+- 压缩期间用户草稿保持可编辑，完成后必须再次主动提交。
+- 新 Session 的 AGENTS 和摘要顺序稳定且可审计。
+- Agent 能按需找回压缩前的具体消息，且不能跨 Conversation 或项目查询。
+- 压缩失败、取消或进程退出不会丢失消息和草稿。
 
 ### 步骤 6：统一知识模型与 FTS5
 
