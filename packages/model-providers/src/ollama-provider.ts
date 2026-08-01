@@ -17,6 +17,7 @@ import {
   type ProviderStreamTimeoutOptions,
   type ProviderStreamTimeoutOverrides,
 } from "./http-errors.js";
+import { emitProtocolEvent, redactHeaders } from "./protocol-debug.js";
 
 const tagsSchema = z
   .object({
@@ -96,52 +97,91 @@ export class OllamaProvider implements ModelProvider {
     const timeouts = new ProviderStreamTimeoutController(callerSignal, this.streamTimeouts);
     const requestSignal = timeouts.signal;
     try {
-      const response = await this.fetchImplementation(`${this.baseUrl}/api/chat`, {
+      const url = `${this.baseUrl}/api/chat`;
+      const headers = { Accept: "application/x-ndjson", "Content-Type": "application/json" };
+      const body = JSON.stringify({
+        model: request.model,
+        messages: request.messages.map(toOllamaMessage),
+        stream: true,
+        options: {
+          ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+          ...(request.maxTokens === undefined ? {} : { num_predict: request.maxTokens }),
+        },
+        ...(request.responseFormat?.type === "json_object" ? { format: "json" } : {}),
+        ...(request.thinking === undefined ? {} : { think: request.thinking.type === "enabled" }),
+        ...(request.tools === undefined
+          ? {}
+          : {
+              tools: request.tools.map((tool) => ({
+                type: "function",
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.inputSchema,
+                },
+              })),
+            }),
+      });
+      emitProtocolEvent(request, {
+        type: "request",
         method: "POST",
-        headers: { Accept: "application/x-ndjson", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages.map(toOllamaMessage),
-          stream: true,
-          options: {
-            ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-            ...(request.maxTokens === undefined ? {} : { num_predict: request.maxTokens }),
-          },
-          ...(request.tools === undefined
-            ? {}
-            : {
-                tools: request.tools.map((tool) => ({
-                  type: "function",
-                  function: {
-                    name: tool.name,
-                    description: tool.description,
-                    parameters: tool.inputSchema,
-                  },
-                })),
-              }),
-        }),
+        url,
+        headers: redactHeaders(headers),
+        body,
+      });
+      const response = await this.fetchImplementation(url, {
+        method: "POST",
+        headers,
+        body,
         signal: requestSignal,
       });
       timeouts.markConnected();
+      emitProtocolEvent(request, {
+        type: "response-head",
+        status: response.status,
+        statusText: response.statusText,
+        headers: redactHeaders(response.headers),
+      });
       if (!response.ok) {
-        await throwForProviderResponse(response);
+        await throwForProviderResponse(response, (responseBody) =>
+          emitProtocolEvent(request, { type: "response-chunk", chunk: responseBody }),
+        );
       }
       if (response.body === null) {
         throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 没有返回响应流。");
       }
 
       let toolIndex = 0;
-      for await (const line of readLines(response.body, requestSignal, () =>
-        timeouts.markActivity(),
+      for await (const line of readLines(
+        response.body,
+        requestSignal,
+        () => timeouts.markActivity(),
+        (chunk) => emitProtocolEvent(request, { type: "response-chunk", chunk }),
       )) {
         if (line.trim() === "") {
           continue;
         }
-        const parsedJson: unknown = JSON.parse(line);
+        let parsedJson: unknown;
+        try {
+          parsedJson = JSON.parse(line) as unknown;
+        } catch (error) {
+          throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 流式响应不是有效的 JSON。", {
+            cause: error,
+            details: {
+              responseStage: "stream_json_parse",
+              parserMessage: error instanceof Error ? error.message : String(error),
+              dataPreview: line.slice(0, 500),
+            },
+          });
+        }
         const parsed = chatChunkSchema.safeParse(parsedJson);
         if (!parsed.success) {
           throw new AppError("PROVIDER_UNAVAILABLE", "Ollama 流式响应格式无效。", {
-            details: { issues: parsed.error.issues },
+            details: {
+              responseStage: "stream_schema_validation",
+              issues: parsed.error.issues,
+              dataPreview: line.slice(0, 500),
+            },
           });
         }
         if (parsed.data.message?.content) {
@@ -231,6 +271,7 @@ async function* readLines(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   onActivity: () => void,
+  onChunk: (chunk: string) => void,
 ): AsyncGenerator<string, void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -239,11 +280,15 @@ async function* readLines(
     while (true) {
       const result = await readStreamChunk(reader, signal);
       if (result.done) {
-        buffer += decoder.decode();
+        const tail = decoder.decode();
+        if (tail !== "") onChunk(tail);
+        buffer += tail;
         break;
       }
       onActivity();
-      buffer += decoder.decode(result.value, { stream: true });
+      const chunk = decoder.decode(result.value, { stream: true });
+      onChunk(chunk);
+      buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
       yield* lines;

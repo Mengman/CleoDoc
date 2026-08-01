@@ -14,6 +14,7 @@ import { AppError } from "../../contracts/src/index.js";
 import { FakeModelProvider } from "../../model-providers/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
+import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -32,6 +33,7 @@ describe("ChatService", () => {
     const chat = await ChatService.open(project.root);
     const provider = new FakeModelProvider("# 第一章\n\n雨落在没有灯的车站。\n");
     const streamed: string[] = [];
+    const debugEvents: LlmDebugEvent[] = [];
 
     try {
       const result = await chat.send({
@@ -45,9 +47,19 @@ describe("ChatService", () => {
             streamed.push(event.text);
           }
         },
+        onDebugEvent: (event) => debugEvents.push(event),
       });
 
       expect(streamed.join("")).toBe(result.content);
+      expect(debugEvents).toContainEqual(
+        expect.objectContaining({
+          type: "llm-response",
+          operation: "agent",
+          round: 1,
+          contextTokens: 20,
+          contextSource: "provider",
+        }),
+      );
       expect(await new DocumentService(project.root).list()).toHaveLength(0);
 
       const saved = await chat.saveGeneration("manuscript/chapter-001.md", {

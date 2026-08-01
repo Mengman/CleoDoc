@@ -37,8 +37,16 @@ export function resolveProviderStreamTimeouts(
   };
 }
 
-export async function throwForProviderResponse(response: Response): Promise<never> {
+export async function throwForProviderResponse(
+  response: Response,
+  onResponseBody?: (body: string) => void,
+): Promise<never> {
   const responseText = await response.text().catch(() => "");
+  try {
+    onResponseBody?.(responseText);
+  } catch {
+    // Debug presentation must not affect error classification.
+  }
   const details = { status: response.status, response: responseText.slice(0, 500) };
   if (response.status === 401 || response.status === 403) {
     throw new AppError("PROVIDER_AUTH_ERROR", "模型服务鉴权失败，请检查 API Key。", {

@@ -12,6 +12,7 @@ import type {
 } from "../../contracts/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
+import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -40,16 +41,31 @@ describe("session compaction", () => {
         signal: new AbortController().signal,
       });
       expect(provider.requests[0]?.messages[0]?.content).toContain("第一版项目规则");
+      expect(provider.requests[0]?.thinking).toBeUndefined();
 
       await writeFile(path.join(project.root, "AGENTS.md"), "第二版项目规则", "utf8");
       await chat.compactConversation({
         conversationId: first.conversationId,
         provider,
         model: "scripted",
-        contextWindowTokens: 8_000,
         trigger: "manual",
         signal: new AbortController().signal,
       });
+
+      const compactionRequest = provider.requests.find((request) =>
+        request.messages[0]?.content.includes("上下文压缩器"),
+      );
+      expect(compactionRequest?.messages[1]?.content).toContain("输出 JSON Schema：");
+      expect(compactionRequest?.responseFormat).toEqual({ type: "json_object" });
+      expect(compactionRequest?.thinking).toEqual({ type: "disabled" });
+      expect(compactionRequest?.maxTokens).toBeUndefined();
+      expect(compactionRequest?.messages[1]?.content).toContain('"required"');
+      expect(compactionRequest?.messages[1]?.content).toContain('"handoffBrief"');
+      expect(compactionRequest?.messages[1]?.content).toContain("没有内容的数组字段必须返回 []");
+      expect(
+        extractCompactionPayload(compactionRequest!.messages[1]!.content).summaryTargetTokens,
+      ).toBe(8_000);
+      expect(provider.compactionChunks).toBeGreaterThan(1);
 
       const sessions = chat.getSessions(first.conversationId);
       expect(sessions.map((session) => session.status)).toEqual(["closed", "active"]);
@@ -92,6 +108,7 @@ describe("session compaction", () => {
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
     const provider = new InvalidCompactionProvider();
     const chat = await ChatService.open(project.root);
+    const debugEvents: LlmDebugEvent[] = [];
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
@@ -106,6 +123,7 @@ describe("session compaction", () => {
           provider,
           model: "scripted",
           signal: new AbortController().signal,
+          onDebugEvent: (event) => debugEvents.push(event),
         }),
       ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
       expect(chat.getSessions(first.conversationId)).toEqual([
@@ -114,6 +132,30 @@ describe("session compaction", () => {
       expect(
         chat.getConversationHistory(first.conversationId).map((message) => message.content),
       ).toEqual(expect.arrayContaining(["保留这一条历史。", "已记录。"]));
+      expect(
+        debugEvents.filter(
+          (event) => event.type === "llm-response-error" && event.errorCode === "VALIDATION_ERROR",
+        ),
+      ).toHaveLength(2);
+      expect(provider.requests).toHaveLength(3);
+      expect(provider.requests[2]?.messages[1]?.content).toContain(
+        "原始压缩请求（包括输入记录、允许的 Message ID 和输出 Schema）",
+      );
+      expect(provider.requests[2]?.messages[1]?.content).toContain("保留这一条历史。");
+      expect(debugEvents).toContainEqual(
+        expect.objectContaining({
+          type: "llm-protocol",
+          operation: "compaction",
+          protocol: expect.objectContaining({ type: "request", body: expect.any(String) }),
+        }),
+      );
+      expect(debugEvents).toContainEqual(
+        expect.objectContaining({
+          type: "llm-protocol",
+          operation: "compaction-repair",
+          protocol: expect.objectContaining({ type: "response-chunk", chunk: "{}" }),
+        }),
+      );
     } finally {
       await chat.close();
     }
@@ -129,14 +171,14 @@ describe("session compaction", () => {
         projectId: project.manifest.id,
         provider,
         model: "scripted",
-        prompt: "关键线索".repeat(900),
+        prompt: "关键线索".repeat(3_000),
         signal: new AbortController().signal,
       });
       await chat.compactConversation({
         conversationId: first.conversationId,
         provider,
         model: "scripted",
-        contextWindowTokens: 4_000,
+        contextWindowTokens: 20_000,
         signal: new AbortController().signal,
       });
       expect(provider.compactionCalls).toBeGreaterThan(1);
@@ -154,6 +196,7 @@ class CompactionAwareProvider implements ModelProvider {
   readonly id = "compaction-script";
   readonly displayName = "Compaction Script";
   readonly requests: ModelRequest[] = [];
+  compactionChunks = 0;
   private normalCalls = 0;
 
   async validateConfiguration(): Promise<ProviderHealth> {
@@ -165,37 +208,44 @@ class CompactionAwareProvider implements ModelProvider {
     if (request.messages[0]?.content.includes("上下文压缩器")) {
       const payload = extractCompactionPayload(request.messages[1]!.content);
       const messages = payload.messages as Array<{ id: string }>;
-      yield {
-        type: "text-delta",
-        text: JSON.stringify({
-          schemaVersion: 1,
-          sourceSessionId: payload.sourceSessionId,
-          coveredMessages: {
-            firstMessageId: messages[0]!.id,
-            lastMessageId: messages.at(-1)!.id,
-            count: messages.length,
+      const result = JSON.stringify({
+        schemaVersion: 1,
+        sourceSessionId: payload.sourceSessionId,
+        coveredMessages: {
+          firstMessageId: messages[0]!.id,
+          lastMessageId: messages.at(-1)!.id,
+          count: messages.length,
+        },
+        conversationObjective: "继续创作小说",
+        userDecisions: [{ text: "主角是退休刑警", sourceMessageIds: [messages[0]!.id] }],
+        acceptedResults: [],
+        rejectedDirections: [],
+        aiSuggestions: [],
+        constraints: [],
+        unresolvedQuestions: [],
+        pendingTasks: [],
+        projectChanges: [],
+        relevantDocuments: [],
+        knownConflicts: [],
+        detailLookupHints: [
+          {
+            topic: "主角职业",
+            suggestedQuery: "退休刑警",
+            sourceMessageIds: [messages[0]!.id],
           },
-          conversationObjective: "继续创作小说",
-          userDecisions: [{ text: "主角是退休刑警", sourceMessageIds: [messages[0]!.id] }],
-          acceptedResults: [],
-          rejectedDirections: [],
-          aiSuggestions: [],
-          constraints: [],
-          unresolvedQuestions: [],
-          pendingTasks: [],
-          projectChanges: [],
-          relevantDocuments: [],
-          knownConflicts: [],
-          detailLookupHints: [
-            {
-              topic: "主角职业",
-              suggestedQuery: "退休刑警",
-              sourceMessageIds: [messages[0]!.id],
-            },
-          ],
-          handoffBrief: "用户已指定主角职业，需要时回查原话。",
-        }),
-      };
+        ],
+        handoffBrief: "用户已指定主角职业，需要时回查原话。",
+      });
+      const firstBoundary = Math.floor(result.length / 3);
+      const secondBoundary = Math.floor((result.length * 2) / 3);
+      for (const text of [
+        result.slice(0, firstBoundary),
+        result.slice(firstBoundary, secondBoundary),
+        result.slice(secondBoundary),
+      ]) {
+        this.compactionChunks += 1;
+        yield { type: "text-delta", text };
+      }
       yield { type: "done", finishReason: "stop" };
       return;
     }
@@ -222,15 +272,32 @@ class CompactionAwareProvider implements ModelProvider {
 class InvalidCompactionProvider implements ModelProvider {
   readonly id = "invalid-script";
   readonly displayName = "Invalid Script";
+  readonly requests: ModelRequest[] = [];
 
   async validateConfiguration(): Promise<ProviderHealth> {
     return { ok: true, message: "ready" };
   }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    this.requests.push(request);
+    const rawOutput = request.messages[0]?.content.includes("上下文压缩器") ? "{}" : "已记录。";
+    request.onProtocolEvent?.({
+      type: "request",
+      method: "POST",
+      url: "https://provider.test/chat/completions",
+      headers: { Authorization: "<redacted>" },
+      body: JSON.stringify(request),
+    });
+    request.onProtocolEvent?.({
+      type: "response-head",
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "text/event-stream" },
+    });
+    request.onProtocolEvent?.({ type: "response-chunk", chunk: rawOutput });
     yield {
       type: "text-delta",
-      text: request.messages[0]?.content.includes("上下文压缩器") ? "{}" : "已记录。",
+      text: rawOutput,
     };
     yield { type: "done", finishReason: "stop" };
   }

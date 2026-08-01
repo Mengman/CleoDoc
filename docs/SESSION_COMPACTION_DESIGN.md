@@ -141,14 +141,26 @@ interface ChatInputController {
 
 ```ts
 interface ContextBudgetPolicy {
-  contextWindowTokens: number;
-  reservedOutputTokens: number;
-  nextUserInputReserveTokens: number; // 默认 2048
-  safetyMarginRatio: number; // 默认 0.10
+  contextWindowTokens: number; // 当前默认 1,000,000
+  reservedOutputTokens: number; // 1M 默认 384,000
+  nextUserInputReserveTokens: number; // 1M 默认 32,768
+  safetyMarginRatio: number; // 默认 0.05
   softCompactionRatio: number; // 默认 0.75
   hardCompactionRatio: number; // 默认 0.90
 }
 ```
+
+为了让显式指定的小上下文窗口仍可用于测试和兼容模型，固定上限按窗口比例缩放：
+
+```ts
+reservedOutputTokens = Math.min(384_000, Math.floor(contextWindowTokens * 0.384));
+nextUserInputReserveTokens = Math.min(
+  32_768,
+  Math.floor(contextWindowTokens * 0.05),
+);
+```
+
+因此 1M 窗口使用完整的 384K/32,768 预留；小窗口不会因预留量本身超过窗口而失效。
 
 完整回合保存后，如果包含下一条输入预留的预计占用达到 75%，标记并立即启动压缩。达到 90% 后，如果压缩失败，不允许继续提交新消息。
 
@@ -177,6 +189,140 @@ interface ContextBudgetPolicy {
 
 触发算法不能只依赖消息数量。
 
+### 4.5 1M 上下文下的旧实现（v6 前）
+
+本节保留 `session-compaction-v6` 之前的实际计算，作为参数迁移和历史日志排查依据。设：
+
+```text
+C = contextWindowTokens                     = 1,000,000
+O = reservedOutputTokens                    = min(4,096, floor(C × 0.20))
+U = nextUserInputReserveTokens              = min(2,048, floor(C × 0.10))
+S = floor(C × safetyMarginRatio)            = floor(C × 0.10)
+E = estimatedInputTokens                    = estimate(payload) + U
+L = effectiveLimitTokens                    = C - O - S
+```
+
+代入当时的默认值得到：
+
+```text
+O = 4,096
+U = 2,048
+S = 100,000
+L = 1,000,000 - 4,096 - 100,000
+  = 895,904
+```
+
+旧实现的软压缩与硬阻塞使用包含下一条用户输入预留的 `E`：
+
+```text
+软压缩条件：E / L >= 0.75
+软压缩阈值：895,904 × 0.75 = 671,928
+对应当前 Payload：671,928 - 2,048 = 669,880
+
+硬阻塞条件：E / L >= 0.90
+硬阻塞阈值：895,904 × 0.90 = 806,313.6
+最小整数估算值：806,314
+对应当前 Payload：806,314 - 2,048 = 804,266
+```
+
+因此，旧实现大约在 670K Payload 时启动后台压缩，在 804K Payload 时禁止继续提交。
+
+压缩任务自身还有另一套输入上限。旧公式为：
+
+```text
+T = summaryTargetTokens
+  = max(512, min(4,000, floor(C × 0.10)))
+  = 4,000
+
+P = estimateTokens(COMPACTION_SYSTEM_PROMPT)
+  = 576
+
+M = maximumPayloadTokens
+  = C - T - floor(C × 0.15) - P
+  = 1,000,000 - 4,000 - 150,000 - 576
+  = 845,424
+```
+
+`M` 约束的是发送给压缩模型的输入 Payload，不是接收回复的长度。压缩请求当时已经不发送 `max_tokens`，但本地公式仍为摘要软目标 `T` 和 15% 安全余量预留空间。
+
+旧参数在 1M 模型下有三个问题：
+
+1. `O = 4,096` 仍是为小上下文模型设计的值，与模型最大 384K 输出能力不匹配。
+2. `U = 2,048` 不适合文档原生应用中的长委托或大段粘贴输入。
+3. `M = 845,424` 只为回复和估算误差留下约 155K；在不设置 `max_tokens` 时，无法覆盖模型允许的 384K 最大输出。
+
+### 4.6 1M 上下文的当前预算方案
+
+当前实现把模型能力显式拆为上下文窗口和最大输出长度，并采用以下默认值：
+
+```text
+C = 1,000,000    // 模型上下文窗口
+O = 384,000      // 模型最大输出预留
+U = 32,768       // 下一次用户输入预留
+S = 50,000       // 固定 5% 安全余量
+softRatio = 0.75
+hardRatio = 0.90
+T = 8,000        // 最终累计摘要软目标
+segmentTarget = 2,000
+```
+
+输出预留 `O` 只参与本地安全预算，不会转换成 API 的 `max_tokens` 参数。
+
+安全输入容量为：
+
+```text
+L = C - O - S
+  = 1,000,000 - 384,000 - 50,000
+  = 566,000
+```
+
+当前触发点为：
+
+```text
+软压缩估算阈值 = L × 0.75
+                 = 424,500
+软压缩 Payload  ≈ 424,500 - U
+                 = 391,732
+
+硬阻塞估算阈值 = L × 0.90
+                 = 509,400
+硬阻塞 Payload  ≈ 509,400 - U
+                 = 476,632
+```
+
+硬阻塞附近的最坏情况预算为：
+
+```text
+当前 Payload       476,632
+下一次用户输入预留  32,768
+模型最大输出预留   384,000
+安全余量            50,000
+合计               943,400
+额外缓冲            56,600
+```
+
+压缩请求的安全输入上限不再使用独立的 15% 比例，而是复用模型最大输出与固定安全余量：
+
+```text
+M = C - O - S - P
+  = 1,000,000 - 384,000 - 50,000 - 576
+  = 565,424
+```
+
+这意味着当前方案约在 392K Payload 时后台压缩，在 477K Payload 时必须先压缩。它没有把 1M 全部用于历史输入，因为还必须保证一次最大 384K 的模型回复能够完成，并为 Token 估算误差保留空间。
+
+本次参数更新仍沿用单层 Map-Reduce。后续还应改为递归归并，以处理分段摘要本身仍超出 `M` 的极端情况：
+
+```text
+原始消息分组
+→ 每组生成 Segment Summary
+→ 若全部 Segment Summary 的 Reduce Payload <= M：生成最终摘要
+→ 否则再次对 Segment Summary 分组并归并
+→ 重复直到最终 Reduce Payload <= M
+```
+
+递归归并的每一层都必须保留原始 `sourceMessageIds`，并继续执行相同的 JSON Schema、本地引用范围和完整消息覆盖校验。
+
 ## 5. 压缩调用的具体实现
 
 ### 5.1 是否单独调用 LLM
@@ -198,17 +344,18 @@ interface ContextBudgetPolicy {
 ```ts
 const compactionModelOptions = {
   temperature: 0.1,
-  maxTokens: summaryTargetTokens,
+  responseFormat: { type: "json_object" },
+  thinking: { type: "disabled" },
   tools: [],
 };
 ```
 
-摘要目标默认控制在 2,000–4,000 Token：
+压缩请求不设置 Provider 的 `max_tokens`/`num_predict`，避免硬上限在模型完成 JSON 前截断输出。最终累计摘要的默认软目标在 1M 窗口下为 8,000 Token；分段摘要继续使用不超过 2,000 Token 的软目标。两者都只用于 Prompt 和本地分段，不会转换成 Provider 输出硬上限：
 
 ```ts
-const summaryTargetTokens = Math.min(
-  4_000,
-  Math.floor(contextWindowTokens * 0.1),
+const summaryTargetTokens = Math.max(
+  512,
+  Math.min(8_000, Math.floor(contextWindowTokens * 0.01)),
 );
 ```
 
@@ -273,7 +420,22 @@ Summary 1 + Session 2 原始消息
 
 ## 6. 压缩提示词
 
-压缩 Prompt 必须版本化，首版标识为 `session-compaction-v1`。
+压缩 Prompt 必须版本化。首版 `session-compaction-v1` 只要求模型返回指定 Schema，未把 Schema 本体放入请求；`session-compaction-v2` 开始发送完整 JSON Schema；`session-compaction-v3` 增加结构化响应模式；`session-compaction-v4` 显式关闭思考模式；`session-compaction-v5` 不再设置 Provider 输出 Token 硬上限；当前版本 `session-compaction-v6` 统一采用 384K 输出预留、32,768 下一输入预留、5% 安全余量和 8K 最终摘要软目标。Schema 与运行时校验共用同一个 Zod 定义，避免提示词格式和校验器漂移。
+
+OpenAI-compatible 请求必须携带：
+
+```json
+{
+  "response_format": { "type": "json_object" },
+  "thinking": { "type": "disabled" }
+}
+```
+
+DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模型可能把压缩调用的输出额度全部消耗在 `reasoning_content`，最终以 `finish_reason: "length"` 结束且没有最终 `content`。压缩是确定性的结构化转换任务，因此默认关闭思考；普通主笔对话不携带该参数，继续遵循所选模型的默认模式。参考 [DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)。
+
+Ollama Provider 将相同的领域请求映射为 `"format": "json"` 和 `"think": false`。这些参数只用于会话压缩相关调用，不得加入普通主笔对话或 Tool Call 请求。JSON 模式只能约束响应为合法 JSON，具体字段、引用范围和业务语义仍由 Prompt、JSON Schema 和本地 Zod 校验共同保证。
+
+压缩响应允许流式返回。Provider 先按协议边界解析每个 SSE/NDJSON 包，从中提取 `text-delta`；`CompactionService` 按收到顺序累加所有文本分片，只有响应流结束后才对完整字符串执行一次 `JSON.parse` 和 Zod 校验。不得对单个文本分片直接执行 JSON 解析。网络读取层还必须缓存不完整行，避免一个 SSE JSON 包被 TCP 数据块拆开时提前解析。
 
 ### 6.1 System Prompt
 
@@ -310,13 +472,26 @@ Summary 1 + Session 2 原始消息
 ```text
 请根据下面的数据生成新的累计会话摘要。
 
+输出 JSON Schema：
+
+<由 sessionCompactionResultSchema 自动生成的完整 JSON Schema>
+
+输出必须满足以下要求：
+
+1. 只输出一个 JSON 对象，不使用 Markdown 代码块或解释文字。
+2. JSON 必须严格符合给出的输出 JSON Schema。
+3. Schema 中 required 列出的字段全部必须出现，不能省略。
+4. 没有内容的数组字段必须返回 []，不能省略、返回 null 或改成字符串。
+5. 不得添加 Schema 中未声明的字段。
+6. sourceMessageIds 至少包含一个输入允许的消息 ID。
+
 输入 JSON：
 
 {
   "schemaVersion": 1,
   "conversationId": "...",
   "sourceSessionId": "...",
-  "summaryTargetTokens": 3000,
+  "summaryTargetTokens": 8000,
   "previousSummary": null,
   "messages": [
     {
@@ -339,8 +514,9 @@ Summary 1 + Session 2 原始消息
   ]
 }
 
-严格返回指定 JSON Schema。
 ```
+
+普通压缩、超长会话的分段压缩与归并压缩都使用这套格式要求。归并请求仍然携带完整输出 Schema，不能依赖模型记住前一轮请求。
 
 ### 6.3 修复 Prompt
 
@@ -349,17 +525,21 @@ Summary 1 + Session 2 原始消息
 ```text
 你刚才返回的会话摘要没有通过 Schema 校验。
 
+下面是原始压缩请求，其中包含完整输出 JSON Schema、原始输入和允许引用的消息 ID：
+<ORIGINAL_COMPACTION_REQUEST>
+
 下面是校验错误：
 <VALIDATION_ERRORS_JSON>
 
 下面是你刚才的输出：
 <INVALID_OUTPUT_JSON>
 
-请只修复格式和引用错误，不得增加输入记录中不存在的信息。
-只返回修复后的 JSON。
+输出仍须遵守原始请求中的 JSON Schema 和全部格式要求。
+请只修复格式、缺失字段和引用错误，不得增加输入记录中不存在的信息。
+只返回一个修复后的 JSON 对象。
 ```
 
-第二次仍然失败时停止，不创建新 Session。
+修复调用保留原始请求，而不是只发送校验错误和无效输出；这样模型能够恢复缺失字段，并校验 `sourceMessageIds` 是否来自真实输入。只允许一次修复，第二次仍然失败时停止，不创建新 Session。
 
 ## 7. 摘要输出 Schema
 

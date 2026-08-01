@@ -20,8 +20,14 @@ import {
 import { DocumentService } from "../../project/src/index.js";
 import { ProjectToolRuntime, type ToolApprovalHandler } from "./project-tools.js";
 import { CompactionService } from "./compaction-service.js";
-import { ContextBudgetService, createContextBudgetPolicy } from "./context-budget.js";
+import {
+  ContextBudgetService,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  createContextBudgetPolicy,
+  estimateTokens,
+} from "./context-budget.js";
 import { ContextBuilder } from "./context-builder.js";
+import { emitLlmDebugEvent, type LlmDebugHandler } from "./debug-events.js";
 import { loadProjectInstructions } from "./project-instructions.js";
 
 export const DEFAULT_SYSTEM_PROMPT = `你是 CleoDoc 的中文小说主笔。你与用户讨论创作委托，给出完整、可保存的中文内容。明确区分用户决定、已知资料与创作假设。
@@ -42,6 +48,7 @@ export interface SendMessageInput {
   onEvent?: (event: ModelEvent) => void;
   approveToolCall?: ToolApprovalHandler;
   contextWindowTokens?: number;
+  onDebugEvent?: LlmDebugHandler;
 }
 
 export class ChatService {
@@ -122,21 +129,75 @@ export class ChatService {
         );
         let roundContent = "";
         const toolCalls: ModelToolCall[] = [];
+        let roundUsage: ModelUsage | undefined;
+        let finishReason: string | null = null;
+        const estimatedContextTokens = estimateTokens(
+          JSON.stringify({ model: input.model, messages, tools: tools.definitions }),
+        );
 
-        for await (const event of input.provider.stream(
-          { model: input.model, messages, tools: tools.definitions },
-          input.signal,
-        )) {
-          if (event.type === "text-delta") {
-            roundContent += event.text;
-            streamedContent += event.text;
-          } else if (event.type === "usage") {
-            usage = mergeUsage(usage, event.usage);
-          } else if (event.type === "tool-call") {
-            toolCalls.push(event.call);
+        try {
+          for await (const event of input.provider.stream(
+            {
+              model: input.model,
+              messages,
+              tools: tools.definitions,
+              ...(input.onDebugEvent === undefined
+                ? {}
+                : {
+                    onProtocolEvent: (protocol) =>
+                      emitLlmDebugEvent(input.onDebugEvent, {
+                        type: "llm-protocol",
+                        operation: "agent",
+                        round: round + 1,
+                        providerId: input.provider.id,
+                        model: input.model,
+                        protocol,
+                      }),
+                  }),
+            },
+            input.signal,
+          )) {
+            if (event.type === "text-delta") {
+              roundContent += event.text;
+              streamedContent += event.text;
+            } else if (event.type === "usage") {
+              usage = mergeUsage(usage, event.usage);
+              roundUsage = mergeUsage(roundUsage, event.usage);
+            } else if (event.type === "tool-call") {
+              toolCalls.push(event.call);
+            } else if (event.type === "done") {
+              finishReason = event.finishReason ?? null;
+            }
+            input.onEvent?.(event);
           }
-          input.onEvent?.(event);
+        } catch (error) {
+          const appError = asAppError(error);
+          emitLlmDebugEvent(input.onDebugEvent, {
+            type: "llm-response-error",
+            operation: "agent",
+            round: round + 1,
+            providerId: input.provider.id,
+            model: input.model,
+            errorCode: appError.code,
+            message: appError.message,
+            details: appError.details ?? null,
+          });
+          throw appError;
         }
+        emitLlmDebugEvent(input.onDebugEvent, {
+          type: "llm-response",
+          operation: "agent",
+          round: round + 1,
+          providerId: input.provider.id,
+          model: input.model,
+          contextTokens: roundUsage?.inputTokens ?? estimatedContextTokens,
+          contextSource: roundUsage?.inputTokens === undefined ? "estimated" : "provider",
+          estimatedContextTokens,
+          outputTokens: roundUsage?.outputTokens ?? null,
+          reasoningTokens: roundUsage?.reasoningTokens ?? null,
+          totalTokens: roundUsage?.totalTokens ?? null,
+          finishReason,
+        });
 
         if (toolCalls.length > 0) {
           await this.repository.addMessage(
@@ -146,6 +207,26 @@ export class ChatService {
           );
           for (const call of toolCalls) {
             const result = await tools.execute(call);
+            const toolResponseError = parseToolResponseError(result);
+            if (
+              toolResponseError !== null &&
+              ["VALIDATION_ERROR", "UNKNOWN_TOOL"].includes(toolResponseError.code)
+            ) {
+              emitLlmDebugEvent(input.onDebugEvent, {
+                type: "llm-response-error",
+                operation: "agent",
+                round: round + 1,
+                providerId: input.provider.id,
+                model: input.model,
+                errorCode: toolResponseError.code,
+                message: toolResponseError.message,
+                details: {
+                  responseStage: "tool_call_validation",
+                  toolName: call.name,
+                  toolCallId: call.id,
+                },
+              });
+            }
             await this.repository.addMessage(
               conversation.id,
               { role: "tool", name: call.name, toolCallId: call.id, content: result },
@@ -156,7 +237,22 @@ export class ChatService {
         }
 
         if (roundContent.trim() === "") {
-          throw new AppError("PROVIDER_UNAVAILABLE", "模型没有生成可保存的文本内容。");
+          const emptyResponseError = new AppError(
+            "PROVIDER_UNAVAILABLE",
+            "模型没有生成可保存的文本内容。",
+            { details: { responseStage: "agent_output_validation" } },
+          );
+          emitLlmDebugEvent(input.onDebugEvent, {
+            type: "llm-response-error",
+            operation: "agent",
+            round: round + 1,
+            providerId: input.provider.id,
+            model: input.model,
+            errorCode: emptyResponseError.code,
+            message: emptyResponseError.message,
+            details: emptyResponseError.details ?? null,
+          });
+          throw emptyResponseError;
         }
         await this.repository.finishGeneration({
           generationId: generation.id,
@@ -279,6 +375,7 @@ export class ChatService {
     trigger?: "automatic" | "manual";
     signal: AbortSignal;
     onEvent?: (event: CompactionEvent) => void;
+    onDebugEvent?: LlmDebugHandler;
   }): Promise<CompactionEvent & { type: "compaction-completed" }> {
     const conversation = this.assertConversation(input.conversationId);
     if (conversation.providerId !== input.provider.id || conversation.model !== input.model) {
@@ -293,10 +390,11 @@ export class ChatService {
       session,
       provider: input.provider,
       model: input.model,
-      contextWindowTokens: input.contextWindowTokens ?? 32_768,
+      contextWindowTokens: input.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
       trigger: input.trigger ?? "manual",
       signal: input.signal,
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+      ...(input.onDebugEvent === undefined ? {} : { onDebugEvent: input.onDebugEvent }),
     });
   }
 
@@ -347,8 +445,25 @@ function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsa
   return {
     inputTokens: mergeTokenCount(current?.inputTokens, next.inputTokens),
     outputTokens: mergeTokenCount(current?.outputTokens, next.outputTokens),
+    reasoningTokens: mergeTokenCount(current?.reasoningTokens, next.reasoningTokens),
     totalTokens: mergeTokenCount(current?.totalTokens, next.totalTokens),
   };
+}
+
+function parseToolResponseError(result: string): { code: string; message: string } | null {
+  try {
+    const parsed = JSON.parse(result) as {
+      ok?: boolean;
+      error?: { code?: unknown; message?: unknown };
+    };
+    return parsed.ok === false &&
+      typeof parsed.error?.code === "string" &&
+      typeof parsed.error.message === "string"
+      ? { code: parsed.error.code, message: parsed.error.message }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function mergeTokenCount(

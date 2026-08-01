@@ -32,7 +32,7 @@ v0.1 的核心闭环是：
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
 | 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、迁移、写入队列和健康检查 |
-| 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类和 Fake Provider 测试 |
+| 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
 | 5.5 会话上下文管理 | 已完成 | Session 压缩、AGENTS 快照、历史回查 Tool、分层压缩和可编辑草稿提交门 |

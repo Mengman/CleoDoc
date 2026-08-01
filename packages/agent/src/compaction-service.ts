@@ -1,18 +1,35 @@
 import type {
   CompactionEvent,
   ConversationSession,
+  ModelProtocolDebugHandler,
   ModelProvider,
   ModelUsage,
   SessionCompactionResult,
   SessionTrigger,
   StoredMessage,
 } from "../../contracts/src/index.js";
-import { AppError, asAppError, sessionCompactionResultSchema } from "../../contracts/src/index.js";
+import {
+  AppError,
+  asAppError,
+  sessionCompactionOutputJsonSchema,
+  sessionCompactionResultSchema,
+} from "../../contracts/src/index.js";
 import type { SessionRepository } from "../../database/src/index.js";
-import { estimateTokens } from "./context-budget.js";
+import { createContextBudgetPolicy, estimateTokens } from "./context-budget.js";
+import { emitLlmDebugEvent, type LlmDebugHandler, type LlmDebugOperation } from "./debug-events.js";
 import { loadProjectInstructions } from "./project-instructions.js";
 
-export const COMPACTION_PROMPT_VERSION = "session-compaction-v1";
+export const COMPACTION_PROMPT_VERSION = "session-compaction-v6";
+
+const COMPACTION_OUTPUT_REQUIREMENTS = `输出必须满足以下要求：
+1. 只输出一个 JSON 对象，不使用 Markdown 代码块或解释文字。
+2. JSON 必须严格符合给出的输出 JSON Schema。
+3. Schema 中 required 列出的字段全部必须出现，不能省略。
+4. 没有内容的数组字段必须返回 []，不能省略、返回 null 或改成字符串。
+5. 不得添加 Schema 中未声明的字段。
+6. sourceMessageIds 至少包含一个输入允许的消息 ID。`;
+
+const COMPACTION_OUTPUT_SCHEMA_TEXT = JSON.stringify(sessionCompactionOutputJsonSchema);
 
 const COMPACTION_SYSTEM_PROMPT = `你是 CleoDoc 的会话上下文压缩器，不是小说主笔，也不是用户对话参与者。
 
@@ -46,6 +63,7 @@ export interface CompactInput {
   trigger: SessionTrigger;
   signal: AbortSignal;
   onEvent?: (event: CompactionEvent) => void;
+  onDebugEvent?: LlmDebugHandler;
 }
 
 export class CompactionService {
@@ -61,8 +79,9 @@ export class CompactionService {
     const previous = this.sessions.getLatestSummary(input.conversationId);
     const targetTokens = Math.max(
       512,
-      Math.min(4_000, Math.floor(input.contextWindowTokens * 0.1)),
+      Math.min(8_000, Math.floor(input.contextWindowTokens * 0.01)),
     );
+    const budgetPolicy = createContextBudgetPolicy(input.contextWindowTokens);
     const jobId = await this.sessions.beginCompaction({
       session: input.session,
       trigger: input.trigger,
@@ -82,6 +101,7 @@ export class CompactionService {
 
     let usage: ModelUsage | undefined;
     let validatingEventEmitted = false;
+    let debugCallCount = 0;
     try {
       const payload = buildPayload(
         input.conversationId,
@@ -93,25 +113,93 @@ export class CompactionService {
       const maximumPayloadTokens = Math.max(
         512,
         input.contextWindowTokens -
-          targetTokens -
-          Math.floor(input.contextWindowTokens * 0.15) -
+          budgetPolicy.reservedOutputTokens -
+          Math.floor(input.contextWindowTokens * budgetPolicy.safetyMarginRatio) -
           estimateTokens(COMPACTION_SYSTEM_PROMPT),
       );
       const requestValidated = async (
         requestPayload: string,
         expectedMessages: readonly StoredMessage[],
       ): Promise<SessionCompactionResult> => {
-        await this.sessions.recordCompactionAttempt(jobId);
-        let raw = await collect(
-          input.provider,
-          input.model,
-          requestPayload,
-          targetTokens,
-          input.signal,
-          (next) => {
-            usage = mergeUsage(usage, next);
-          },
-        );
+        const runCompactionCall = async (
+          payload: string,
+          operation: LlmDebugOperation,
+        ): Promise<{
+          output: string;
+          round: number;
+          finishReason: string | null;
+          reasoningTokens: number | null;
+        }> => {
+          await this.sessions.recordCompactionAttempt(jobId);
+          const round = ++debugCallCount;
+          const estimatedContextTokens = estimateTokens(
+            JSON.stringify({
+              messages: [
+                { role: "system", content: COMPACTION_SYSTEM_PROMPT },
+                { role: "user", content: payload },
+              ],
+              tools: [],
+            }),
+          );
+          let callUsage: ModelUsage | undefined;
+          try {
+            const collected = await collect(
+              input.provider,
+              input.model,
+              payload,
+              input.signal,
+              (next) => {
+                usage = mergeUsage(usage, next);
+                callUsage = mergeUsage(callUsage, next);
+              },
+              (protocol) =>
+                emitLlmDebugEvent(input.onDebugEvent, {
+                  type: "llm-protocol",
+                  operation,
+                  round,
+                  providerId: input.provider.id,
+                  model: input.model,
+                  protocol,
+                }),
+            );
+            emitLlmDebugEvent(input.onDebugEvent, {
+              type: "llm-response",
+              operation,
+              round,
+              providerId: input.provider.id,
+              model: input.model,
+              contextTokens: callUsage?.inputTokens ?? estimatedContextTokens,
+              contextSource: callUsage?.inputTokens === undefined ? "estimated" : "provider",
+              estimatedContextTokens,
+              outputTokens: callUsage?.outputTokens ?? null,
+              reasoningTokens: callUsage?.reasoningTokens ?? null,
+              totalTokens: callUsage?.totalTokens ?? null,
+              finishReason: collected.finishReason,
+            });
+            return {
+              output: collected.output,
+              round,
+              finishReason: collected.finishReason,
+              reasoningTokens: callUsage?.reasoningTokens ?? null,
+            };
+          } catch (error) {
+            const appError = asAppError(error);
+            emitLlmDebugEvent(input.onDebugEvent, {
+              type: "llm-response-error",
+              operation,
+              round,
+              providerId: input.provider.id,
+              model: input.model,
+              errorCode: appError.code,
+              message: appError.message,
+              details: appError.details ?? null,
+            });
+            throw appError;
+          }
+        };
+
+        const initialCall = await runCompactionCall(requestPayload, "compaction");
+        let raw = initialCall.output;
         await this.sessions.markCompactionValidating(jobId);
         if (!validatingEventEmitted) {
           validatingEventEmitted = true;
@@ -119,20 +207,49 @@ export class CompactionService {
         }
         let validation = validateResult(raw, input.session.id, expectedMessages);
         if (!validation.ok) {
-          const repairPayload = `你刚才返回的会话摘要没有通过 Schema 校验。\n\n下面是校验错误：\n${JSON.stringify(validation.errors)}\n\n下面是你刚才的输出：\n${JSON.stringify(raw)}\n\n请只修复格式和引用错误，不得增加输入记录中不存在的信息。只返回修复后的 JSON。`;
-          await this.sessions.recordCompactionAttempt(jobId);
-          raw = await collect(
-            input.provider,
-            input.model,
-            repairPayload,
-            targetTokens,
-            input.signal,
-            (next) => {
-              usage = mergeUsage(usage, next);
+          emitLlmDebugEvent(input.onDebugEvent, {
+            type: "llm-response-error",
+            operation: "compaction",
+            round: initialCall.round,
+            providerId: input.provider.id,
+            model: input.model,
+            errorCode: "VALIDATION_ERROR",
+            message:
+              initialCall.finishReason === "length" && initialCall.output.trim() === ""
+                ? "压缩模型以 length 结束且没有返回最终 content；输出额度可能被 reasoning 消耗，将尝试修复。"
+                : "LLM 返回的压缩摘要未通过 Schema 校验，将尝试修复。",
+            details: {
+              validationErrors: validation.errors,
+              finishReason: initialCall.finishReason,
+              outputLength: initialCall.output.length,
+              reasoningTokens: initialCall.reasoningTokens,
             },
-          );
+          });
+          const repairPayload = buildRepairPayload(requestPayload, validation.errors, raw);
+          const repairCall = await runCompactionCall(repairPayload, "compaction-repair");
+          raw = repairCall.output;
           await this.sessions.markCompactionValidating(jobId);
           validation = validateResult(raw, input.session.id, expectedMessages);
+          if (!validation.ok) {
+            emitLlmDebugEvent(input.onDebugEvent, {
+              type: "llm-response-error",
+              operation: "compaction-repair",
+              round: repairCall.round,
+              providerId: input.provider.id,
+              model: input.model,
+              errorCode: "VALIDATION_ERROR",
+              message:
+                repairCall.finishReason === "length" && repairCall.output.trim() === ""
+                  ? "压缩修复以 length 结束且没有返回最终 content；输出额度可能被 reasoning 消耗。"
+                  : "LLM 修复后的压缩摘要仍未通过 Schema 校验。",
+              details: {
+                validationErrors: validation.errors,
+                finishReason: repairCall.finishReason,
+                outputLength: repairCall.output.length,
+                reasoningTokens: repairCall.reasoningTokens,
+              },
+            });
+          }
         }
         if (!validation.ok) {
           throw new AppError("VALIDATION_ERROR", "压缩摘要连续两次未通过 Schema 校验。", {
@@ -291,22 +408,28 @@ function buildReducePayload(
   segmentSummaries: readonly SessionCompactionResult[],
   messages: readonly StoredMessage[],
 ): string {
-  return `请把上一份累计摘要与分段摘要归并为一份新的累计会话摘要。分段摘要中的 sourceMessageIds 是原始消息 ID，必须原样保留。\n\n输入 JSON：\n${JSON.stringify(
-    {
-      schemaVersion: 1,
-      conversationId,
-      sourceSessionId,
-      summaryTargetTokens,
-      previousSummary,
-      segmentSummaries,
-      coveredMessagesExpected: {
-        firstMessageId: messages[0]!.id,
-        lastMessageId: messages.at(-1)!.id,
-        count: messages.length,
-      },
-      allowedSourceMessageIds: messages.map((message) => message.id),
-    },
-  )}\n\n严格返回指定 JSON Schema。`;
+  return `请把上一份累计摘要与分段摘要归并为一份新的累计会话摘要。分段摘要中的 sourceMessageIds 是原始消息 ID，必须原样保留。
+
+输出 JSON Schema：
+${COMPACTION_OUTPUT_SCHEMA_TEXT}
+
+${COMPACTION_OUTPUT_REQUIREMENTS}
+
+输入 JSON：
+${JSON.stringify({
+  schemaVersion: 1,
+  conversationId,
+  sourceSessionId,
+  summaryTargetTokens,
+  previousSummary,
+  segmentSummaries,
+  coveredMessagesExpected: {
+    firstMessageId: messages[0]!.id,
+    lastMessageId: messages.at(-1)!.id,
+    count: messages.length,
+  },
+  allowedSourceMessageIds: messages.map((message) => message.id),
+})}\n\n严格返回指定 JSON Schema。`;
 }
 
 function buildPayload(
@@ -333,32 +456,62 @@ function buildPayload(
       status: inferToolStatus(message.content),
       description: message.content.slice(0, 500),
     }));
-  return `请根据下面的数据生成新的累计会话摘要。\n\n输入 JSON：\n${JSON.stringify({
-    schemaVersion: 1,
-    conversationId,
-    sourceSessionId,
-    summaryTargetTokens,
-    previousSummary,
-    messages: normalMessages,
-    toolEvents,
-    coveredMessagesExpected: {
-      firstMessageId: messages[0]!.id,
-      lastMessageId: messages.at(-1)!.id,
-      count: messages.length,
-    },
-    allowedSourceMessageIds: messages.map((message) => message.id),
-  })}\n\n严格返回指定 JSON Schema。`;
+  return `请根据下面的数据生成新的累计会话摘要。
+
+输出 JSON Schema：
+${COMPACTION_OUTPUT_SCHEMA_TEXT}
+
+${COMPACTION_OUTPUT_REQUIREMENTS}
+
+输入 JSON：
+${JSON.stringify({
+  schemaVersion: 1,
+  conversationId,
+  sourceSessionId,
+  summaryTargetTokens,
+  previousSummary,
+  messages: normalMessages,
+  toolEvents,
+  coveredMessagesExpected: {
+    firstMessageId: messages[0]!.id,
+    lastMessageId: messages.at(-1)!.id,
+    count: messages.length,
+  },
+  allowedSourceMessageIds: messages.map((message) => message.id),
+})}\n\n严格返回指定 JSON Schema。`;
+}
+
+function buildRepairPayload(
+  originalRequest: string,
+  validationErrors: unknown,
+  invalidOutput: string,
+): string {
+  return `你刚才返回的会话摘要没有通过 Schema 校验。
+
+原始压缩请求（包括输入记录、允许的 Message ID 和输出 Schema）：
+${originalRequest}
+
+校验错误：
+${JSON.stringify(validationErrors)}
+
+无效输出：
+${JSON.stringify(invalidOutput)}
+
+${COMPACTION_OUTPUT_REQUIREMENTS}
+
+请只修复格式、缺失字段和引用错误，不得增加原始输入中不存在的信息。只返回修复后的 JSON。`;
 }
 
 async function collect(
   provider: ModelProvider,
   model: string,
   userPayload: string,
-  maxTokens: number,
   signal: AbortSignal,
   onUsage: (usage: ModelUsage) => void,
-): Promise<string> {
+  onProtocolEvent?: ModelProtocolDebugHandler,
+): Promise<{ output: string; finishReason: string | null }> {
   let output = "";
+  let finishReason: string | null = null;
   for await (const event of provider.stream(
     {
       model,
@@ -368,17 +521,20 @@ async function collect(
       ],
       tools: [],
       temperature: 0.1,
-      maxTokens,
+      responseFormat: { type: "json_object" },
+      thinking: { type: "disabled" },
+      ...(onProtocolEvent === undefined ? {} : { onProtocolEvent }),
     },
     signal,
   )) {
     if (event.type === "text-delta") output += event.text;
     if (event.type === "usage") onUsage(event.usage);
+    if (event.type === "done") finishReason = event.finishReason ?? null;
     if (event.type === "tool-call") {
       throw new AppError("VALIDATION_ERROR", "压缩模型不得调用工具。");
     }
   }
-  return output;
+  return { output, finishReason };
 }
 
 function validateResult(
@@ -448,6 +604,7 @@ function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsa
   return {
     inputTokens: mergeCount(current?.inputTokens, next.inputTokens),
     outputTokens: mergeCount(current?.outputTokens, next.outputTokens),
+    reasoningTokens: mergeCount(current?.reasoningTokens, next.reasoningTokens),
     totalTokens: mergeCount(current?.totalTokens, next.totalTokens),
   };
 }

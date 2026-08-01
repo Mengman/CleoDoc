@@ -14,17 +14,47 @@ export interface ModelToolDefinition {
   inputSchema: Readonly<Record<string, unknown>>;
 }
 
+export type ModelProtocolEvent =
+  | {
+      type: "request";
+      method: string;
+      url: string;
+      headers: Readonly<Record<string, string>>;
+      body: string;
+    }
+  | {
+      type: "response-head";
+      status: number;
+      statusText: string;
+      headers: Readonly<Record<string, string>>;
+    }
+  | { type: "response-chunk"; chunk: string };
+
+export type ModelProtocolDebugHandler = (event: ModelProtocolEvent) => void;
+
+export interface ModelResponseFormat {
+  type: "json_object";
+}
+
+export interface ModelThinkingMode {
+  type: "enabled" | "disabled";
+}
+
 export interface ModelRequest {
   model: string;
   messages: readonly ChatMessage[];
   tools?: readonly ModelToolDefinition[];
   temperature?: number;
   maxTokens?: number;
+  responseFormat?: ModelResponseFormat;
+  thinking?: ModelThinkingMode;
+  onProtocolEvent?: ModelProtocolDebugHandler;
 }
 
 export interface ModelUsage {
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
   totalTokens?: number;
 }
 

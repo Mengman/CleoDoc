@@ -62,6 +62,8 @@ export const sessionCompactionResultSchema = z.object({
   handoffBrief: z.string().max(12_000),
 });
 
+export const sessionCompactionOutputJsonSchema = z.toJSONSchema(sessionCompactionResultSchema);
+
 export type SessionCompactionResult = z.infer<typeof sessionCompactionResultSchema>;
 
 export type SessionStatus = "active" | "compacting" | "closed";

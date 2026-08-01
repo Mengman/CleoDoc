@@ -7,8 +7,9 @@ import { TextDecoder } from "node:util";
 import { z } from "zod";
 
 import {
-  ChatService,
   ChatInputController,
+  ChatService,
+  type LlmDebugHandler,
   type ToolApprovalHandler,
   type ToolApprovalRequest,
 } from "../../../packages/agent/src/index.js";
@@ -37,6 +38,7 @@ import {
   validateInput,
 } from "./arguments.js";
 import { helpText } from "./help.js";
+import { LlmDebugFileLogger } from "./debug-log.js";
 
 const projectService = new ProjectService();
 const configService = new ConfigService();
@@ -400,6 +402,7 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
     "stream-idle-timeout-ms",
     "generation-timeout-ms",
     "context-window-tokens",
+    "debug",
     "conversation",
     "new",
     "prompt",
@@ -417,12 +420,19 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
   if (!model) {
     throw new AppError("VALIDATION_ERROR", "请使用 --model 或 CLEODOC_MODEL 指定模型。");
   }
-  const chat = await ChatService.open(project.root);
+  const debug = optionBoolean(parsed, "debug");
   const contextWindowTokens =
     optionPositiveInteger(parsed, "context-window-tokens") ??
     parsePositiveEnvironmentInteger("CLEODOC_MODEL_CONTEXT_TOKENS");
   if (contextWindowTokens !== undefined && contextWindowTokens < 2_048) {
     throw new AppError("VALIDATION_ERROR", "模型上下文窗口不能小于 2048 Token。");
+  }
+  const chat = await ChatService.open(project.root);
+  const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
+  const onDebugEvent = debugLogger?.onEvent;
+  if (debugLogger !== undefined) {
+    output.write(`Debug 日志：${debugLogger.filePath}\n`);
+    output.write("日志可能包含作品或资料；鉴权 Header 已脱敏。\n");
   }
   try {
     const explicitConversationId = optionString(parsed, "conversation");
@@ -440,6 +450,7 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
         prompt,
         conversationId: initialConversationId,
         contextWindowTokens,
+        ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
       });
       const budget = chat.getContextStatus(result.conversationId, contextWindowTokens);
       if (budget.softLimitReached) {
@@ -451,6 +462,7 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
           contextWindowTokens,
           trigger: "automatic",
           signal: new AbortController().signal,
+          ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
         });
         output.write("上下文压缩完成。\n");
       }
@@ -475,9 +487,14 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
       createProvider: (selectedProviderId) => providerFromArguments(selectedProviderId, parsed),
       documents: new DocumentService(project.root),
       contextWindowTokens,
+      ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
     });
   } finally {
-    await chat.close();
+    try {
+      await chat.close();
+    } finally {
+      await debugLogger?.close();
+    }
   }
 }
 
@@ -520,6 +537,7 @@ async function generateOnce(
     conversationId?: string;
     approveToolCall?: ToolApprovalHandler;
     contextWindowTokens?: number;
+    onDebugEvent?: LlmDebugHandler;
   },
 ): Promise<ChatGenerationResult> {
   const controller = new AbortController();
@@ -554,6 +572,7 @@ async function interactiveChat(
     createProvider: (providerId: string) => ModelProvider;
     documents: DocumentService;
     contextWindowTokens?: number;
+    onDebugEvent?: LlmDebugHandler;
   },
 ): Promise<void> {
   let readline = createInterface({ input, output });
@@ -602,6 +621,7 @@ async function interactiveChat(
         contextWindowTokens: context.contextWindowTokens,
         trigger,
         signal: controller.signal,
+        ...(context.onDebugEvent === undefined ? {} : { onDebugEvent: context.onDebugEvent }),
       })
       .then(() => {
         hardBlocked = false;
@@ -767,6 +787,7 @@ async function interactiveChat(
           ...(conversationId === undefined ? {} : { conversationId }),
           approveToolCall: (request) => approveProjectWrite(readline, request),
           contextWindowTokens: context.contextWindowTokens,
+          ...(context.onDebugEvent === undefined ? {} : { onDebugEvent: context.onDebugEvent }),
         });
         conversationId = result.conversationId;
         const budget = chat.getContextStatus(conversationId, context.contextWindowTokens);

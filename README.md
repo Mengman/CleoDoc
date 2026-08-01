@@ -107,7 +107,11 @@ npm run cleo -- chat
 
 进入交互式聊天时会显示最近 5 条记录。输入 `/resume 1` 可以恢复列表中的第 1 条；输入 `/history` 会打开更多历史记录，在真实终端中使用上下键选择、按 Enter 恢复、按 `q` 返回聊天。使用 `/new` 开始新对话。
 
-长对话达到默认 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。模型上下文窗口默认 32768 Token，可通过 `--context-window-tokens` 或 `CLEODOC_MODEL_CONTEXT_TOKENS` 明确设置。
+长对话达到默认 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。模型上下文窗口默认 1,000,000 Token，并预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量；因此约在当前 Payload 392K Token 时自动压缩，在 477K Token 时阻止继续提交。可通过 `--context-window-tokens` 或 `CLEODOC_MODEL_CONTEXT_TOKENS` 明确覆盖上下文窗口，小窗口下固定预留会按比例缩放。
+
+需要检查模型上下文占用或响应协议时可以使用 `npm run cleo -- chat --debug`。Debug 模式会把主笔、上下文压缩和压缩修复实际发送的 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header，以及 Provider 解析前收到的原始 SSE 或 NDJSON 数据块写入 UTF-8 日志；响应结束后还会记录输入 Context Token、输出 Token、结束原因、本地估算值和 Schema 校验错误。终端只显示本次日志文件的绝对路径，不再输出原始协议内容，因此不会干扰聊天交互。
+
+每次启动 Debug Chat 都会在 `<项目根目录>/.cleo/logs/` 下创建独立的 `cleodoc-debug-<时间>-<进程>.log`。`.cleo/` 默认不进入 Git，日志也不写入 SQLite。原始请求日志包含当前轮发送给模型的聊天、摘要和项目上下文，可能含有作品正文或资料；API Key、Authorization、Cookie 等鉴权 Header 会替换为 `<redacted>`。排查完问题后应关闭 `--debug`，分享日志前仍应检查其中的作品内容。
 
 API 超时只会终止本轮请求，不会退出聊天；CLI 会区分连接/首响应超时、响应流空闲、总生成时限和上游 HTTP 超时。本轮用户消息和此前记录已经写入项目，可以稍后继续尝试。
 

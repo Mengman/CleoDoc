@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +35,7 @@ describe("CleoDoc CLI", () => {
         response.writeHead(200, { "Content-Type": "text/event-stream" });
         response.write('data: {"choices":[{"delta":{"content":"# 第一章\\n\\n"}}]}\n\n');
         response.write(
-          'data: {"choices":[{"delta":{"content":"钟声在雨里停了。"},"finish_reason":"stop"}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"钟声在雨里停了。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":321,"completion_tokens":18,"total_tokens":339}}\n\n',
         );
         response.end("data: [DONE]\n\n");
         return;
@@ -68,11 +68,24 @@ describe("CleoDoc CLI", () => {
           "2000",
           "--generation-timeout-ms",
           "5000",
+          "--debug",
         ],
         environment,
       );
       expect(generated.exitCode).toBe(0);
       expect(generated.stdout).toContain("钟声在雨里停了。");
+      expect(generated.stdout).not.toContain("[debug][raw]");
+      const debugLogPath = generated.stdout.match(/Debug 日志：(.+)\r?\n/)?.[1]?.trim();
+      expect(debugLogPath).toBeDefined();
+      const debugLog = await readFile(debugLogPath!, "utf8");
+      expect(debugLog).toContain("[debug][raw] ===== 主笔 LLM 请求 #1 =====");
+      expect(debugLog).toContain('"content":"写一个开场"');
+      expect(debugLog).toContain("[debug][raw] ===== 主笔 LLM 响应头 #1 =====");
+      expect(debugLog).toContain("[debug][raw] ===== 主笔 LLM 原始响应块 #1 =====");
+      expect(debugLog).toContain("钟声在雨里停了。");
+      expect(debugLog).toContain("主笔 LLM 响应 #1：context=321 tokens（API）");
+      expect(generated.stdout).not.toContain("test-key");
+      expect(debugLog).not.toContain("test-key");
       expect(generated.stdout).toContain("已创建：manuscript/chapter-001.md");
 
       const shown = await runCli(["document", "show", "manuscript/chapter-001.md"], environment);
@@ -124,7 +137,7 @@ describe("CleoDoc CLI", () => {
       environment.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
       expect((await runCli(["init", projectDirectory], environment)).exitCode).toBe(0);
 
-      const chat = await runInteractiveCli(["chat"], environment, [
+      const chat = await runInteractiveCli(["chat", "--debug"], environment, [
         "第一次请求",
         "再次尝试",
         "/history",
@@ -135,6 +148,8 @@ describe("CleoDoc CLI", () => {
       expect(chat.stdout).toContain("稍后重试成功。");
       expect(chat.stdout).toContain("聊天历史：");
       expect(chat.stdout).toContain("聊天记录已保存在当前项目中");
+      expect(chat.stdout).toContain("Debug 日志：");
+      expect(chat.stdout).not.toContain("[debug][raw]");
 
       const listed = await runCli(["conversation", "list"], environment);
       expect(listed.exitCode).toBe(0);

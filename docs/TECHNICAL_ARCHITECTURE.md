@@ -600,7 +600,9 @@ interface DocumentDiff {
 
 会话 Session、自动上下文压缩、项目 AGENTS 快照和压缩前历史回查的详细方案见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。
 
-v0.1 已通过 SQLite migration v4 落地 `conversation_sessions`、`session_summaries`、`compaction_jobs`、`messages.session_id` 和 `conversation_message_fts`。`ChatService` 只组装当前 active Session；`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用，校验失败允许一次修复，并在一个事务中保存摘要、关闭旧 Session 和创建新 Session。进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+v0.1 已通过 SQLite migration v4 落地 `conversation_sessions`、`session_summaries`、`compaction_jobs`、`messages.session_id` 和 `conversation_message_fts`。`ChatService` 只组装当前 active Session；`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v6` 会在普通压缩、分段归并和一次性修复请求中发送由公共 Zod Schema 自动生成的完整 JSON Schema，并要求所有必填字段出现、空数组显式返回 `[]`、禁止额外字段；同时将领域层的 `responseFormat: { type: "json_object" }` 和 `thinking: { type: "disabled" }` 映射为 OpenAI-compatible 的 `response_format`、`thinking`，或 Ollama 的 `format: "json"`、`think: false`。压缩请求不设置 Provider 输出 Token 硬上限，`summaryTargetTokens` 只作为 Prompt 软目标与本地分段依据；普通主笔调用仍使用自身配置，也不覆盖模型的思考模式。修复请求同时保留原始输入和允许引用的消息 ID。通过校验后，服务在一个事务中保存摘要、关闭旧 Session 和创建新 Session；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+
+模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，约在当前 Payload 391,732 Token 时启动压缩，在 476,632 Token 时阻止继续提交；压缩请求的安全 Payload 上限约为 565,424 Token，最终累计摘要软目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 
 ### 12.1 v0.1 前台 Tool Loop
 
@@ -609,6 +611,8 @@ v0.1 在 CLI 前台执行单任务 Tool Loop：模型可以通过 `list_project_
 Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
 流式 Provider 将超时拆为三个阶段：连接/首响应超时、连续无原始流数据的空闲超时、单轮生成总时限。连接成功后必须停止连接计时；任意 SSE/NDJSON 数据块（包括 keep-alive）都会重置空闲计时。默认值分别为 60 秒、120 秒和 20 分钟，CLI 参数或环境变量可以覆盖。客户端超时原因与上游 HTTP 408/504 必须分别记录，不能统一误报为连接失败。
+
+CLI 的 `--debug` 只开启本次进程的 LLM 协议诊断：Provider 在解析前逐次发出实际 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header 和原始 SSE/NDJSON 数据块，Agent 再为日志标注主笔、上下文压缩、压缩修复及调用轮次。每次响应结束后记录 API 返回的输入 Token，缺少 usage 时记录本地保守估算，并记录输出 Token、结束原因和 Schema 校验错误。CLI 将这些信息按 UTF-8 写入 `<项目根目录>/.cleo/logs/` 下本次进程独立的日志文件，终端只显示文件路径；日志不得写入 SQLite，并由现有 `.cleo/` 忽略规则排除在 Git 之外。API Key、Authorization、Cookie 等鉴权 Header 必须脱敏。由于请求 body 包含发送给模型的作品内容，CLI 文档必须明确提示用户仅在排障时开启并在分享前检查日志。
 
 CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料、对话记录和 `ContextManifest` 必须保持一致。
 

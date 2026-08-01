@@ -18,6 +18,7 @@ import {
   type ProviderStreamTimeoutOptions,
   type ProviderStreamTimeoutOverrides,
 } from "./http-errors.js";
+import { emitProtocolEvent, redactHeaders } from "./protocol-debug.js";
 
 const modelListSchema = z.object({
   data: z.array(z.object({ id: z.string() }).passthrough()),
@@ -60,6 +61,11 @@ const streamChunkSchema = z
         prompt_tokens: z.number().optional(),
         completion_tokens: z.number().optional(),
         total_tokens: z.number().optional(),
+        completion_tokens_details: z
+          .object({ reasoning_tokens: z.number().optional() })
+          .passthrough()
+          .nullable()
+          .optional(),
       })
       .nullable()
       .optional(),
@@ -123,50 +129,91 @@ export class OpenAICompatibleProvider implements ModelProvider {
     let finishReason: string | undefined;
 
     try {
-      const response = await this.fetchImplementation(`${this.baseUrl}/chat/completions`, {
+      const url = `${this.baseUrl}/chat/completions`;
+      const headers = this.headers();
+      const body = JSON.stringify({
+        model: request.model,
+        messages: request.messages.map(toOpenAIMessage),
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+        ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
+        ...(request.responseFormat === undefined
+          ? {}
+          : { response_format: request.responseFormat }),
+        ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
+        ...(request.tools === undefined
+          ? {}
+          : {
+              tools: request.tools.map((tool) => ({
+                type: "function",
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.inputSchema,
+                },
+              })),
+            }),
+      });
+      emitProtocolEvent(request, {
+        type: "request",
         method: "POST",
-        headers: this.headers(),
-        body: JSON.stringify({
-          model: request.model,
-          messages: request.messages.map(toOpenAIMessage),
-          stream: true,
-          stream_options: { include_usage: true },
-          ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-          ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
-          ...(request.tools === undefined
-            ? {}
-            : {
-                tools: request.tools.map((tool) => ({
-                  type: "function",
-                  function: {
-                    name: tool.name,
-                    description: tool.description,
-                    parameters: tool.inputSchema,
-                  },
-                })),
-              }),
-        }),
+        url,
+        headers: redactHeaders(headers),
+        body,
+      });
+      const response = await this.fetchImplementation(url, {
+        method: "POST",
+        headers,
+        body,
         signal: requestSignal,
       });
       timeouts.markConnected();
+      emitProtocolEvent(request, {
+        type: "response-head",
+        status: response.status,
+        statusText: response.statusText,
+        headers: redactHeaders(response.headers),
+      });
       if (!response.ok) {
-        await throwForProviderResponse(response);
+        await throwForProviderResponse(response, (responseBody) =>
+          emitProtocolEvent(request, { type: "response-chunk", chunk: responseBody }),
+        );
       }
       if (response.body === null) {
         throw new AppError("PROVIDER_UNAVAILABLE", "模型服务没有返回响应流。");
       }
 
-      for await (const data of readServerSentEvents(response.body, requestSignal, () =>
-        timeouts.markActivity(),
+      for await (const data of readServerSentEvents(
+        response.body,
+        requestSignal,
+        () => timeouts.markActivity(),
+        (chunk) => emitProtocolEvent(request, { type: "response-chunk", chunk }),
       )) {
         if (data === "[DONE]") {
           break;
         }
-        const parsedJson: unknown = JSON.parse(data);
+        let parsedJson: unknown;
+        try {
+          parsedJson = JSON.parse(data) as unknown;
+        } catch (error) {
+          throw new AppError("PROVIDER_UNAVAILABLE", "模型流式响应不是有效的 JSON。", {
+            cause: error,
+            details: {
+              responseStage: "stream_json_parse",
+              parserMessage: error instanceof Error ? error.message : String(error),
+              dataPreview: data.slice(0, 500),
+            },
+          });
+        }
         const parsed = streamChunkSchema.safeParse(parsedJson);
         if (!parsed.success) {
           throw new AppError("PROVIDER_UNAVAILABLE", "模型流式响应格式无效。", {
-            details: { issues: parsed.error.issues },
+            details: {
+              responseStage: "stream_schema_validation",
+              issues: parsed.error.issues,
+              dataPreview: data.slice(0, 500),
+            },
           });
         }
 
@@ -197,6 +244,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             usage: {
               inputTokens: parsed.data.usage.prompt_tokens,
               outputTokens: parsed.data.usage.completion_tokens,
+              reasoningTokens: parsed.data.usage.completion_tokens_details?.reasoning_tokens,
               totalTokens: parsed.data.usage.total_tokens,
             },
           };
@@ -256,6 +304,7 @@ async function* readServerSentEvents(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal,
   onActivity: () => void,
+  onChunk: (chunk: string) => void,
 ): AsyncGenerator<string, void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -264,11 +313,15 @@ async function* readServerSentEvents(
     while (true) {
       const result = await readStreamChunk(reader, signal);
       if (result.done) {
-        buffer += decoder.decode();
+        const tail = decoder.decode();
+        if (tail !== "") onChunk(tail);
+        buffer += tail;
         break;
       }
       onActivity();
-      buffer += decoder.decode(result.value, { stream: true });
+      const chunk = decoder.decode(result.value, { stream: true });
+      onChunk(chunk);
+      buffer += chunk;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
       for (const line of lines) {

@@ -16,7 +16,8 @@ export const helpText = `CleoDoc v0.1 CLI
     --connect-timeout-ms <ms>     连接/首响应超时，默认 60000
     --stream-idle-timeout-ms <ms> 流连续无数据超时，默认 120000
     --generation-timeout-ms <ms>  单轮生成总时限，默认 1200000
-    --context-window-tokens <n>    模型上下文窗口，用于自动压缩预算，默认 32768
+    --context-window-tokens <n>    模型上下文窗口，用于自动压缩预算，默认 1000000
+    --debug               将原始 LLM 请求/响应、Token 和校验错误写入本地日志
     --conversation <id>   继续指定对话
     --new                 不恢复最近对话，开始新对话
     --prompt <text>       单轮非交互调用
