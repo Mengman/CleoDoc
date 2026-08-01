@@ -151,7 +151,13 @@ async function providerCommand(parsed: ParsedArguments): Promise<void> {
   if (subcommand !== "test" || providerId === undefined || parsed.positionals.length !== 2) {
     throw new AppError("VALIDATION_ERROR", "用法：cleo provider <list|test <provider>>");
   }
-  assertOnlyOptions(parsed, ["base-url", "api-key-env"]);
+  assertOnlyOptions(parsed, [
+    "base-url",
+    "api-key-env",
+    "connect-timeout-ms",
+    "stream-idle-timeout-ms",
+    "generation-timeout-ms",
+  ]);
   const provider = providerFromArguments(providerId, parsed);
   const controller = new AbortController();
   const removeHandler = installInterruptHandler(controller);
@@ -389,6 +395,9 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
     "model",
     "base-url",
     "api-key-env",
+    "connect-timeout-ms",
+    "stream-idle-timeout-ms",
+    "generation-timeout-ms",
     "conversation",
     "new",
     "prompt",
@@ -789,7 +798,18 @@ function isRecoverableChatError(error: AppError): boolean {
 
 function printRecoverableChatError(error: AppError): void {
   if (error.code === "PROVIDER_TIMEOUT") {
-    output.write("API 连接超时，本轮消息已经保存。聊天仍然保持，可以稍后再次尝试。\n");
+    const timeoutKind = error.details?.timeoutKind;
+    const message =
+      timeoutKind === "connection"
+        ? "连接模型服务或等待首个响应超时"
+        : timeoutKind === "stream_idle"
+          ? "模型响应流长时间没有返回新数据"
+          : timeoutKind === "overall"
+            ? "本轮模型生成超过总时间限制"
+            : timeoutKind === "upstream"
+              ? "上游模型服务返回超时"
+              : "模型服务请求超时";
+    output.write(`${message}，本轮消息已经保存。聊天仍然保持，可以稍后再次尝试。\n`);
     return;
   }
   if (error.code === "GENERATION_CANCELLED") {
@@ -835,7 +855,25 @@ function providerFromArguments(providerId: string, parsed: ParsedArguments): Mod
   return createProvider(providerId, {
     baseUrl: optionString(parsed, "base-url"),
     apiKeyEnvironmentVariable: optionString(parsed, "api-key-env"),
+    connectionTimeoutMs: optionPositiveInteger(parsed, "connect-timeout-ms"),
+    streamIdleTimeoutMs: optionPositiveInteger(parsed, "stream-idle-timeout-ms"),
+    overallTimeoutMs: optionPositiveInteger(parsed, "generation-timeout-ms"),
   });
+}
+
+function optionPositiveInteger(parsed: ParsedArguments, name: string): number | undefined {
+  const value = optionString(parsed, name);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!/^\d+$/.test(value)) {
+    throw new AppError("VALIDATION_ERROR", `--${name} 必须是正整数毫秒数。`);
+  }
+  const parsedValue = Number(value);
+  if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
+    throw new AppError("VALIDATION_ERROR", `--${name} 必须是正整数毫秒数。`);
+  }
+  return parsedValue;
 }
 
 async function resolveProjectRoot(explicitProject: string | undefined): Promise<string> {

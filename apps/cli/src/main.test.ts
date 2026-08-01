@@ -56,7 +56,19 @@ describe("CleoDoc CLI", () => {
       expect(initialized.stdout).toContain("已创建项目：钟声");
 
       const generated = await runCli(
-        ["chat", "--prompt", "写一个开场", "--save", "manuscript/chapter-001.md"],
+        [
+          "chat",
+          "--prompt",
+          "写一个开场",
+          "--save",
+          "manuscript/chapter-001.md",
+          "--connect-timeout-ms",
+          "2000",
+          "--stream-idle-timeout-ms",
+          "2000",
+          "--generation-timeout-ms",
+          "5000",
+        ],
         environment,
       );
       expect(generated.exitCode).toBe(0);
@@ -119,7 +131,7 @@ describe("CleoDoc CLI", () => {
         "/exit",
       ]);
       expect(chat.exitCode, JSON.stringify(chat)).toBe(0);
-      expect(chat.stdout).toContain("API 连接超时，本轮消息已经保存");
+      expect(chat.stdout).toContain("上游模型服务返回超时，本轮消息已经保存");
       expect(chat.stdout).toContain("稍后重试成功。");
       expect(chat.stdout).toContain("聊天历史：");
       expect(chat.stdout).toContain("聊天记录已保存在当前项目中");

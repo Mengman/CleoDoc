@@ -8,7 +8,15 @@ import type {
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
-import { mapProviderFailure, throwForProviderResponse, withTimeout } from "./http-errors.js";
+import {
+  mapProviderFailure,
+  ProviderStreamTimeoutController,
+  resolveProviderStreamTimeouts,
+  throwForProviderResponse,
+  withTimeout,
+  type ProviderStreamTimeoutOptions,
+  type ProviderStreamTimeoutOverrides,
+} from "./http-errors.js";
 
 const tagsSchema = z
   .object({
@@ -40,9 +48,8 @@ const chatChunkSchema = z
   })
   .passthrough();
 
-export interface OllamaProviderOptions {
+export interface OllamaProviderOptions extends ProviderStreamTimeoutOverrides {
   baseUrl?: string;
-  timeoutMs?: number;
   fetchImplementation?: typeof fetch;
 }
 
@@ -50,17 +57,20 @@ export class OllamaProvider implements ModelProvider {
   readonly id = "ollama";
   readonly displayName = "Ollama";
   private readonly baseUrl: string;
-  private readonly timeoutMs: number;
+  private readonly streamTimeouts: ProviderStreamTimeoutOptions;
   private readonly fetchImplementation: typeof fetch;
 
   constructor(options: OllamaProviderOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-    this.timeoutMs = options.timeoutMs ?? 120_000;
+    this.streamTimeouts = resolveProviderStreamTimeouts(options);
     this.fetchImplementation = options.fetchImplementation ?? fetch;
   }
 
   async validateConfiguration(callerSignal?: AbortSignal): Promise<ProviderHealth> {
-    const requestSignal = withTimeout(callerSignal, Math.min(this.timeoutMs, 30_000));
+    const requestSignal = withTimeout(
+      callerSignal,
+      Math.min(this.streamTimeouts.connectionTimeoutMs, 30_000),
+    );
     try {
       const response = await this.fetchImplementation(`${this.baseUrl}/api/tags`, {
         signal: requestSignal,
@@ -83,7 +93,8 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async *stream(request: ModelRequest, callerSignal: AbortSignal): AsyncIterable<ModelEvent> {
-    const requestSignal = withTimeout(callerSignal, this.timeoutMs);
+    const timeouts = new ProviderStreamTimeoutController(callerSignal, this.streamTimeouts);
+    const requestSignal = timeouts.signal;
     try {
       const response = await this.fetchImplementation(`${this.baseUrl}/api/chat`, {
         method: "POST",
@@ -111,6 +122,7 @@ export class OllamaProvider implements ModelProvider {
         }),
         signal: requestSignal,
       });
+      timeouts.markConnected();
       if (!response.ok) {
         await throwForProviderResponse(response);
       }
@@ -119,7 +131,9 @@ export class OllamaProvider implements ModelProvider {
       }
 
       let toolIndex = 0;
-      for await (const line of readLines(response.body)) {
+      for await (const line of readLines(response.body, requestSignal, () =>
+        timeouts.markActivity(),
+      )) {
         if (line.trim() === "") {
           continue;
         }
@@ -168,7 +182,9 @@ export class OllamaProvider implements ModelProvider {
         }
       }
     } catch (error) {
-      throw mapProviderFailure(error, callerSignal, requestSignal);
+      throw mapProviderFailure(error, callerSignal, requestSignal, timeouts.timeoutKind);
+    } finally {
+      timeouts.dispose();
     }
   }
 }
@@ -211,17 +227,22 @@ function parseToolArguments(value: string): unknown {
   }
 }
 
-async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string, void> {
+async function* readLines(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  onActivity: () => void,
+): AsyncGenerator<string, void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     while (true) {
-      const result = await reader.read();
+      const result = await readStreamChunk(reader, signal);
       if (result.done) {
         buffer += decoder.decode();
         break;
       }
+      onActivity();
       buffer += decoder.decode(result.value, { stream: true });
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
@@ -232,5 +253,23 @@ async function* readLines(body: ReadableStream<Uint8Array>): AsyncGenerator<stri
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted();
+  const abort = (): void => {
+    void reader.cancel(signal.reason).catch(() => undefined);
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    const result = await reader.read();
+    signal.throwIfAborted();
+    return result;
+  } finally {
+    signal.removeEventListener("abort", abort);
   }
 }

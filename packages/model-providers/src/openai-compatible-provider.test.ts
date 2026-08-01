@@ -116,4 +116,132 @@ describe("OpenAICompatibleProvider", () => {
       ],
     });
   });
+
+  it("does not treat the connection timeout as a total streaming deadline", async () => {
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://example.test/v1",
+      connectionTimeoutMs: 20,
+      streamIdleTimeoutMs: 70,
+      overallTimeoutMs: 300,
+      fetchImplementation: async () =>
+        new Response(
+          timedStream([
+            { afterMs: 0, text: 'data: {"choices":[{"delta":{"content":"第一段"}}]}\n\n' },
+            { afterMs: 40, text: 'data: {"choices":[{"delta":{"content":"第二段"}}]}\n\n' },
+            { afterMs: 80, text: "data: [DONE]\n\n", close: true },
+          ]),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+    });
+
+    const events = await collectEvents(provider);
+    expect(
+      events.filter((event) => event.type === "text-delta").map((event) => event.text),
+    ).toEqual(["第一段", "第二段"]);
+  });
+
+  it("distinguishes connection, stream-idle and overall generation timeouts", async () => {
+    const connectionProvider = new OpenAICompatibleProvider({
+      baseUrl: "https://example.test/v1",
+      connectionTimeoutMs: 25,
+      streamIdleTimeoutMs: 200,
+      overallTimeoutMs: 300,
+      fetchImplementation: async (_input, init) => await waitUntilAborted(init?.signal),
+    });
+    await expect(collectEvents(connectionProvider)).rejects.toMatchObject({
+      code: "PROVIDER_TIMEOUT",
+      details: { timeoutKind: "connection" },
+    });
+
+    const idleProvider = new OpenAICompatibleProvider({
+      baseUrl: "https://example.test/v1",
+      connectionTimeoutMs: 100,
+      streamIdleTimeoutMs: 30,
+      overallTimeoutMs: 300,
+      fetchImplementation: async () =>
+        new Response(
+          timedStream([
+            { afterMs: 0, text: 'data: {"choices":[{"delta":{"content":"开始"}}]}\n\n' },
+          ]),
+        ),
+    });
+    await expect(collectEvents(idleProvider)).rejects.toMatchObject({
+      code: "PROVIDER_TIMEOUT",
+      details: { timeoutKind: "stream_idle" },
+    });
+
+    const overallProvider = new OpenAICompatibleProvider({
+      baseUrl: "https://example.test/v1",
+      connectionTimeoutMs: 100,
+      streamIdleTimeoutMs: 50,
+      overallTimeoutMs: 80,
+      fetchImplementation: async () => new Response(keepAliveStream(15)),
+    });
+    await expect(collectEvents(overallProvider)).rejects.toMatchObject({
+      code: "PROVIDER_TIMEOUT",
+      details: { timeoutKind: "overall" },
+    });
+  });
 });
+
+async function collectEvents(provider: OpenAICompatibleProvider) {
+  const events = [];
+  for await (const event of provider.stream(
+    { model: "test-model", messages: [{ role: "user", content: "测试" }] },
+    new AbortController().signal,
+  )) {
+    events.push(event);
+  }
+  return events;
+}
+
+function timedStream(
+  chunks: readonly { afterMs: number; text: string; close?: boolean }[],
+): ReadableStream<Uint8Array> {
+  const timers: NodeJS.Timeout[] = [];
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) {
+        timers.push(
+          setTimeout(() => {
+            controller.enqueue(new TextEncoder().encode(chunk.text));
+            if (chunk.close === true) {
+              controller.close();
+            }
+          }, chunk.afterMs),
+        );
+      }
+    },
+    cancel() {
+      timers.forEach(clearTimeout);
+    },
+  });
+}
+
+function keepAliveStream(intervalMs: number): ReadableStream<Uint8Array> {
+  let timer: NodeJS.Timeout;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setInterval(
+        () => controller.enqueue(new TextEncoder().encode(": keep-alive\n\n")),
+        intervalMs,
+      );
+    },
+    cancel() {
+      clearInterval(timer);
+    },
+  });
+}
+
+async function waitUntilAborted(signal: AbortSignal | null | undefined): Promise<Response> {
+  if (signal === null || signal === undefined) {
+    return await new Promise<Response>(() => undefined);
+  }
+  return await new Promise<Response>((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}

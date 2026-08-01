@@ -13,6 +13,9 @@ export const helpText = `CleoDoc v0.1 CLI
     --provider <id>       默认 openai-compatible
     --base-url <url>      覆盖 Provider 地址
     --api-key-env <name>  API Key 环境变量名，默认 OPENAI_API_KEY
+    --connect-timeout-ms <ms>     连接/首响应超时，默认 60000
+    --stream-idle-timeout-ms <ms> 流连续无数据超时，默认 120000
+    --generation-timeout-ms <ms>  单轮生成总时限，默认 1200000
     --conversation <id>   继续指定对话
     --new                 不恢复最近对话，开始新对话
     --prompt <text>       单轮非交互调用
@@ -49,5 +52,8 @@ export const helpText = `CleoDoc v0.1 CLI
   OPENAI_BASE_URL   OpenAI-compatible API 根地址
   OLLAMA_BASE_URL   Ollama 地址，默认 http://127.0.0.1:11434
   CLEODOC_MODEL     未提供 --model 时使用的模型
+  CLEODOC_LLM_CONNECT_TIMEOUT_MS      连接/首响应超时
+  CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS  流连续无数据超时
+  CLEODOC_LLM_OVERALL_TIMEOUT_MS      单轮生成总时限
   CLEODOC_HOME      CLI 状态目录；只保存当前项目路径，不保存密钥
 `;

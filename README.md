@@ -62,6 +62,28 @@ $env:CLEODOC_MODEL="你要使用的模型 ID"
 $env:OPENAI_BASE_URL="https://your-provider.example/v1"
 ```
 
+例如 DeepSeek：
+
+```powershell
+$env:OPENAI_BASE_URL="https://api.deepseek.com"
+$env:OPENAI_API_KEY="你的 DeepSeek API Key"
+$env:CLEODOC_MODEL="deepseek-chat"
+```
+
+流式请求采用三个独立超时：连接或首响应默认 60 秒、连续无流数据默认 120 秒、单轮生成总时限默认 20 分钟。收到响应后不会继续使用连接超时；每收到一个原始流数据块都会重置空闲超时。可以按网络和模型速度覆盖：
+
+```powershell
+$env:CLEODOC_LLM_CONNECT_TIMEOUT_MS="90000"
+$env:CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS="180000"
+$env:CLEODOC_LLM_OVERALL_TIMEOUT_MS="1800000"
+```
+
+也可以仅对一次命令指定：
+
+```powershell
+npm run cleo -- chat --connect-timeout-ms 90000 --stream-idle-timeout-ms 180000 --generation-timeout-ms 1800000
+```
+
 测试连接并开始交互：
 
 ```powershell
@@ -85,7 +107,7 @@ npm run cleo -- chat
 
 进入交互式聊天时会显示最近 5 条记录。输入 `/resume 1` 可以恢复列表中的第 1 条；输入 `/history` 会打开更多历史记录，在真实终端中使用上下键选择、按 Enter 恢复、按 `q` 返回聊天。使用 `/new` 开始新对话。
 
-API 超时只会终止本轮请求，不会退出聊天；本轮用户消息和此前记录已经写入项目，可以稍后继续尝试。
+API 超时只会终止本轮请求，不会退出聊天；CLI 会区分连接/首响应超时、响应流空闲、总生成时限和上游 HTTP 超时。本轮用户消息和此前记录已经写入项目，可以稍后继续尝试。
 
 也可以在聊天外查看全部历史：
 
