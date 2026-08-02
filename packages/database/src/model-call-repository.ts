@@ -20,7 +20,7 @@ interface ModelCallRow {
   completed_at: string | null;
 }
 
-export type CompactionModelCallPhase = "primary" | "segment" | "reduce" | "repair";
+export type CompactionModelCallPhase = "primary" | "segment" | "reduce";
 
 export class ModelCallRepository {
   constructor(private readonly projectDatabase: ProjectDatabase) {}

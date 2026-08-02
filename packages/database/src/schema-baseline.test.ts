@@ -67,6 +67,29 @@ describe("current database schema baseline", () => {
         expect.arrayContaining(["message_rowid", "reasoning_content", "model_call_id"]),
       );
       expect(getColumnNames(database, "conversation_message_fts")).toEqual(["content"]);
+      expect(
+        database.read(
+          (sqlite) =>
+            (
+              sqlite.prepare("PRAGMA table_info(messages)").all() as Array<{
+                name: string;
+                notnull: number;
+              }>
+            ).find((column) => column.name === "session_id")?.notnull,
+        ),
+      ).toBe(1);
+      expect(
+        database.read(
+          (sqlite) =>
+            (
+              sqlite
+                .prepare(
+                  "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'compaction_job_model_call_mapping'",
+                )
+                .get() as { sql: string }
+            ).sql,
+        ),
+      ).not.toContain("repair");
       expect(getColumnNames(database, "conversation_sessions")).not.toEqual(
         expect.arrayContaining([
           "project_instructions_path",

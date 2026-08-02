@@ -31,7 +31,7 @@ interface MessageRow {
   message_rowid: number;
   id: string;
   conversation_id: string;
-  session_id: string | null;
+  session_id: string;
   sequence: number;
   role: StoredMessage["role"];
   content: string;
@@ -65,7 +65,6 @@ export class ConversationRepository {
     projectId: string;
     providerId: string;
     model: string;
-    systemPrompt?: string;
     title?: string;
   }): Promise<ConversationRecord> {
     const id = randomUUID();
@@ -79,10 +78,6 @@ export class ConversationRepository {
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(id, input.projectId, input.providerId, input.model, input.title ?? null, now, now);
-
-      if (input.systemPrompt !== undefined) {
-        this.insertMessage(database, id, { role: "system", content: input.systemPrompt }, 0, now);
-      }
     });
 
     return {
@@ -158,7 +153,7 @@ export class ConversationRepository {
   async addMessage(
     conversationId: string,
     message: ChatMessage,
-    sessionId: string | null = null,
+    sessionId: string,
     modelCallId: string | null = null,
   ): Promise<StoredMessage> {
     const id = randomUUID();
@@ -274,6 +269,10 @@ export class ConversationRepository {
         );
 
       if (input.addAssistantMessage === true) {
+        const sessionId = input.sessionId;
+        if (sessionId === undefined) {
+          throw new AppError("VALIDATION_ERROR", "写入 Assistant 消息时必须指定 Session。");
+        }
         const sequenceRow = database
           .prepare(
             "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence FROM messages WHERE conversation_id = ?",
@@ -292,7 +291,7 @@ export class ConversationRepository {
           Number(sequenceRow.next_sequence),
           completedAt,
           undefined,
-          input.sessionId ?? null,
+          sessionId,
           input.modelCallId ?? null,
         );
         database
@@ -348,10 +347,11 @@ export class ConversationRepository {
     message: ChatMessage,
     sequence: number,
     createdAt: string,
-    id = randomUUID(),
-    sessionId: string | null = null,
+    id: string | undefined,
+    sessionId: string,
     modelCallId: string | null = null,
   ): number {
+    const messageId = id ?? randomUUID();
     const result = database
       .prepare(
         `INSERT INTO messages
@@ -360,7 +360,7 @@ export class ConversationRepository {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
-        id,
+        messageId,
         conversationId,
         sequence,
         message.role,

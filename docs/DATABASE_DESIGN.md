@@ -162,7 +162,7 @@ PRAGMA busy_timeout = 5000;
 | `tool_call_id` | TEXT | 可空 | Tool Result 对应的模型 Tool Call ID；不是数据库外键 |
 | `created_at` | TEXT | NOT NULL | 消息创建时间 |
 | `tool_calls_json` | TEXT | 可空 | Assistant 消息发起的 Tool Call 列表 JSON |
-| `session_id` | TEXT | 可空、外键 | 所属内部 Session；删除 Session 时级联删除消息 |
+| `session_id` | TEXT | NOT NULL、外键 | 所属内部 Session；删除 Session 时级联删除消息 |
 | `model_call_id` | TEXT | 可空、外键、UNIQUE | 直接产生该 Assistant Message 的 ModelCall；User/System/Tool Message 为空 |
 
 约束：
@@ -171,7 +171,7 @@ PRAGMA busy_timeout = 5000;
 UNIQUE(conversation_id, sequence)
 ```
 
-`session_id` 当前仍保持可空，以兼容 Repository 的非 Session 系统消息入口；正常聊天流程会为消息指定 Session。Message 完成后一次性插入，Repository 不提供修改方法，数据库 `messages_immutable_update` Trigger 也会拒绝任何 UPDATE。纠正历史只能追加新 Message。
+所有 Message 都必须属于一个 Session；创建 Conversation 不再产生无 Session 的 System Message，系统提示词由 `conversation_sessions.system_prompt_snapshot` 保存。Message 完成后一次性插入，Repository 不提供修改方法，数据库 `messages_immutable_update` Trigger 也会拒绝任何 UPDATE。纠正历史只能追加新 Message。
 
 ### 6.5 `generations`
 
@@ -377,7 +377,7 @@ UNIQUE(generation_id, ordinal)
 | `compaction_job_id` | TEXT | NOT NULL、外键 | 关联 `compaction_jobs.id`；删除 Job 时级联删除 |
 | `model_call_id` | TEXT | NOT NULL、外键、UNIQUE | 关联 `model_calls.id`；删除 ModelCall 时级联删除 |
 | `ordinal` | INTEGER | NOT NULL、`> 0` | 本次 CompactionJob 内的调用顺序，从 1 开始 |
-| `phase` | TEXT | NOT NULL、CHECK | `primary`、`segment`、`reduce` 或 `repair`；当前运行路径使用前三种，`repair` 为 Schema 兼容值 |
+| `phase` | TEXT | NOT NULL、CHECK | `primary`、`segment` 或 `reduce` |
 | `segment_index` | INTEGER | 可空、非负 | 分段调用的零基序号；其他阶段为空 |
 
 约束：

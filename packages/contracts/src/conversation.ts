@@ -18,7 +18,7 @@ export interface StoredMessage extends ChatMessage {
   messageRowid: number;
   id: string;
   conversationId: string;
-  sessionId: string | null;
+  sessionId: string;
   modelCallId: string | null;
   sequence: number;
   createdAt: string;

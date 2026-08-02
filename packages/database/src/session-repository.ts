@@ -55,7 +55,7 @@ interface HistoryRow {
   message_rowid: number;
   id: string;
   conversation_id: string;
-  session_id: string | null;
+  session_id: string;
   sequence: number;
   role: StoredMessage["role"];
   content: string;
@@ -85,17 +85,7 @@ export class SessionRepository {
     systemPrompt: string;
   }): Promise<ConversationSession> {
     const current = this.getCurrentSession(input.conversationId);
-    if (current !== null) {
-      if (current.systemPromptSnapshot === "") {
-        await this.projectDatabase.write((database) => {
-          database
-            .prepare("UPDATE conversation_sessions SET system_prompt_snapshot = ? WHERE id = ?")
-            .run(input.systemPrompt, current.id);
-        });
-        return this.getSession(current.id)!;
-      }
-      return current;
-    }
+    if (current !== null) return current;
 
     const id = randomUUID();
     const now = new Date().toISOString();

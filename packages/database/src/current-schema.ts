@@ -149,7 +149,7 @@ export const CURRENT_SCHEMA_SQL = `
     compaction_job_id TEXT NOT NULL REFERENCES compaction_jobs(id) ON DELETE CASCADE,
     model_call_id TEXT NOT NULL UNIQUE REFERENCES model_calls(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL CHECK (ordinal > 0),
-    phase TEXT NOT NULL CHECK (phase IN ('primary', 'segment', 'reduce', 'repair')),
+    phase TEXT NOT NULL CHECK (phase IN ('primary', 'segment', 'reduce')),
     segment_index INTEGER CHECK (segment_index IS NULL OR segment_index >= 0),
     PRIMARY KEY (compaction_job_id, model_call_id),
     UNIQUE (compaction_job_id, ordinal)
@@ -167,7 +167,7 @@ export const CURRENT_SCHEMA_SQL = `
     tool_call_id TEXT,
     tool_calls_json TEXT,
     created_at TEXT NOT NULL,
-    session_id TEXT REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
     model_call_id TEXT UNIQUE REFERENCES model_calls(id),
     UNIQUE (conversation_id, sequence)
   );
