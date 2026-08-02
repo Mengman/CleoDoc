@@ -849,7 +849,7 @@ function printSession(details: ReturnType<ChatService["getSessionDetails"]>): vo
     `消息范围：${details.firstMessageId ?? "无"} → ${details.lastMessageId ?? "无"}（${details.messageCount} 条）\n`,
   );
   if (details.summary !== null) {
-    output.write(`累计摘要：${details.summary.content.handoffBrief}\n`);
+    output.write(`累计摘要：${details.summary.summary}\n`);
   }
 }
 

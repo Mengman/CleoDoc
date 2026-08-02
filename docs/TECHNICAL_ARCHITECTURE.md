@@ -1,7 +1,7 @@
 # CleoDoc 技术架构设计（v0.1 CLI / v0.2 Desktop）
 
 > 状态：架构基线  
-> 日期：2026-08-01  
+> 日期：2026-08-02
 > 对应产品需求：[PRD.md](./PRD.md)  
 > 开发计划：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)  
 > 适用范围：CleoDoc v0.1 CLI 核心与 v0.2 Electron 桌面应用
@@ -259,7 +259,39 @@ MyNovel.cleo/
 
 个人资料库存放于应用数据目录下的 `personal-library.sqlite`。项目必须将用户明确链接的个人资料复制为带哈希的快照后再参与项目检索。
 
+### 6.3 Project、Conversation 与 Session 归属模型
+
+Project 是物理存储、数据隔离和生命周期的最外层边界。一个 Project 对应一个项目目录和一个 `.cleo/project.sqlite`，目录内包含项目配置、作品正文、资料和未来的 Git 数据。Conversation 与 Session 都不能脱离 Project 独立存在。
+
+```mermaid
+erDiagram
+    PROJECT ||--o{ CONVERSATION : contains
+    CONVERSATION ||--|{ SESSION : segmented_into
+    SESSION ||--o{ MESSAGE : contains
+```
+
+关系约束：
+
+- 一个 Project 可以拥有多个 Conversation，一个 Conversation 只属于一个 Project。
+- 一个 Conversation 可以拥有多个 Session，一个 Session 只属于一个 Conversation。
+- Conversation 创建时产生第一个 Session；上下文压缩成功后关闭当前 Session，并在同一 Conversation 中创建下一个 Session。
+- 每个 Conversation 最多有一个 `active` 或 `compacting` Session。
+- `messages.sequence` 在整个 Conversation 内单调递增，不因创建新 Session 重新计数。
+
+语义边界：
+
+- Project 保存跨 Conversation 共享的长期资产，包括当前项目指令、正文、资料、批准设定和其他项目级知识。
+- Conversation 保存具有独立工作目标的用户可见对话和工作记忆。
+- Session 只是 Conversation 的上下文窗口分段，不是新的用户任务或新的对话入口。
+- 新 Session 通过累计摘要保持原 Conversation 的语义连续性。
+- 新 Conversation 不继承其他 Conversation 的消息或 Session 摘要，但可以读取同一 Project 的项目级资产。
+- 用户继续同一任务时应恢复原 Conversation；只有在主动切换任务、隔离实验方案或重置工作记忆时才创建新 Conversation。
+
+当前 `conversation_message_fts` 的查询范围保持为指定 Conversation 的已关闭 Session，不能跨 Conversation 或 Project。架构保留未来在同一 Project 内按需查询其他 Conversation 历史的能力，但具体 Tool、触发条件、检索范围、权限、Schema 和权威规则均待后续评审，当前不提前实现跨 Conversation 查询。
+
 ## 7. SQLite 架构
+
+当前 migration v5 已落地的表、字段、索引、FTS 影子表、实例审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
 
 ### 7.1 数据库拓扑
 
@@ -598,9 +630,9 @@ interface DocumentDiff {
 
 ## 12. Agent 运行时
 
-会话 Session、自动上下文压缩、项目 AGENTS 快照和压缩前历史回查的详细方案见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。
+Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。migration v4 中的项目 AGENTS 文件快照属于当前实现，将由 [数据库设计](./DATABASE_DESIGN.md#16-已确认的下一版设计数据库原生项目指令) 中已经确认的数据库原生项目指令替代。
 
-v0.1 已通过 SQLite migration v4 落地 `conversation_sessions`、`session_summaries`、`compaction_jobs`、`messages.session_id` 和 `conversation_message_fts`。`ChatService` 只组装当前 active Session；`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v6` 会在普通压缩、分段归并和一次性修复请求中发送由公共 Zod Schema 自动生成的完整 JSON Schema，并要求所有必填字段出现、空数组显式返回 `[]`、禁止额外字段；同时将领域层的 `responseFormat: { type: "json_object" }` 和 `thinking: { type: "disabled" }` 映射为 OpenAI-compatible 的 `response_format`、`thinking`，或 Ollama 的 `format: "json"`、`think: false`。压缩请求不设置 Provider 输出 Token 硬上限，`summaryTargetTokens` 只作为 Prompt 软目标与本地分段依据；普通主笔调用仍使用自身配置，也不覆盖模型的思考模式。修复请求同时保留原始输入和允许引用的消息 ID。通过校验后，服务在一个事务中保存摘要、关闭旧 Session 和创建新 Session；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+v0.1 已通过 SQLite migration v5 落地 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、`messages.session_id` 和 `conversation_message_fts`。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`，显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 硬上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。migration v5 会确定性转换旧 v6 结构化摘要，无法解析的行保留兼容文本，不调用 LLM。
 
 模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，约在当前 Payload 391,732 Token 时启动压缩，在 476,632 Token 时阻止继续提交；压缩请求的安全 Payload 上限约为 565,424 Token，最终累计摘要软目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 
@@ -880,6 +912,8 @@ v0.2 在此基础上增加：
 - FTS5、向量、精确字段和关系图四路混合召回。
 - v0.1 使用精确向量检索，保留 VectorIndex 替换接口。
 - Agent 使用可持久化状态机和 ChangeSet 审批。
+- 一个 Project 可以包含多个 Conversation，一个 Conversation 可以因上下文压缩包含多个 Session。
+- 新 Session 延续当前 Conversation；新 Conversation 不继承其他 Conversation 的消息或摘要，但共享同一 Project 的长期资产。
 
 ### 20.2 延后
 
@@ -891,6 +925,7 @@ v0.2 在此基础上增加：
 - 应用级全项目加密。
 - 按句子接受或恢复 Diff。
 - 自动重写 Git 历史的永久清除。
+- 同一 Project 内跨 Conversation 历史查询的 Tool、触发条件、检索范围、权限、Schema 和权威规则。
 
 ## 21. 外部参考
 

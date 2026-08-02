@@ -1,3 +1,4 @@
+import { copyFileSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
@@ -124,15 +125,16 @@ export class ProjectDatabase {
     const insert = this.database.prepare(
       "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
     );
+    const pending = migrations.filter((migration) => !applied.has(migration.version));
+    if (applied.size > 0 && pending.length > 0) {
+      this.backupBeforeMigration(pending[0]!.version);
+    }
 
-    for (const migration of migrations) {
-      if (applied.has(migration.version)) {
-        continue;
-      }
-
+    for (const migration of pending) {
       this.database.exec("BEGIN IMMEDIATE");
       try {
-        this.database.exec(migration.sql);
+        if (migration.sql !== "") this.database.exec(migration.sql);
+        migration.apply?.(this.database);
         insert.run(migration.version as SQLInputValue, new Date().toISOString());
         this.database.exec("COMMIT");
       } catch (error) {
@@ -140,6 +142,18 @@ export class ProjectDatabase {
         throw error;
       }
     }
+  }
+
+  private backupBeforeMigration(targetVersion: number): void {
+    this.database.exec("PRAGMA wal_checkpoint(FULL)");
+    const backupDirectory = path.join(path.dirname(this.filePath), "backups");
+    mkdirSync(backupDirectory, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const destination = path.join(
+      backupDirectory,
+      `pre-migration-v${targetVersion}-${timestamp}.sqlite`,
+    );
+    copyFileSync(this.filePath, destination, 0);
   }
 
   private assertOpen(): void {

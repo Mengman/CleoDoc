@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import type {
   ConversationSession,
   ModelUsage,
-  SessionCompactionResult,
   SessionSummaryRecord,
   SessionTrigger,
   StoredMessage,
@@ -34,13 +33,26 @@ interface SummaryRow {
   id: string;
   conversation_id: string;
   source_session_id: string;
-  content_json: string;
-  handoff_text: string;
+  summary: string;
+  first_message_id: string;
+  last_message_id: string;
+  message_count: number;
   prompt_version: string;
   provider_id: string;
   model: string;
   usage_json: string | null;
   created_at: string;
+}
+
+interface CompactionJobCompletionRow {
+  conversation_id: string;
+  source_session_id: string;
+  prompt_version: string;
+  provider_id: string;
+  model: string;
+  first_message_id: string;
+  last_message_id: string;
+  message_count: number;
 }
 
 interface HistoryRow {
@@ -188,6 +200,29 @@ export class SessionRepository {
     return row === undefined ? null : mapSummary(row);
   }
 
+  getSummary(id: string): SessionSummaryRecord | null {
+    const row = this.projectDatabase.read(
+      (database) =>
+        database.prepare("SELECT * FROM session_summaries WHERE id = ?").get(id) as
+          SummaryRow | undefined,
+    );
+    return row === undefined ? null : mapSummary(row);
+  }
+
+  getInheritedSummary(session: ConversationSession): SessionSummaryRecord | null {
+    if (session.inheritedSummaryId === null) return null;
+    const summary = this.getSummary(session.inheritedSummaryId);
+    if (summary === null || summary.conversationId !== session.conversationId) {
+      throw new AppError("DATABASE_ERROR", "当前 Session 继承的摘要不存在或归属不匹配。", {
+        details: {
+          sessionId: session.id,
+          inheritedSummaryId: session.inheritedSummaryId,
+        },
+      });
+    }
+    return summary;
+  }
+
   getSummaryForSourceSession(sessionId: string): SessionSummaryRecord | null {
     const row = this.projectDatabase.read(
       (database) =>
@@ -305,11 +340,7 @@ export class SessionRepository {
   async completeCompaction(input: {
     jobId: string;
     sourceSession: ConversationSession;
-    result: SessionCompactionResult;
-    handoffText: string;
-    promptVersion: string;
-    providerId: string;
-    model: string;
+    summary: string;
     usage?: ModelUsage;
     trigger: SessionTrigger;
     instructions: ProjectInstructionSnapshot;
@@ -319,28 +350,40 @@ export class SessionRepository {
     const newSessionId = randomUUID();
     const now = new Date().toISOString();
     await this.projectDatabase.transaction((database) => {
+      const job = database
+        .prepare(
+          `SELECT conversation_id, source_session_id, prompt_version, provider_id, model,
+                  first_message_id, last_message_id, message_count
+           FROM compaction_jobs WHERE id = ?`,
+        )
+        .get(input.jobId) as CompactionJobCompletionRow | undefined;
+      if (
+        job === undefined ||
+        job.conversation_id !== input.sourceSession.conversationId ||
+        job.source_session_id !== input.sourceSession.id
+      ) {
+        throw new AppError("VALIDATION_ERROR", "压缩任务与来源 Session 不匹配。");
+      }
+
       database
         .prepare(
           `INSERT INTO session_summaries
-           (id, conversation_id, source_session_id, content_json, handoff_text, prompt_version,
-            provider_id, model, usage_json, parameters_json, validation_status,
-            first_message_id, last_message_id, message_count, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?)`,
+           (id, conversation_id, source_session_id, summary, first_message_id, last_message_id,
+            message_count, prompt_version, provider_id, model, usage_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           summaryId,
-          input.sourceSession.conversationId,
-          input.sourceSession.id,
-          JSON.stringify(input.result),
-          input.handoffText,
-          input.promptVersion,
-          input.providerId,
-          input.model,
+          job.conversation_id,
+          job.source_session_id,
+          input.summary,
+          job.first_message_id,
+          job.last_message_id,
+          Number(job.message_count),
+          job.prompt_version,
+          job.provider_id,
+          job.model,
           input.usage === undefined ? null : JSON.stringify(input.usage),
-          JSON.stringify({ temperature: 0.1 }),
-          input.result.coveredMessages.firstMessageId,
-          input.result.coveredMessages.lastMessageId,
-          input.result.coveredMessages.count,
           now,
         );
       database
@@ -523,14 +566,36 @@ function mapSummary(row: SummaryRow): SessionSummaryRecord {
     id: row.id,
     conversationId: row.conversation_id,
     sourceSessionId: row.source_session_id,
-    content: JSON.parse(row.content_json) as SessionCompactionResult,
-    handoffText: row.handoff_text,
+    summary: row.summary,
+    firstMessageId: row.first_message_id,
+    lastMessageId: row.last_message_id,
+    messageCount: Number(row.message_count),
     promptVersion: row.prompt_version,
     providerId: row.provider_id,
     model: row.model,
-    usageJson: row.usage_json,
+    usage: parseModelUsage(row.usage_json),
     createdAt: row.created_at,
   };
+}
+
+function parseModelUsage(value: string | null): ModelUsage | null {
+  if (value === null) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const keys = ["inputTokens", "outputTokens", "reasoningTokens", "totalTokens"] as const;
+    const usage: ModelUsage = {};
+    for (const key of keys) {
+      const count = record[key];
+      if (count === undefined) continue;
+      if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
+      usage[key] = count;
+    }
+    return usage;
+  } catch {
+    return null;
+  }
 }
 
 function mapHistoryMessage(row: HistoryRow): StoredMessage {

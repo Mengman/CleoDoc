@@ -94,14 +94,40 @@ CleoDoc 是一款面向普通中文用户的文档原生 AI Agent 应用。用�
 - 用户直接修改的内容生成高优先级候选事实，等待批量确认。
 - 阶段批准自动形成修改记录；用户可以进一步将其命名为正式版本。
 
-### 3.3 会话上下文管理
+### 3.3 Project、Conversation 与 Session
 
-- 一个用户可见的长期 Conversation 由多个有限上下文 Session 组成，压缩不会打断聊天历史或改变恢复入口。
-- 在完整 Agent 回合结束后，系统根据模型 Token 预算自动生成可追溯的累计交接摘要，并开启干净 Session。
-- 压缩使用独立 LLM 调用；摘要不是作品 Canon，重要内容必须引用原始消息。
+三个概念的产品语义固定为：
+
+- **Project**：一项独立写作工程，物理上对应一个项目目录。目录包含项目配置、独立 SQLite 数据库、正文、资料，以及未来由 CleoDoc 管理的 Git 数据。
+- **Conversation**：Project 内一次用户可见、具有独立工作目标的对话。一个 Project 可以包含多个 Conversation；项目创建时默认建立一个主创对话。
+- **Session**：Conversation 内一次连续的有限上下文。一个 Conversation 可以包含多个 Session；触发上下文压缩后关闭当前 Session，并在同一 Conversation 中开启新 Session。
+
+```text
+Project 1 ── N Conversation 1 ── N Session 1 ── N Message
+```
+
+新 Session 是技术上的上下文切换，继续同一工作目标并继承累计摘要；新 Conversation 是用户意图上的任务切换，不继承其他 Conversation 的消息或摘要。上下文长度增长本身只触发新 Session，不构成新建 Conversation 的理由。
+
+用户通常继续使用项目默认的主创对话。在开始独立资料研究、单独评审某一卷、尝试替代故事方案、放弃已有错误假设或希望以干净工作记忆处理新任务时，可以新建 Conversation。
+
+同一 Project 下的所有 Conversation 共享：
+
+- 当前项目指令。
+- 正文、大纲和其他项目文档。
+- 项目资料。
+- 已批准设定、事实及其他项目级知识。
+
+Conversation 的原始消息、Session 摘要和临时讨论结论默认相互隔离。需要长期供多个 Conversation 使用的决定必须保存到 Project 的正文、设定、资料或项目指令中，不能只依赖聊天历史。
+
+产品保留“新 Conversation 按需查询同一 Project 内其他 Conversation 历史”的未来能力，但具体触发方式、Tool、检索范围、权限、数据结构和结果权威等级尚未确定，本阶段不纳入实现要求。当前历史查询只服务于同一个 Conversation 的已关闭 Session，禁止跨项目访问。
+
+会话上下文管理规则：
+
+- 在完整 Agent 回合结束后，系统根据模型 Token 预算自动生成累计交接摘要，并开启干净 Session。
+- 压缩使用独立 LLM 调用；摘要不是作品 Canon，重要内容必须能够回查原始消息。
 - 压缩期间用户可以继续编辑下一条消息，但 Enter 和发送按钮不能提交；提前提交不清空、不排队、不自动发送。
-- 新 Session 按 CleoDoc System Prompt、项目根目录 AGENTS 指令、累计摘要、当前消息的顺序组装上下文。
-- Agent 可以通过受限历史查询 Tool 搜索和分段读取压缩前的具体对话，但不能跨 Conversation 或项目访问。
+- 新 Session 按 CleoDoc System Prompt、数据库中的当前项目指令、累计摘要、当前消息的顺序组装上下文。
+- Agent 可以通过受限历史查询 Tool 搜索和分段读取当前 Conversation 中压缩前的具体对话。
 - 压缩失败、取消或应用退出不得丢失旧 Session、原始消息或用户草稿。
 
 详细实现见 [会话上下文压缩与历史回查技术设计](./SESSION_COMPACTION_DESIGN.md)。

@@ -179,6 +179,7 @@ npm run cleo -- material remove <material-id>
 
 - [产品需求](./docs/PRD.md)
 - [技术架构](./docs/TECHNICAL_ARCHITECTURE.md)
+- [数据库设计与当前实现](./docs/DATABASE_DESIGN.md)
 - [开发计划](./docs/DEVELOPMENT_PLAN.md)
 - [会话上下文压缩设计](./docs/SESSION_COMPACTION_DESIGN.md)
 - [编码 Agent 指南](./AGENTS.md)

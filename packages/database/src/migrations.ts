@@ -1,6 +1,11 @@
+import type { DatabaseSync } from "node:sqlite";
+
+import { legacySessionCompactionResultSchema } from "../../contracts/src/index.js";
+
 export interface Migration {
   version: number;
   sql: string;
+  apply?: (database: DatabaseSync) => void;
 }
 
 export const migrations: readonly Migration[] = [
@@ -194,4 +199,192 @@ export const migrations: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 5,
+    sql: "",
+    apply: migrateSessionSummariesToMarkdown,
+  },
 ];
+
+interface LegacySummaryRow {
+  id: string;
+  conversation_id: string;
+  source_session_id: string;
+  content_json: string;
+  handoff_text: string;
+  prompt_version: string;
+  provider_id: string;
+  model: string;
+  usage_json: string | null;
+  first_message_id: string;
+  last_message_id: string;
+  message_count: number;
+  created_at: string;
+}
+
+function migrateSessionSummariesToMarkdown(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE session_summaries_v5 (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      source_session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+      summary TEXT NOT NULL,
+      first_message_id TEXT NOT NULL,
+      last_message_id TEXT NOT NULL,
+      message_count INTEGER NOT NULL CHECK (message_count >= 0),
+      prompt_version TEXT NOT NULL,
+      provider_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      usage_json TEXT,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  const legacyRows = database
+    .prepare("SELECT * FROM session_summaries ORDER BY rowid")
+    .all() as unknown as LegacySummaryRow[];
+  const insert = database.prepare(`
+    INSERT INTO session_summaries_v5
+      (id, conversation_id, source_session_id, summary, first_message_id, last_message_id,
+       message_count, prompt_version, provider_id, model, usage_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const row of legacyRows) {
+    insert.run(
+      row.id,
+      row.conversation_id,
+      row.source_session_id,
+      renderLegacySummary(row.content_json, row.handoff_text, row.prompt_version),
+      row.first_message_id,
+      row.last_message_id,
+      Number(row.message_count),
+      row.prompt_version,
+      row.provider_id,
+      row.model,
+      row.usage_json,
+      row.created_at,
+    );
+  }
+
+  const migratedCount = Number(
+    (
+      database.prepare("SELECT COUNT(*) AS count FROM session_summaries_v5").get() as {
+        count: number;
+      }
+    ).count,
+  );
+  if (migratedCount !== legacyRows.length) {
+    throw new Error(
+      `session_summaries migration row count mismatch: ${legacyRows.length} -> ${migratedCount}`,
+    );
+  }
+
+  const foreignKeyFailures = database
+    .prepare("PRAGMA foreign_key_check(session_summaries_v5)")
+    .all();
+  if (foreignKeyFailures.length > 0) {
+    throw new Error("session_summaries migration produced invalid foreign keys");
+  }
+
+  database.exec(`
+    DROP TABLE session_summaries;
+    ALTER TABLE session_summaries_v5 RENAME TO session_summaries;
+    CREATE INDEX session_summaries_conversation_created
+      ON session_summaries(conversation_id, created_at DESC);
+    CREATE INDEX session_summaries_source_session
+      ON session_summaries(source_session_id);
+  `);
+}
+
+function renderLegacySummary(
+  contentJson: string,
+  handoffText: string,
+  promptVersion: string,
+): string {
+  if (promptVersion === "session-compaction-v7" && handoffText.trim() !== "") {
+    return handoffText;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contentJson);
+  } catch {
+    return compatibilitySummary(contentJson, handoffText);
+  }
+
+  const checked = legacySessionCompactionResultSchema.safeParse(parsed);
+  if (!checked.success) return compatibilitySummary(contentJson, handoffText);
+  const legacy = checked.data;
+  const sections: string[] = [];
+
+  appendTextSection(sections, "交接摘要", legacy.handoffBrief);
+  appendTextSection(sections, "当前目标", legacy.conversationObjective);
+  appendItemSection(sections, "已确认决定", legacy.userDecisions);
+  appendItemSection(sections, "当前成果", legacy.acceptedResults);
+  appendItemSection(sections, "已拒绝方向", legacy.rejectedDirections);
+  appendItemSection(sections, "AI 建议（未确认）", legacy.aiSuggestions);
+  appendItemSection(sections, "约束与注意事项", legacy.constraints);
+  appendItemSection(sections, "未解决问题", legacy.unresolvedQuestions);
+  appendItemSection(sections, "下一步", legacy.pendingTasks);
+
+  const projectChanges = legacy.projectChanges.map(
+    (item) =>
+      `- ${item.path} [${item.action}]：${item.description}${
+        item.contentHash === undefined ? "" : `（内容哈希：${item.contentHash}）`
+      }${sourceSuffix(item.sourceMessageIds)}`,
+  );
+  appendRenderedSection(sections, "项目文件变更", projectChanges);
+
+  const relevantDocuments = legacy.relevantDocuments.map(
+    (item) => `- ${item.path}：${item.description}${sourceSuffix(item.sourceMessageIds)}`,
+  );
+  appendRenderedSection(sections, "相关文档", relevantDocuments);
+
+  const conflicts = legacy.knownConflicts.map(
+    (item) => `- ${item.description}${sourceSuffix(item.sourceMessageIds)}`,
+  );
+  appendRenderedSection(sections, "风险与冲突", conflicts);
+
+  const lookupHints = legacy.detailLookupHints.map(
+    (item) =>
+      `- ${item.topic}；建议查询：${item.suggestedQuery}${sourceSuffix(item.sourceMessageIds)}`,
+  );
+  appendRenderedSection(sections, "历史回查提示", lookupHints);
+
+  return sections.length > 0
+    ? sections.join("\n\n")
+    : compatibilitySummary(contentJson, handoffText);
+}
+
+function compatibilitySummary(contentJson: string, handoffText: string): string {
+  return handoffText.trim() === "" ? contentJson : handoffText;
+}
+
+function appendTextSection(sections: string[], heading: string, content: string): void {
+  if (content.trim() !== "") sections.push(`# ${heading}\n\n${content.trim()}`);
+}
+
+function appendItemSection(
+  sections: string[],
+  heading: string,
+  items: readonly { text: string; sourceMessageIds: readonly string[] }[],
+): void {
+  appendRenderedSection(
+    sections,
+    heading,
+    items.map((item) => `- ${item.text}${sourceSuffix(item.sourceMessageIds)}`),
+  );
+}
+
+function appendRenderedSection(
+  sections: string[],
+  heading: string,
+  items: readonly string[],
+): void {
+  if (items.length > 0) sections.push(`# ${heading}\n\n${items.join("\n")}`);
+}
+
+function sourceSuffix(sourceMessageIds: readonly string[]): string {
+  return sourceMessageIds.length === 0 ? "" : `（来源消息：${sourceMessageIds.join("、")}）`;
+}

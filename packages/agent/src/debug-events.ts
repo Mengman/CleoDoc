@@ -1,6 +1,6 @@
 import type { ModelProtocolEvent } from "../../contracts/src/index.js";
 
-export type LlmDebugOperation = "agent" | "compaction" | "compaction-repair";
+export type LlmDebugOperation = "agent" | "compaction" | "compaction-segment" | "compaction-reduce";
 
 export type LlmDebugEvent =
   | {
@@ -23,6 +23,17 @@ export type LlmDebugEvent =
       outputTokens: number | null;
       reasoningTokens: number | null;
       totalTokens: number | null;
+      finishReason: string | null;
+    }
+  | {
+      type: "llm-assembled-output";
+      operation: LlmDebugOperation;
+      round: number;
+      providerId: string;
+      model: string;
+      compactionJobId: string;
+      content: string;
+      characterCount: number;
       finishReason: string | null;
     }
   | {

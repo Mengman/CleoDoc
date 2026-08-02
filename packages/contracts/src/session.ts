@@ -1,12 +1,15 @@
 import { z } from "zod";
 
+import type { ModelUsage } from "./model.js";
+
 const sourceIds = z.array(z.string().min(1)).min(1).max(50);
 const summaryItemSchema = z.object({
   text: z.string().max(4_000),
   sourceMessageIds: sourceIds,
 });
 
-export const sessionCompactionResultSchema = z.object({
+/** Legacy migration-only schema for session-compaction-v4 through v6 rows. */
+export const legacySessionCompactionResultSchema = z.object({
   schemaVersion: z.literal(1),
   sourceSessionId: z.string().min(1),
   coveredMessages: z.object({
@@ -62,10 +65,6 @@ export const sessionCompactionResultSchema = z.object({
   handoffBrief: z.string().max(12_000),
 });
 
-export const sessionCompactionOutputJsonSchema = z.toJSONSchema(sessionCompactionResultSchema);
-
-export type SessionCompactionResult = z.infer<typeof sessionCompactionResultSchema>;
-
 export type SessionStatus = "active" | "compacting" | "closed";
 export type SessionTrigger = "conversation_started" | "automatic" | "manual";
 
@@ -92,12 +91,14 @@ export interface SessionSummaryRecord {
   id: string;
   conversationId: string;
   sourceSessionId: string;
-  content: SessionCompactionResult;
-  handoffText: string;
+  summary: string;
+  firstMessageId: string;
+  lastMessageId: string;
+  messageCount: number;
   promptVersion: string;
   providerId: string;
   model: string;
-  usageJson: string | null;
+  usage: ModelUsage | null;
   createdAt: string;
 }
 

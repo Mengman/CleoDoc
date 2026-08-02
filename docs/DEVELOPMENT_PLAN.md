@@ -1,7 +1,7 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.5 已完成，本地文档 Tool Loop 已提前交付
-> 日期：2026-08-01  
+> 状态：实施中；v0.1 步骤 1–5.5 已完成，本地文档 Tool Loop 已提前交付；步骤 5.6–5.7 待实施
+> 日期：2026-08-02
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
 
@@ -36,6 +36,8 @@ v0.1 的核心闭环是：
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
 | 5.5 会话上下文管理 | 已完成 | Session 压缩、AGENTS 快照、历史回查 Tool、分层压缩和可编辑草稿提交门 |
+| 5.6 Reasoning 流式体验与调用审计 | 待实施 | Reasoning 实时展示、持久化、DeepSeek Tool Loop 回传和逐次 ModelCall 审计 |
+| 5.7 数据库原生项目指令 | 待实施 | 追加式指令版本、恢复、受控 Tool、CLI 查看和移除 Session 文件快照依赖 |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
@@ -225,7 +227,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成。数据库 migration v4 会为旧 Conversation 创建 legacy Session；CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。数据库 migration v4 会为旧 Conversation 创建 legacy Session；migration v5 将累计摘要收敛为单一 Markdown `summary` 并确定性转换旧 v6 摘要。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。下文中的项目 AGENTS 快照是当前已实现现状，将由步骤 5.7 的数据库原生项目指令替代。
 
 工作内容：
 
@@ -239,11 +241,93 @@ cleo material remove <material-id>
 验收：
 
 - 达到阈值后不再向主笔发送已关闭 Session 的全部原文。
-- 正常压缩只使用一次独立 LLM 调用，并输出经过 Schema 校验的累计摘要。
+- 正常压缩只使用一次独立 LLM 调用，并输出通过最低完整性校验的 Markdown 累计摘要。
 - 压缩期间用户草稿保持可编辑，完成后必须再次主动提交。
 - 新 Session 的 AGENTS 和摘要顺序稳定且可审计。
 - Agent 能按需找回压缩前的具体消息，且不能跨 Conversation 或项目查询。
 - 压缩失败、取消或进程退出不会丢失消息和草稿。
+
+### 步骤 5.6：Reasoning 流式体验与模型调用审计
+
+数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#15-已确认的下一版设计reasoning-与模型调用审计)
+
+实施状态：待实施。本步骤解决 Thinking 模型在 Reasoning 阶段长时间没有可见输出的问题，并保证 DeepSeek 在 Tool Loop 中能够收到协议要求的上一轮完整 `reasoning_content`。
+
+工作内容：
+
+- 扩展 Provider 流事件，增加独立的 `reasoning-delta`，不得把 Reasoning 拼入最终 `content`。
+- OpenAI-compatible Provider 在流式响应中持续解析 `delta.reasoning_content`；Provider 未返回时保持为空。
+- CLI 收到第一个 Reasoning 片段后立即显示明确的“思考中”区域；进入 `content` 阶段后切换为“回答”，避免用户把模型思考时间误认为网络延迟。
+- 将 Provider 暴露的完整 Reasoning 保存到 Assistant Message 的 `reasoning_content`；最终回答继续保存到 `content`。
+- Assistant 发起 Tool Call 时，同时保存该轮 `reasoning_content`、`content` 和 `tool_calls_json`。
+- DeepSeek Tool Loop 在追加 Tool Result 并发起下一次模型请求时，带回上一轮 Assistant 消息的完整 `reasoning_content`。该行为由 Provider Adapter 处理，不由通用 Agent 逻辑硬编码 Provider 特例。
+- 非 Tool Loop 的普通历史上下文不默认重发 Reasoning；是否需要发送由 Provider 能力与协议决定。
+- Reasoning 不加入会话压缩输入、`session_summaries` 或 `conversation_message_fts`，也不通过 `/save` 写入作品文档。
+- 上下文预算在 Provider 确实需要重发 Reasoning 的 Tool Loop 请求中计入相应 Token，避免本地预算低估。
+- 建立逐次 `model_calls` 审计，并分别通过 Generation 与 CompactionJob 映射表记录 Tool Loop、分段、归并和修复调用；模型输出内容仍由业务表保存。
+
+CLI 交互示意：
+
+```text
+思考中：
+模型正在分析人物动机……
+
+回答：
+根据已有设定，下一章可以从……
+```
+
+这里展示的是 Provider 实际返回并允许暴露的 Reasoning。未启用 Thinking 或 Provider 不提供 Reasoning 时，CLI 直接显示“回答”，不显示空的思考区域。
+
+验收：
+
+- Reasoning 的首个流式片段到达后立即可见，不等待最终 `content` 才统一输出。
+- Reasoning 与最终回答在终端中有稳定、清晰的视觉边界，流式输出不会交叉或重复。
+- 普通回答、纯 Tool Call、Reasoning 后 Tool Call、Tool Result 后继续回答四类流式响应均可正确解析。
+- DeepSeek Tool Loop 的后续请求包含协议要求的完整 `reasoning_content`，并通过集成测试验证请求体。
+- 每次真实 LLM API 请求均产生独立 ModelCall；一个 Generation 或 CompactionJob 可以按顺序关联多次调用。
+- 重启 CLI 后仍可读取 Assistant Message 的 Reasoning；未返回 Reasoning 的历史消息保持兼容。
+- Reasoning 不会进入历史全文检索、会话摘要或保存的作品文档。
+- Provider 超时、流中断或解析失败时，已经接收的 Reasoning 可用于本地诊断，但不会被误当作最终生成内容保存。
+
+### 步骤 5.7：数据库原生项目指令
+
+数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#16-已确认的下一版设计数据库原生项目指令)
+
+实施状态：待实施。本步骤取消用户作品项目对 `AGENTS.md` 或 `agents.md` 的运行时依赖，将项目指令改为 SQLite 中唯一的项目级事实源。CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。
+
+工作内容：
+
+- 新增追加式 `project_instruction_revisions` 表；每个 Revision 保存修改后的完整指令、内容哈希和创建时间。
+- 当前项目指令由最大 Revision 确定，不增加项目指令主表、当前版本指针或 `project_id`。
+- 所有修改使用 `expected_revision` 做乐观并发检查；尾部追加、精确文本替换和全量替换最终都创建完整的新 Revision。
+- 恢复旧版本时，将旧内容复制为新 Revision，不删除或改写历史。
+- 提供 `read_project_instructions`、`append_project_instructions`、`replace_project_instruction_text` 和 `set_project_instructions` Tool。
+- LLM 发起的写操作展示 Diff 并要求用户明确批准；拒绝、冲突或进程中断不得改变当前 Revision。
+- 从 `conversation_sessions` 移除项目指令路径、快照、哈希和加载时间字段，不增加 Session 到项目指令 Revision 的替代关联。
+- 任何需要项目指令的主笔或 Agent 请求在上下文组装前读取数据库最新 Revision，并按 System Prompt、项目指令、累计摘要、当前消息的顺序注入。
+- 当前阶段不追踪 ModelCall 使用的具体项目指令 Revision；未来需要时使用独立映射表扩展。
+- 旧项目迁移先保留原字段和文件，比较当前 Session 快照与项目指令文件；存在差异时要求用户选择或合并，禁止静默覆盖。
+
+CLI 命令：
+
+```text
+/instructions
+/instructions history
+/instructions restore <revision>
+```
+
+验收：
+
+- CLI 可以显示当前完整项目指令、Revision、哈希和更新时间。
+- 查询、追加、精确文本替换和全量替换都生成完整且可恢复的新 Revision。
+- 恢复旧版本会新增 Revision，历史记录保持不变。
+- Tool 使用过期 Revision 写入时得到明确冲突，不会覆盖用户较新的修改。
+- LLM 修改项目指令必须经过用户批准；读取无需批准。
+- Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
+- 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
+- 项目文件被移动、删除或手工修改不会改变数据库中的当前项目指令。
+- 旧项目迁移时不同内容不会被静默丢弃，迁移失败不损坏现有 Session 或文件。
+- 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 冲突规则。
 
 ### 步骤 6：统一知识模型与 FTS5
 
@@ -409,6 +493,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 
 - 三栏布局。
 - 项目树、资料中心、正文阅读和主笔对话。
+- 提供独立的项目指令页面，从 SQLite 读取当前 Revision，并使用与 CLI 相同的冲突检查和恢复服务。
 - 将 CLI 命令映射为可视化操作。
 - 展示流式生成、Tool Call、证据和 ContextManifest。
 

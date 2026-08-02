@@ -124,7 +124,7 @@ export class ChatService {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
         const messages = this.contextBuilder.build(
           session,
-          this.sessions.getLatestSummary(conversation.id),
+          this.sessions.getInheritedSummary(session),
           this.sessions.getSessionMessages(session.id),
         );
         let roundContent = "";
@@ -356,7 +356,7 @@ export class ChatService {
     if (session === null) throw new AppError("VALIDATION_ERROR", "当前对话没有可用 Session。");
     const messages = this.contextBuilder.build(
       session,
-      this.sessions.getLatestSummary(conversationId),
+      this.sessions.getInheritedSummary(session),
       this.sessions.getSessionMessages(session.id),
     );
     return this.budgetService.estimate(

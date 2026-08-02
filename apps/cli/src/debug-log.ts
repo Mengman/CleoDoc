@@ -82,12 +82,29 @@ export function formatLlmDebugEvent(event: LlmDebugEvent): string {
     return `[${timestamp}] [debug] ${operation} LLM 响应 #${event.round}：context=${event.contextTokens} tokens（${source}），本地估算=${event.estimatedContextTokens}，output=${event.outputTokens ?? "未知"}，reasoning=${event.reasoningTokens ?? "未知"}，total=${event.totalTokens ?? "未知"}，finish=${event.finishReason ?? "未知"}\n`;
   }
 
+  if (event.type === "llm-assembled-output") {
+    return rawBlock(
+      timestamp,
+      `${operation} LLM 完整拼接结果 #${event.round}（job=${event.compactionJobId}，characters=${event.characterCount}，finish=${event.finishReason ?? "未知"}）`,
+      event.content,
+    );
+  }
+
   const details = event.details === null ? "" : `\n错误详情：${JSON.stringify(event.details)}`;
   return `[${timestamp}] [debug] ${operation} LLM 响应 #${event.round} 解析/验证失败 [${event.errorCode}]：${event.message}${details}\n`;
 }
 
 function operationLabel(operation: LlmDebugEvent["operation"]): string {
-  return operation === "agent" ? "主笔" : operation === "compaction" ? "上下文压缩" : "压缩修复";
+  switch (operation) {
+    case "agent":
+      return "主笔";
+    case "compaction":
+      return "上下文压缩";
+    case "compaction-segment":
+      return "上下文分段压缩";
+    case "compaction-reduce":
+      return "上下文归并压缩";
+  }
 }
 
 function rawBlock(timestamp: string, label: string, value: string): string {
