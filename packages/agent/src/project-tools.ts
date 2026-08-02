@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ModelToolCall, ModelToolDefinition } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
 import type { SessionRepository } from "../../database/src/index.js";
+import type { ProjectInstructionRepository } from "../../database/src/index.js";
 import { DocumentService } from "../../project/src/index.js";
 
 const readDocumentInputSchema = z.object({
@@ -34,13 +35,40 @@ const readHistoryInputSchema = z.object({
   maxCharacters: z.number().int().min(1).max(20_000).default(10_000),
 });
 
-export interface ToolApprovalRequest {
-  toolName: "write_project_document";
-  path: string;
-  contentLength: number;
-  contentPreview: string;
-  overwrite: boolean;
-}
+const expectedRevisionSchema = z.number().int().nonnegative();
+const appendInstructionsInputSchema = z.object({
+  text: z.string().min(1).max(65_536),
+  expected_revision: expectedRevisionSchema,
+});
+const replaceInstructionTextInputSchema = z.object({
+  old_text: z.string().min(1).max(65_536),
+  new_text: z.string().max(65_536),
+  expected_revision: expectedRevisionSchema,
+});
+const setInstructionsInputSchema = z.object({
+  content: z.string().max(65_536),
+  expected_revision: expectedRevisionSchema,
+});
+
+export type ToolApprovalRequest =
+  | {
+      toolName: "write_project_document";
+      path: string;
+      contentLength: number;
+      contentPreview: string;
+      overwrite: boolean;
+    }
+  | {
+      toolName:
+        | "append_project_instructions"
+        | "replace_project_instruction_text"
+        | "set_project_instructions";
+      expectedRevision: number;
+      currentRevision: number;
+      currentContent: string;
+      proposedContent: string;
+      diff: string;
+    };
 
 export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<boolean>;
 
@@ -50,6 +78,7 @@ export interface ProjectToolRuntimeOptions {
     repository: SessionRepository;
     conversationId: string;
   };
+  projectInstructions?: ProjectInstructionRepository;
 }
 
 export class ProjectToolRuntime {
@@ -110,6 +139,63 @@ export class ProjectToolRuntime {
     this.documents = new DocumentService(projectRoot);
     this.definitions = [
       ...this.projectDefinitions,
+      ...(options.projectInstructions === undefined
+        ? []
+        : [
+            {
+              name: "read_project_instructions",
+              description:
+                "读取当前项目完整指令及 Revision。修改前必须先调用本工具取得 expected_revision；项目未设置指令时 Revision 为 0。",
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            },
+            {
+              name: "append_project_instructions",
+              description:
+                "在当前项目指令末尾追加文本并创建新 Revision。属于高权限写操作，执行前会要求用户批准。",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  text: { type: "string", minLength: 1 },
+                  expected_revision: { type: "integer", minimum: 0 },
+                },
+                required: ["text", "expected_revision"],
+                additionalProperties: false,
+              },
+            },
+            {
+              name: "replace_project_instruction_text",
+              description:
+                "精确替换项目指令中唯一出现的一段旧文本并创建新 Revision。若旧文本不存在或出现多次会拒绝修改。",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  old_text: { type: "string", minLength: 1 },
+                  new_text: { type: "string" },
+                  expected_revision: { type: "integer", minimum: 0 },
+                },
+                required: ["old_text", "new_text", "expected_revision"],
+                additionalProperties: false,
+              },
+            },
+            {
+              name: "set_project_instructions",
+              description:
+                "使用完整内容替换当前项目指令并创建新 Revision，包括用空字符串清空。属于高权限写操作，执行前会要求用户批准。",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  content: { type: "string" },
+                  expected_revision: { type: "integer", minimum: 0 },
+                },
+                required: ["content", "expected_revision"],
+                additionalProperties: false,
+              },
+            },
+          ]),
       ...(options.history === undefined
         ? []
         : [
@@ -172,6 +258,14 @@ export class ProjectToolRuntime {
           return await this.readDocument(rawInput);
         case "write_project_document":
           return await this.writeDocument(rawInput);
+        case "read_project_instructions":
+          return this.readProjectInstructions();
+        case "append_project_instructions":
+          return await this.appendProjectInstructions(rawInput);
+        case "replace_project_instruction_text":
+          return await this.replaceProjectInstructionText(rawInput);
+        case "set_project_instructions":
+          return await this.setProjectInstructions(rawInput);
         case "search_conversation_history":
           return this.searchHistory(rawInput);
         case "read_conversation_history":
@@ -303,6 +397,147 @@ export class ProjectToolRuntime {
       },
     });
   }
+
+  private readProjectInstructions(): string {
+    const repository = this.requireProjectInstructions();
+    const current = repository.getCurrent();
+    return JSON.stringify({
+      ok: true,
+      projectInstructions:
+        current === null
+          ? { revision: 0, content: "", contentHash: null, updatedAt: null }
+          : {
+              revision: current.revision,
+              content: current.content,
+              contentHash: current.contentHash,
+              updatedAt: current.createdAt,
+            },
+    });
+  }
+
+  private async appendProjectInstructions(rawInput: unknown): Promise<string> {
+    const input = appendInstructionsInputSchema.parse(rawInput);
+    const repository = this.requireProjectInstructions();
+    const current = repository.getCurrent();
+    const proposed = `${current?.content ?? ""}${input.text}`;
+    if (this.options.approve === undefined) {
+      return toolError("USER_APPROVAL_REQUIRED", "项目指令修改需要用户在 CLI 中明确确认。");
+    }
+    const approved = await this.approveInstructionChange(
+      "append_project_instructions",
+      input.expected_revision,
+      current?.revision ?? 0,
+      current?.content ?? "",
+      proposed,
+    );
+    if (!approved) return toolError("USER_REJECTED", "用户拒绝了项目指令修改请求。");
+    return instructionRevisionResult(await repository.append(input.text, input.expected_revision));
+  }
+
+  private async replaceProjectInstructionText(rawInput: unknown): Promise<string> {
+    const input = replaceInstructionTextInputSchema.parse(rawInput);
+    const repository = this.requireProjectInstructions();
+    const current = repository.getCurrent();
+    if (this.options.approve === undefined) {
+      return toolError("USER_APPROVAL_REQUIRED", "项目指令修改需要用户在 CLI 中明确确认。");
+    }
+    if (current === null || current.revision !== input.expected_revision) {
+      return toolError("VALIDATION_ERROR", "项目指令 Revision 已变化，请重新读取后再修改。");
+    }
+    const first = current.content.indexOf(input.old_text);
+    if (first < 0 || current.content.indexOf(input.old_text, first + input.old_text.length) >= 0) {
+      return toolError(
+        "VALIDATION_ERROR",
+        first < 0
+          ? "当前项目指令中不存在指定的旧文本。"
+          : "指定旧文本出现多次，请提供更精确的文本。",
+      );
+    }
+    const proposed = `${current.content.slice(0, first)}${input.new_text}${current.content.slice(first + input.old_text.length)}`;
+    const approved = await this.approveInstructionChange(
+      "replace_project_instruction_text",
+      input.expected_revision,
+      current.revision,
+      current.content,
+      proposed,
+    );
+    if (!approved) return toolError("USER_REJECTED", "用户拒绝了项目指令修改请求。");
+    return instructionRevisionResult(
+      await repository.replaceText(input.old_text, input.new_text, input.expected_revision),
+    );
+  }
+
+  private async setProjectInstructions(rawInput: unknown): Promise<string> {
+    const input = setInstructionsInputSchema.parse(rawInput);
+    const repository = this.requireProjectInstructions();
+    const current = repository.getCurrent();
+    if (this.options.approve === undefined) {
+      return toolError("USER_APPROVAL_REQUIRED", "项目指令修改需要用户在 CLI 中明确确认。");
+    }
+    const approved = await this.approveInstructionChange(
+      "set_project_instructions",
+      input.expected_revision,
+      current?.revision ?? 0,
+      current?.content ?? "",
+      input.content,
+    );
+    if (!approved) return toolError("USER_REJECTED", "用户拒绝了项目指令修改请求。");
+    return instructionRevisionResult(await repository.set(input.content, input.expected_revision));
+  }
+
+  private requireProjectInstructions(): ProjectInstructionRepository {
+    if (this.options.projectInstructions === undefined) {
+      throw new AppError("VALIDATION_ERROR", "当前任务未授权项目指令访问。");
+    }
+    return this.options.projectInstructions;
+  }
+
+  private async approveInstructionChange(
+    toolName:
+      | "append_project_instructions"
+      | "replace_project_instruction_text"
+      | "set_project_instructions",
+    expectedRevision: number,
+    currentRevision: number,
+    currentContent: string,
+    proposedContent: string,
+  ): Promise<boolean> {
+    if (expectedRevision !== currentRevision) {
+      throw new AppError("VALIDATION_ERROR", "项目指令 Revision 已变化，请重新读取后再修改。", {
+        details: { expectedRevision, currentRevision },
+      });
+    }
+    const approve = this.options.approve;
+    if (approve === undefined) return false;
+    return approve({
+      toolName,
+      expectedRevision,
+      currentRevision,
+      currentContent,
+      proposedContent,
+      diff: createInstructionDiff(currentContent, proposedContent),
+    });
+  }
+}
+
+function instructionRevisionResult(revision: {
+  revision: number;
+  contentHash: string;
+  createdAt: string;
+}): string {
+  return JSON.stringify({
+    ok: true,
+    projectInstructions: {
+      revision: revision.revision,
+      contentHash: revision.contentHash,
+      updatedAt: revision.createdAt,
+    },
+  });
+}
+
+export function createInstructionDiff(current: string, proposed: string): string {
+  if (current === proposed) return "（内容没有变化）";
+  return `--- 当前项目指令\n+++ 修改后项目指令\n-${current.replaceAll("\n", "\n-")}\n+${proposed.replaceAll("\n", "\n+")}`;
 }
 
 function parseArguments(argumentsJson: string): unknown {

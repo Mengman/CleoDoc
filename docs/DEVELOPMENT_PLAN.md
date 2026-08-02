@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.6 已完成，本地文档 Tool Loop 已提前交付；步骤 5.7 待实施
+> 状态：实施中；v0.1 步骤 1–5.7 已完成，本地文档 Tool Loop 已提前交付
 > 日期：2026-08-02
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -35,9 +35,9 @@ v0.1 的核心闭环是：
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
-| 5.5 会话上下文管理 | 已完成 | Session 压缩、AGENTS 快照、历史回查 Tool、分层压缩和可编辑草稿提交门 |
+| 5.5 会话上下文管理 | 已完成 | Session 压缩、数据库项目指令注入、历史回查 Tool、分层压缩和可编辑草稿提交门 |
 | 5.6 Reasoning 流式体验与调用审计 | 已完成 | Reasoning 实时展示与持久化、DeepSeek Tool Loop 回传、逐次 ModelCall 审计、不可变 Message 和 External Content 历史 FTS |
-| 5.7 数据库原生项目指令 | 待实施 | 追加式指令版本、恢复、受控 Tool、CLI 查看和移除 Session 文件快照依赖 |
+| 5.7 数据库原生项目指令 | 已完成 | migration v7–v8 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及 Session 旧字段清理 |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
@@ -227,16 +227,16 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。数据库 migration v4 会为旧 Conversation 创建 legacy Session；migration v5 将累计摘要收敛为单一 Markdown `summary` 并确定性转换旧 v6 摘要。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。下文中的项目 AGENTS 快照是当前已实现现状，将由步骤 5.7 的数据库原生项目指令替代。
+实施状态：已完成当前范围。数据库 migration v4 会为旧 Conversation 创建 legacy Session；migration v5 将累计摘要收敛为单一 Markdown `summary` 并确定性转换旧 v6 摘要；migration v7 已用数据库 Revision 替代运行时 AGENTS 文件快照。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
 
 工作内容：
 
 - 在用户可见 Conversation 内建立有边界的内部 Session。
 - 在完整 Agent 回合结束后，根据 Token 预算触发独立 LLM 压缩调用。
-- 新 Session 按 Core System Prompt、项目 AGENTS、累计摘要、当前消息的顺序组装上下文。
+- 新 Session 按 Core System Prompt、数据库最新项目指令、累计摘要、当前消息的顺序组装上下文。
 - 压缩期间允许用户编辑草稿，但 Enter 和发送按钮不能提交；草稿不清空、不排队、不自动发送。
 - 建立压缩前历史消息的搜索和精确读取 Tool。
-- 保存摘要引用、模型参数、用量、AGENTS 快照和可恢复 CompactionJob。
+- 保存摘要引用、模型参数、用量和可恢复 CompactionJob；项目指令独立按 Revision 保存。
 
 验收：
 
@@ -293,9 +293,9 @@ CLI 交互示意：
 
 ### 步骤 5.7：数据库原生项目指令
 
-数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#16-已确认的下一版设计数据库原生项目指令)
+数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)
 
-实施状态：待实施。本步骤取消用户作品项目对 `AGENTS.md` 或 `agents.md` 的运行时依赖，将项目指令改为 SQLite 中唯一的项目级事实源。CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。
+实施状态：已完成。migration v7–v8、Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复均已落地。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session 的四个旧文件快照字段已经删除。
 
 工作内容：
 
@@ -308,7 +308,6 @@ CLI 交互示意：
 - 从 `conversation_sessions` 移除项目指令路径、快照、哈希和加载时间字段，不增加 Session 到项目指令 Revision 的替代关联。
 - 任何需要项目指令的主笔或 Agent 请求在上下文组装前读取数据库最新 Revision，并按 System Prompt、项目指令、累计摘要、当前消息的顺序注入。
 - 当前阶段不追踪 ModelCall 使用的具体项目指令 Revision；未来需要时使用独立映射表扩展。
-- 旧项目迁移先保留原字段和文件，比较当前 Session 快照与项目指令文件；存在差异时要求用户选择或合并，禁止静默覆盖。
 
 CLI 命令：
 
@@ -327,9 +326,9 @@ CLI 命令：
 - LLM 修改项目指令必须经过用户批准；读取无需批准。
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
-- 项目文件被移动、删除或手工修改不会改变数据库中的当前项目指令。
-- 旧项目迁移时不同内容不会被静默丢弃，迁移失败不损坏现有 Session 或文件。
-- 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 冲突规则。
+- 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。
+- migration v8 删除旧字段时不损坏 Conversation、Session、Message、Summary 或 CompactionJob。
+- 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 并发规则。
 
 ### 步骤 6：统一知识模型与 FTS5
 

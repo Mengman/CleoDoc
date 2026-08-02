@@ -1,6 +1,6 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 状态：migration v5–v6 与 `session-compaction-v7` 已实现 Markdown 压缩、单一摘要存储、输入投影、最低校验、完整拼接 Debug 日志和逐次 ModelCall 审计；数据库项目指令仍待实施
+> 状态：migration v5–v8 与 `session-compaction-v7` 已实现 Markdown 压缩、单一摘要存储、输入投影、最低校验、完整拼接 Debug 日志、逐次 ModelCall 审计和数据库原生项目指令
 > 计划位置：v0.1 步骤 5.5
 > 日期：2026-08-02
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -621,7 +621,7 @@ interface SessionSummary {
 - 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取最新 Revision。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
-- migration v4 的文件路径和 Session 快照字段属于旧实现，迁移方案见 [数据库设计](./DATABASE_DESIGN.md#16-已确认的下一版设计数据库原生项目指令)。
+- migration v8 已删除 migration v4 的文件路径和 Session 快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见 [数据库设计](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)。
 
 ## 9. 会话历史查询 Tool
 
@@ -909,7 +909,7 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 3. **主体已完成**：实现空内容、截断、长度和非法 Tool Call 的最低校验；标题缺失的非阻断质量警告仍待补充。
 4. **已完成**：更新普通、分段和归并 Payload 投影与 Prompt：Message 只发送 `role` 与正文 `content`，排除 `reasoning_content`，并返回相同的 Markdown 摘要。
 5. **已完成**：migration v5 在迁移前创建本地数据库备份，将 `session_summaries` 重建为单一 `summary` 正文加应用层元数据，并确定性转换旧摘要；无法解析的行保留兼容文本。
-6. **部分完成**：ContextBuilder 已按 active Session 的 `inherited_summary_id` 精确注入一份 `summary`；数据库原生项目指令尚待实施，当前项目指令仍沿用文件快照。
+6. **已完成**：ContextBuilder 按 active Session 的 `inherited_summary_id` 精确注入一份 `summary`，并在每次 Agent 调用前读取数据库中的最新项目指令 Revision。
 7. **已完成当前范围**：已增加流式边界、旧摘要迁移、失败恢复、Debug 日志、普通/Map-Reduce 以及 S1→Summary1→S2→Summary2→S3 连续继承的端到端回归测试。
 8. **已完成**：migration v6 已接入 CompactionJob→ModelCall 逐次审计；普通、分段和归并调用分别记录阶段、顺序、实际请求参数、结束原因和 Token 用量。
 

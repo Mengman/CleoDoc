@@ -244,6 +244,28 @@ describe("CleoDoc CLI", () => {
     }
   });
 
+  it("shows database-native project instructions and their history in interactive chat", async () => {
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-instructions-test-"));
+    temporaryDirectories.push(temporaryDirectory);
+    const projectDirectory = path.join(temporaryDirectory, "story.cleo");
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      CLEODOC_HOME: path.join(temporaryDirectory, "cli-state"),
+      OPENAI_API_KEY: "unused-test-key",
+      CLEODOC_MODEL: "test-model",
+    };
+    expect((await runCli(["init", projectDirectory], environment)).exitCode).toBe(0);
+
+    const chat = await runInteractiveCli(["chat"], environment, [
+      "/instructions",
+      "/instructions history",
+      "/exit",
+    ]);
+    expect(chat.exitCode, JSON.stringify(chat)).toBe(0);
+    expect(chat.stdout).toContain("当前项目尚未设置项目指令（Revision 0）");
+    expect(chat.stdout).toContain("项目指令没有历史 Revision");
+  });
+
   it("manages file and pasted materials through the CLI without duplicating content", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-material-test-"));
     temporaryDirectories.push(temporaryDirectory);

@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 migration v6 现状基线；第 15、17、18 章已实现，第 16 章为已确认但尚未实施的设计
+> 状态：v0.1 migration v8 现状基线；第 15–18 章已实现
 > 审计日期：2026-08-02
 > Schema 来源：`packages/database/src/migrations.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -36,6 +36,7 @@ conversation_message_fts 及影子表
 | 正文与资料 | Markdown、JSON、原始资料文件 | 是 |
 | 资料元数据投影 | `sources` | 是 |
 | 完整聊天历史 | `conversations`、`messages` | 否 |
+| 项目指令及恢复历史 | `project_instruction_revisions` | 否 |
 | 模型调用和保存审计 | `generations`、`model_calls` 及业务映射表 | 否 |
 | Session 与压缩运行状态 | `conversation_sessions`、`session_summaries`、`compaction_jobs` | 不能完整重建 |
 | 历史消息全文索引 | `conversation_message_fts*` | 是，可从 `messages` 重建 |
@@ -58,6 +59,12 @@ erDiagram
     compaction_jobs ||--o{ compaction_job_model_call_mapping : contains
     model_calls ||--o| compaction_job_model_call_mapping : mapped_by
     model_calls o|--o| messages : produces
+    project_instruction_revisions {
+        INTEGER revision PK
+        TEXT content
+        TEXT content_hash
+        TEXT created_at
+    }
 ```
 
 逻辑上还有以下关联，但当前 Schema 没有外键：
@@ -91,6 +98,8 @@ PRAGMA busy_timeout = 5000;
 - 已有项目存在待执行 migration 时，先执行 WAL 完整 checkpoint，并在 `.cleo/backups/` 创建 `pre-migration-v<版本>-<时间>.sqlite`；全新空数据库不创建无意义备份。
 - migration v5 除 SQL DDL 外还使用同一事务内的确定性 TypeScript 转换函数，将旧结构化摘要渲染为 Markdown；转换不调用 LLM。
 - migration v6 重建 `messages`，保留旧隐式 rowid 为稳定 `message_rowid`，增加 Reasoning/ModelCall 字段，并从 Message 完整重建 External Content FTS；迁移不调用 LLM。
+- migration v7 新增追加式 `project_instruction_revisions`，项目指令运行时以该表为唯一事实源。
+- migration v8 删除 `conversation_sessions` 中四个文件快照遗留字段，不迁移或读取作品项目中的 `AGENTS.md`。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
 - `quickCheck()` 已实现，但项目打开时尚未自动调用。
 - `backup()` 当前执行完整 checkpoint 后复制主数据库文件，尚未使用 SQLite Backup API 或 `VACUUM INTO`。
@@ -106,6 +115,8 @@ PRAGMA busy_timeout = 5000;
 | v4 | 增加 Session、压缩摘要、压缩任务、`messages.session_id` 和会话历史 FTS5 |
 | v5 | 将 `session_summaries` 迁移为单一 Markdown `summary`，确定性转换旧摘要并增加查询索引 |
 | v6 | 增加 ModelCall 审计与业务映射；重建不可变 `messages`；增加 Reasoning；压缩配置改名；历史 FTS 改为 External Content |
+| v7 | 增加数据库原生项目指令 Revision 链并停用 Session 文件快照运行路径 |
+| v8 | 删除 Session 的项目指令文件路径、快照、哈希和加载时间字段；移除遗留文件导入与合并路径 |
 
 ## 6. 表与字段字典
 
@@ -227,10 +238,6 @@ Conversation 内部的上下文分段。用户通常不直接感知 Session。
 | `status` | TEXT | NOT NULL、CHECK | `active`、`compacting` 或 `closed` |
 | `trigger` | TEXT | NOT NULL、CHECK | 创建当前 Session 的原因，见下文 |
 | `system_prompt_snapshot` | TEXT | NOT NULL | 当前 Session 使用的 CleoDoc System Prompt 快照 |
-| `project_instructions_path` | TEXT | 可空 | 项目 `AGENTS.md` 或 `agents.md` 的路径 |
-| `project_instructions_snapshot` | TEXT | 可空 | Session 启动时读取的项目指令完整快照 |
-| `project_instructions_hash` | TEXT | 可空 | 项目指令快照内容哈希 |
-| `project_instructions_loaded_at` | TEXT | NOT NULL | 项目指令读取时间 |
 | `inherited_summary_id` | TEXT | 可空 | 新 Session 继承的累计摘要 ID；当前没有外键 |
 | `estimated_input_tokens` | INTEGER | NOT NULL、默认 0 | 最近一次本地估算的上下文输入 Token |
 | `actual_input_tokens` | INTEGER | 可空 | Provider 最近报告的实际输入 Token |
@@ -317,6 +324,19 @@ FTS5 虚拟表，用于搜索压缩前的历史消息。
 | `content` | 全文索引、External Content | 使用 trigram tokenizer；原文按 FTS rowid=`messages.message_rowid` 从 `searchable_conversation_messages` 视图读取 |
 
 所有 User/Assistant `content` 写入时都会进入 FTS；Reasoning、System Prompt、项目指令和 Tool Result 不进入索引。Conversation、Session、角色和 Message UUID 不在 FTS 重复保存，查询时通过 `message_rowid` 关联 `messages`，并强制限制当前 Conversation 与已关闭 Session。
+
+### 6.11 `project_instruction_revisions`
+
+项目级指令的权威事实源。每次修改保存完整内容并追加新 Revision，不更新或删除历史。
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `revision` | INTEGER | 主键、AUTOINCREMENT | 项目内单调递增版本号；最大值是当前版本 |
+| `content` | TEXT | NOT NULL | 该 Revision 的完整项目指令；空字符串表示显式清空 |
+| `content_hash` | TEXT | NOT NULL | 完整 UTF-8 内容的 SHA-256；恢复旧内容时允许重复 |
+| `created_at` | TEXT | NOT NULL | Revision 创建时间 |
+
+表为空表示尚未设置项目指令，对外使用 Revision 0 表达该状态。每项目独立数据库，因此不保存 `project_id`，也不设置可变的当前版本指针。
 
 ## 7. FTS5 内部影子表
 
@@ -412,6 +432,13 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删�
 - `searchClosedHistory` 使用 FTS5 trigram、`snippet()` 和 `bm25()`。
 - FTS 通过 `message_rowid` 关联 `messages`；查询强制限制当前 `conversation_id` 和已关闭 Session。
 - `readClosedHistory` 通过 `messages` 返回指定已关闭 Session 的原始消息。
+
+### 10.5 项目指令
+
+- 当前内容始终读取最大 Revision；表为空时对外表达为 Revision 0。
+- `set`、`append`、精确文本替换和恢复均先校验 `expected_revision`，再在短事务中追加完整快照。
+- 恢复旧版本通过复制旧内容创建新 Revision，不删除或更新历史行。
+- ContextBuilder 在每次 Agent 模型调用前读取最新 Revision；项目指令 Tool 获批后，下一轮 Tool Loop 立即使用新内容。
 
 ## 11. 实例一致性审计快照
 
@@ -656,7 +683,9 @@ UNIQUE(compaction_job_id, ordinal)
 - `session_summaries` 没有直接的 ModelCall 外键，也不提供最终摘要来源调用的虚假精确性。
 - 现有 migration v4 项目可以前向升级，聊天消息、摘要和压缩任务不丢失。
 
-## 16. 已确认的下一版设计：数据库原生项目指令
+## 16. 已实现设计：数据库原生项目指令
+
+> 实施状态：migration v7–v8、Repository、ContextBuilder、Agent Tool 与 CLI 已落地。SQLite Revision 是唯一事实源，Session 不保存项目指令副本。
 
 ### 16.1 设计结论
 
@@ -735,7 +764,7 @@ Tool 返回新的 Revision、内容哈希和更新时间。数据库不保存 To
 
 ### 16.5 Session 与上下文组装
 
-下一版从 `conversation_sessions` 删除以下 migration v4 字段：
+迁移 v8 已从 `conversation_sessions` 物理删除以下 migration v4 字段：
 
 - `project_instructions_path`
 - `project_instructions_snapshot`
@@ -775,17 +804,11 @@ CLI 增加：
 
 未来 Electron GUI 提供独立的“项目指令”页面。页面每次从数据库读取当前 Revision；用户编辑提交时携带原始 `expected_revision`，成功后创建新 Revision。GUI 不直接读写项目根目录中的指令文件。
 
-### 16.8 旧项目迁移
+### 16.8 早期开发阶段的 Schema 收敛
 
-旧项目可能同时存在 Session 中的 `project_instructions_snapshot` 和项目根目录指令文件，而且两者可能不同。迁移不得静默决定哪一份是当前事实：
+migration v8 直接删除 migration v4 的四个 Session 文件快照字段。CleoDoc 不扫描、不读取、不导入也不合并作品项目目录中的 `AGENTS.md` 或 `agents.md`。只有已经写入 `project_instruction_revisions` 的内容会成为项目指令。
 
-- 只有 Session 快照时，可以将当前活动 Session 的快照导入为初始 Revision。
-- 文件与当前快照内容一致时，只导入一份初始 Revision。
-- 文件与当前快照不同或存在多个互不相同的有效快照时，列出候选内容及哈希，让用户选择或合并后再建立初始 Revision。
-- 迁移完成后，CleoDoc 不再自动读取项目 `AGENTS.md` 或 `agents.md`。
-- 不自动删除或修改遗留指令文件；由用户确认数据库版本正确后自行归档或删除。
-
-迁移应分阶段执行：先创建 Revision 表并完成应用层内容导入；确认项目已有数据库版本后，再通过后续前向 migration 重建 `conversation_sessions` 并删除旧字段。任何阶段失败都不得丢失原快照或文件内容。
+这是早期开发阶段已经接受的迁移边界：尚未写入 Revision 表的旧文件或 Session 快照不会自动保留。迁移前仍会按通用数据库迁移规则创建本地备份；仓库根目录供编码 Agent 使用的 `AGENTS.md` 不属于作品项目数据，也不会被修改。
 
 ### 16.9 验收要求
 
@@ -795,9 +818,9 @@ CLI 增加：
 - 过期 `expected_revision` 无法覆盖较新的用户或 Tool 修改。
 - LLM Tool 修改必须经过用户批准，拒绝修改时当前 Revision 不变。
 - 新的 Agent 请求按固定顺序注入数据库中的最新项目指令。
-- 项目指令不再依赖文件路径，移动、删除或修改遗留 `AGENTS.md` 不会静默改变数据库中的项目指令。
+- 作品项目中的 `AGENTS.md` 或 `agents.md` 完全不会进入项目指令或模型上下文。
 - CLI 可以查看完整当前指令、历史列表并恢复旧版本；未来 GUI 与 CLI 读取同一 Application Service。
-- 旧项目完成迁移后不丢失已有 Session、快照或指令文件内容。
+- migration v8 删除旧字段时不会损坏 Conversation、Session、Message、Summary 或 CompactionJob。
 
 ## 17. 已实现设计：简化会话摘要
 

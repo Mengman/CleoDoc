@@ -15,7 +15,6 @@ import type {
 } from "../../database/src/index.js";
 import { createContextBudgetPolicy, estimateTokens } from "./context-budget.js";
 import { emitLlmDebugEvent, type LlmDebugHandler, type LlmDebugOperation } from "./debug-events.js";
-import { loadProjectInstructions } from "./project-instructions.js";
 
 export const COMPACTION_PROMPT_VERSION = "session-compaction-v7";
 
@@ -74,7 +73,6 @@ interface CollectedSummary {
 
 export class CompactionService {
   constructor(
-    private readonly projectRoot: string,
     private readonly sessions: SessionRepository,
     private readonly modelCalls: ModelCallRepository,
   ) {}
@@ -291,14 +289,12 @@ export class CompactionService {
         summary = await requestSummary(reducePayload, "compaction-reduce", targetTokens, "reduce");
       }
 
-      const instructions = await loadProjectInstructions(this.projectRoot);
       const completed = await this.sessions.completeCompaction({
         jobId,
         sourceSession: input.session,
         summary,
         ...(usage === undefined ? {} : { usage }),
         trigger: input.trigger,
-        instructions,
         estimatedInputTokens: estimateTokens(payload),
       });
       const event: CompactionEvent & { type: "compaction-completed" } = {

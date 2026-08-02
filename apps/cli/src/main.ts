@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   ChatInputController,
   ChatService,
+  createInstructionDiff,
   type LlmDebugHandler,
   type ToolApprovalHandler,
   type ToolApprovalRequest,
@@ -692,7 +693,7 @@ async function interactiveChat(
       }
       if (line === "/help") {
         output.write(
-          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /save <path>  /read <path>  /documents  /exit\n",
+          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /instructions [history|restore <revision>]  /save <path>  /read <path>  /documents  /exit\n",
         );
         continue;
       }
@@ -760,6 +761,42 @@ async function interactiveChat(
       }
       if (line === "/documents") {
         await printDocuments(context.documents);
+        continue;
+      }
+      if (line === "/instructions") {
+        printProjectInstructions(chat.getProjectInstructions());
+        continue;
+      }
+      if (line === "/instructions history") {
+        printProjectInstructionHistory(chat.listProjectInstructionHistory());
+        continue;
+      }
+      if (line.startsWith("/instructions restore ")) {
+        const revision = Number(line.slice("/instructions restore ".length).trim());
+        if (!Number.isSafeInteger(revision) || revision <= 0) {
+          output.write("项目指令 Revision 必须是正整数。\n");
+          continue;
+        }
+        const target = chat
+          .listProjectInstructionHistory(500)
+          .find((item) => item.revision === revision);
+        if (target === undefined) {
+          output.write(`找不到项目指令 Revision ${revision}。\n`);
+          continue;
+        }
+        const current = chat.getProjectInstructions();
+        output.write(
+          `${sanitizeTerminalMultiline(createInstructionDiff(current?.content ?? "", target.content))}\n`,
+        );
+        const answer = (await readline.question(`恢复 Revision ${revision}？[y/N] `))
+          .trim()
+          .toLowerCase();
+        if (answer === "y" || answer === "yes") {
+          const restored = await chat.restoreProjectInstructions(revision, current?.revision ?? 0);
+          output.write(`已恢复为新的 Revision ${restored.revision}。\n`);
+        } else {
+          output.write("已取消恢复。\n");
+        }
         continue;
       }
       if (line.startsWith("/save ")) {
@@ -841,6 +878,32 @@ function printContextStatus(status: ReturnType<ChatService["getContextStatus"]>)
   );
 }
 
+function printProjectInstructions(
+  revision: ReturnType<ChatService["getProjectInstructions"]>,
+): void {
+  if (revision === null) {
+    output.write("当前项目尚未设置项目指令（Revision 0）。\n");
+    return;
+  }
+  output.write(
+    `项目指令 Revision ${revision.revision}\nSHA-256：${revision.contentHash}\n更新时间：${revision.createdAt}\n\n${sanitizeTerminalMultiline(revision.content)}\n`,
+  );
+}
+
+function printProjectInstructionHistory(
+  revisions: ReturnType<ChatService["listProjectInstructionHistory"]>,
+): void {
+  if (revisions.length === 0) {
+    output.write("项目指令没有历史 Revision。\n");
+    return;
+  }
+  for (const revision of revisions) {
+    output.write(
+      `Revision ${revision.revision}\t${revision.createdAt}\t${revision.contentHash}\t${revision.content.length} 字符\n`,
+    );
+  }
+}
+
 function printSessions(sessions: ReturnType<ChatService["getSessions"]>): void {
   for (const session of sessions) {
     output.write(
@@ -854,8 +917,6 @@ function printSession(details: ReturnType<ChatService["getSessionDetails"]>): vo
   output.write(`Session ${session.ordinal} (${session.status})\n`);
   output.write(`ID：${session.id}\n触发：${session.trigger}\n开始：${session.startedAt}\n`);
   output.write(`结束：${session.closedAt ?? "未结束"}\n`);
-  output.write(`AGENTS：${session.projectInstructionsPath ?? "未加载"}\n`);
-  output.write(`AGENTS SHA-256：${session.projectInstructionsHash ?? "无"}\n`);
   output.write(`继承摘要：${session.inheritedSummaryId ?? "无"}\n`);
   output.write(
     `消息范围：${details.firstMessageId ?? "无"} → ${details.lastMessageId ?? "无"}（${details.messageCount} 条）\n`,
@@ -869,6 +930,12 @@ async function approveProjectWrite(
   readline: Interface,
   request: ToolApprovalRequest,
 ): Promise<boolean> {
+  if (request.toolName !== "write_project_document") {
+    output.write(`\nLLM 请求修改项目指令（当前 Revision ${request.currentRevision}）：\n`);
+    output.write(`${sanitizeTerminalMultiline(request.diff)}\n`);
+    const answer = (await readline.question("允许本次项目指令修改？[y/N] ")).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  }
   output.write(`\nLLM 请求${request.overwrite ? "覆盖" : "创建"}项目文档：${request.path}\n`);
   output.write(`内容长度：${request.contentLength} 字符\n`);
   const preview = sanitizeTerminalText(request.contentPreview);
@@ -971,6 +1038,16 @@ function sanitizeTerminalText(value: string): string {
     .join("")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sanitizeTerminalMultiline(value: string): string {
+  return [...value]
+    .map((character) => {
+      if (character === "\n" || character === "\t") return character;
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159) ? " " : character;
+    })
+    .join("");
 }
 
 function truncateText(value: string, maximumLength: number): string {

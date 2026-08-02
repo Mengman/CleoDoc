@@ -75,10 +75,6 @@ export interface ConversationSession {
   status: SessionStatus;
   trigger: SessionTrigger;
   systemPromptSnapshot: string;
-  projectInstructionsPath: string | null;
-  projectInstructionsSnapshot: string | null;
-  projectInstructionsHash: string | null;
-  projectInstructionsLoadedAt: string;
   inheritedSummaryId: string | null;
   estimatedInputTokens: number;
   actualInputTokens: number | null;

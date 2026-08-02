@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ProjectDatabase, ProjectInstructionRepository } from "../../database/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ProjectToolRuntime } from "./project-tools.js";
 
@@ -90,6 +91,55 @@ describe("ProjectToolRuntime", () => {
 
     expect(result).toMatchObject({ ok: false });
     expect(await new DocumentService(project.root).list()).toHaveLength(0);
+  });
+
+  it("reads project instructions freely and requires approval for revisioned writes", async () => {
+    const project = await createProject();
+    const database = await ProjectDatabase.open(project.root);
+    const repository = new ProjectInstructionRepository(database);
+    const approvals: string[] = [];
+    const tools = new ProjectToolRuntime(project.root, {
+      projectInstructions: repository,
+      approve: async (request) => {
+        approvals.push(request.toolName);
+        return true;
+      },
+    });
+    try {
+      expect(
+        parseResult(
+          await tools.execute({
+            id: "read-r0",
+            name: "read_project_instructions",
+            argumentsJson: "{}",
+          }),
+        ),
+      ).toMatchObject({ ok: true, projectInstructions: { revision: 0, content: "" } });
+
+      expect(
+        parseResult(
+          await tools.execute({
+            id: "set-r1",
+            name: "set_project_instructions",
+            argumentsJson: JSON.stringify({ content: "保持第三人称限知", expected_revision: 0 }),
+          }),
+        ),
+      ).toMatchObject({ ok: true, projectInstructions: { revision: 1 } });
+      expect(repository.getCurrent()?.content).toBe("保持第三人称限知");
+      expect(approvals).toEqual(["set_project_instructions"]);
+
+      const stale = parseResult(
+        await tools.execute({
+          id: "stale",
+          name: "append_project_instructions",
+          argumentsJson: JSON.stringify({ text: "\n避免全知视角", expected_revision: 0 }),
+        }),
+      );
+      expect(stale).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+      expect(repository.getCurrent()?.content).toBe("保持第三人称限知");
+    } finally {
+      await database.close();
+    }
   });
 });
 

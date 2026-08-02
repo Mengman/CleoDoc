@@ -50,6 +50,9 @@ export const helpText = `CleoDoc v0.1 CLI
   /sessions
   /session <序号>
   /context
+  /instructions
+  /instructions history
+  /instructions restore <revision>
   /new
   /help
   /exit

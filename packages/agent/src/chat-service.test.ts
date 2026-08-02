@@ -156,7 +156,7 @@ describe("ChatService", () => {
         prompt: "总结并保存到项目",
         signal: new AbortController().signal,
         approveToolCall: async (request) => {
-          approvals.push(request.path);
+          if (request.toolName === "write_project_document") approvals.push(request.path);
           return true;
         },
         onEvent: (event) => {
@@ -218,6 +218,34 @@ describe("ChatService", () => {
       await chat.close();
     }
   });
+
+  it("injects an approved database project-instruction revision on the next tool round", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const chat = await ChatService.open(project.root);
+    const provider = new ProjectInstructionToolProvider();
+    try {
+      const result = await chat.send({
+        projectId: project.manifest.id,
+        provider,
+        model: "instruction-tool-model",
+        prompt: "把第三人称限知写入项目指令",
+        signal: new AbortController().signal,
+        approveToolCall: async (request) => request.toolName === "set_project_instructions",
+      });
+      expect(result.content).toBe("项目指令已经更新。");
+      expect(chat.getProjectInstructions()).toMatchObject({
+        revision: 1,
+        content: "始终使用第三人称限知视角。",
+      });
+      expect(provider.requests[2]?.messages[0]?.content).toContain(
+        "<project_instructions revision=1",
+      );
+      expect(provider.requests[2]?.messages[0]?.content).toContain("始终使用第三人称限知视角。");
+    } finally {
+      await chat.close();
+    }
+  });
 });
 
 class ToolCallingModelProvider implements ModelProvider {
@@ -249,6 +277,45 @@ class ToolCallingModelProvider implements ModelProvider {
     }
     yield { type: "reasoning-delta", text: "工具执行成功，可以向用户确认。" };
     yield { type: "text-delta", text: "总结已经保存到项目中。" };
+    yield { type: "done", finishReason: "stop" };
+  }
+}
+
+class ProjectInstructionToolProvider implements ModelProvider {
+  readonly id = "instruction-tool";
+  readonly displayName = "Instruction Tool Provider";
+  readonly requests: ModelRequest[] = [];
+
+  async validateConfiguration(): Promise<ProviderHealth> {
+    return { ok: true, message: "ready" };
+  }
+
+  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    this.requests.push(request);
+    if (this.requests.length === 1) {
+      yield {
+        type: "tool-call",
+        call: { id: "read-instructions", name: "read_project_instructions", argumentsJson: "{}" },
+      };
+      yield { type: "done", finishReason: "tool_calls" };
+      return;
+    }
+    if (this.requests.length === 2) {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "set-instructions",
+          name: "set_project_instructions",
+          argumentsJson: JSON.stringify({
+            content: "始终使用第三人称限知视角。",
+            expected_revision: 0,
+          }),
+        },
+      };
+      yield { type: "done", finishReason: "tool_calls" };
+      return;
+    }
+    yield { type: "text-delta", text: "项目指令已经更新。" };
     yield { type: "done", finishReason: "stop" };
   }
 }

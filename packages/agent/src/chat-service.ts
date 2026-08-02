@@ -9,6 +9,7 @@ import type {
   ModelRequest,
   ModelToolCall,
   ModelUsage,
+  ProjectInstructionRevision,
   SavedDocument,
   StoredMessage,
 } from "../../contracts/src/index.js";
@@ -16,6 +17,7 @@ import { AppError, asAppError } from "../../contracts/src/index.js";
 import {
   ConversationRepository,
   ModelCallRepository,
+  ProjectInstructionRepository,
   ProjectDatabase,
   SessionRepository,
 } from "../../database/src/index.js";
@@ -30,11 +32,12 @@ import {
 } from "./context-budget.js";
 import { ContextBuilder } from "./context-builder.js";
 import { emitLlmDebugEvent, type LlmDebugHandler } from "./debug-events.js";
-import { loadProjectInstructions } from "./project-instructions.js";
 
 export const DEFAULT_SYSTEM_PROMPT = `你是 CleoDoc 的中文小说主笔。你与用户讨论创作委托，给出完整、可保存的中文内容。明确区分用户决定、已知资料与创作假设。
 
 你可以使用项目工具列出、分段读取和写入 manuscript 中的 Markdown 文档。只有在确实需要项目内容时才读取；不要声称读取了未通过工具获得的资料。当用户明确要求“保存、写入、记录到项目”时，应调用 write_project_document，而不是只在聊天中展示内容。写入会由 CleoDoc 请求用户确认，拒绝后不得绕过。不得覆盖已有文档，除非用户明确要求覆盖并再次批准。
+
+项目指令是跨对话生效的项目级长期规则。需要查看或修改时使用项目指令工具；修改前必须先读取当前 Revision。追加、局部替换和全量替换都会展示 Diff 并要求用户批准，拒绝后不得绕过。
 
 只有累计摘要缺少完成当前任务所需的精确细节时，才使用会话历史查询工具。不得为了全面了解而批量读取全部历史。`;
 
@@ -57,6 +60,7 @@ export class ChatService {
   private readonly repository: ConversationRepository;
   private readonly sessions: SessionRepository;
   private readonly modelCalls: ModelCallRepository;
+  private readonly projectInstructions: ProjectInstructionRepository;
   private readonly documents: DocumentService;
   private readonly contextBuilder = new ContextBuilder();
   private readonly budgetService = new ContextBudgetService();
@@ -68,6 +72,7 @@ export class ChatService {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
     this.modelCalls = new ModelCallRepository(database);
+    this.projectInstructions = new ProjectInstructionRepository(database);
     this.documents = new DocumentService(projectRoot);
   }
 
@@ -98,11 +103,9 @@ export class ChatService {
       throw new AppError("VALIDATION_ERROR", "对话不属于当前项目。");
     }
 
-    const instructions = await loadProjectInstructions(this.projectRoot);
     const session = await this.sessions.createInitialSession({
       conversationId: conversation.id,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      instructions,
     });
     if (session.status === "compacting") {
       throw new AppError("VALIDATION_ERROR", "正在进行上下文压缩，完成后再提交消息。");
@@ -123,12 +126,14 @@ export class ChatService {
     const tools = new ProjectToolRuntime(this.projectRoot, {
       approve: input.approveToolCall,
       history: { repository: this.sessions, conversationId: conversation.id },
+      projectInstructions: this.projectInstructions,
     });
 
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
         const messages = this.contextBuilder.build(
           session,
+          this.projectInstructions.getCurrent(),
           this.sessions.getInheritedSummary(session),
           this.sessions.getSessionMessages(session.id),
         );
@@ -376,11 +381,27 @@ export class ChatService {
     };
   }
 
+  getProjectInstructions(): ProjectInstructionRevision | null {
+    return this.projectInstructions.getCurrent();
+  }
+
+  listProjectInstructionHistory(limit = 50): ProjectInstructionRevision[] {
+    return this.projectInstructions.list(limit);
+  }
+
+  async restoreProjectInstructions(
+    revision: number,
+    expectedRevision: number,
+  ): Promise<ProjectInstructionRevision> {
+    return this.projectInstructions.restore(revision, expectedRevision);
+  }
+
   getContextStatus(
     conversationId: string,
     contextWindowTokens?: number,
     toolDefinitions = new ProjectToolRuntime(this.projectRoot, {
       history: { repository: this.sessions, conversationId },
+      projectInstructions: this.projectInstructions,
     }).definitions,
     draft = "",
   ): ContextBudgetStatus {
@@ -389,6 +410,7 @@ export class ChatService {
     if (session === null) throw new AppError("VALIDATION_ERROR", "当前对话没有可用 Session。");
     const messages = this.contextBuilder.build(
       session,
+      this.projectInstructions.getCurrent(),
       this.sessions.getInheritedSummary(session),
       this.sessions.getSessionMessages(session.id),
     );
@@ -418,7 +440,7 @@ export class ChatService {
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可压缩或压缩已在进行中。");
     }
-    return new CompactionService(this.projectRoot, this.sessions, this.modelCalls).compact({
+    return new CompactionService(this.sessions, this.modelCalls).compact({
       conversationId: input.conversationId,
       session,
       provider: input.provider,

@@ -12,6 +12,7 @@ import type {
   ProviderHealth,
   StoredMessage,
 } from "../../contracts/src/index.js";
+import { ProjectDatabase, ProjectInstructionRepository } from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import { projectMessagesForCompaction } from "./compaction-service.js";
@@ -31,7 +32,8 @@ describe("session compaction", () => {
   it("stores a streamed Markdown summary and uses it in the next session", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    await writeFile(path.join(project.root, "AGENTS.md"), "第一版项目规则", "utf8");
+    await setProjectInstructions(project.root, "数据库项目规则");
+    await writeFile(path.join(project.root, "AGENTS.md"), "第一版文件规则", "utf8");
     const provider = new CompactionAwareProvider();
     const chat = await ChatService.open(project.root);
     const debugEvents: LlmDebugEvent[] = [];
@@ -44,10 +46,11 @@ describe("session compaction", () => {
         prompt: "主角是一名退休刑警。",
         signal: new AbortController().signal,
       });
-      expect(provider.requests[0]?.messages[0]?.content).toContain("第一版项目规则");
+      expect(provider.requests[0]?.messages[0]?.content).toContain("数据库项目规则");
+      expect(provider.requests[0]?.messages[0]?.content).not.toContain("第一版文件规则");
       expect(provider.requests[0]?.thinking).toBeUndefined();
 
-      await writeFile(path.join(project.root, "AGENTS.md"), "第二版项目规则", "utf8");
+      await writeFile(path.join(project.root, "AGENTS.md"), "第二版文件规则", "utf8");
       await chat.compactConversation({
         conversationId: first.conversationId,
         provider,
@@ -89,8 +92,7 @@ describe("session compaction", () => {
 
       const sessions = chat.getSessions(first.conversationId);
       expect(sessions.map((session) => session.status)).toEqual(["closed", "active"]);
-      expect(sessions[0]?.projectInstructionsSnapshot).toBe("第一版项目规则");
-      expect(sessions[1]?.projectInstructionsSnapshot).toBe("第二版项目规则");
+      expect(chat.getProjectInstructions()?.content).toBe("数据库项目规则");
       expect(chat.getSessionDetails(first.conversationId, 1).summary?.summary).toBe(
         provider.summary,
       );
@@ -109,7 +111,8 @@ describe("session compaction", () => {
           !request.messages[0]?.content.includes("会话上下文压缩器") &&
           request.messages.some((message) => message.content === "请找回主角的职业。"),
       );
-      expect(postCompaction?.messages[0]?.content).toContain("第二版项目规则");
+      expect(postCompaction?.messages[0]?.content).toContain("数据库项目规则");
+      expect(postCompaction?.messages[0]?.content).not.toContain("第二版文件规则");
       expect(postCompaction?.messages[0]?.content).toContain("<session_handoff");
       expect(postCompaction?.messages[0]?.content).toContain(provider.summary);
       expect(
@@ -182,7 +185,7 @@ describe("session compaction", () => {
   it("chains inherited summaries across consecutive compactions and injects only the current one", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    await writeFile(path.join(project.root, "AGENTS.md"), "连续压缩项目规则", "utf8");
+    await setProjectInstructions(project.root, "连续压缩项目规则");
     const provider = new CumulativeCompactionProvider();
     const chat = await ChatService.open(project.root);
 
@@ -511,4 +514,13 @@ async function createTemporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "cleodoc-session-test-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+async function setProjectInstructions(projectRoot: string, content: string): Promise<void> {
+  const database = await ProjectDatabase.open(projectRoot);
+  try {
+    await new ProjectInstructionRepository(database).set(content, 0);
+  } finally {
+    await database.close();
+  }
 }

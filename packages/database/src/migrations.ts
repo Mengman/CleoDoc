@@ -209,6 +209,26 @@ export const migrations: readonly Migration[] = [
     sql: "",
     apply: migrateReasoningModelCallsAndExternalMessageFts,
   },
+  {
+    version: 7,
+    sql: `
+      CREATE TABLE project_instruction_revisions (
+        revision INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    version: 8,
+    sql: `
+      ALTER TABLE conversation_sessions DROP COLUMN project_instructions_path;
+      ALTER TABLE conversation_sessions DROP COLUMN project_instructions_snapshot;
+      ALTER TABLE conversation_sessions DROP COLUMN project_instructions_hash;
+      ALTER TABLE conversation_sessions DROP COLUMN project_instructions_loaded_at;
+    `,
+  },
 ];
 
 function migrateReasoningModelCallsAndExternalMessageFts(database: DatabaseSync): void {

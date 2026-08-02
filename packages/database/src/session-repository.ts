@@ -17,10 +17,6 @@ interface SessionRow {
   status: ConversationSession["status"];
   trigger: SessionTrigger;
   system_prompt_snapshot: string;
-  project_instructions_path: string | null;
-  project_instructions_snapshot: string | null;
-  project_instructions_hash: string | null;
-  project_instructions_loaded_at: string;
   inherited_summary_id: string | null;
   estimated_input_tokens: number;
   actual_input_tokens: number | null;
@@ -71,13 +67,6 @@ interface HistoryRow {
   created_at: string;
 }
 
-export interface ProjectInstructionSnapshot {
-  path: string | null;
-  content: string | null;
-  hash: string | null;
-  loadedAt: string;
-}
-
 export interface HistorySearchResult {
   sessionId: string;
   messageId: string;
@@ -94,26 +83,14 @@ export class SessionRepository {
   async createInitialSession(input: {
     conversationId: string;
     systemPrompt: string;
-    instructions: ProjectInstructionSnapshot;
   }): Promise<ConversationSession> {
     const current = this.getCurrentSession(input.conversationId);
     if (current !== null) {
       if (current.systemPromptSnapshot === "") {
         await this.projectDatabase.write((database) => {
           database
-            .prepare(
-              `UPDATE conversation_sessions SET system_prompt_snapshot = ?,
-               project_instructions_path = ?, project_instructions_snapshot = ?,
-               project_instructions_hash = ?, project_instructions_loaded_at = ? WHERE id = ?`,
-            )
-            .run(
-              input.systemPrompt,
-              input.instructions.path,
-              input.instructions.content,
-              input.instructions.hash,
-              input.instructions.loadedAt,
-              current.id,
-            );
+            .prepare("UPDATE conversation_sessions SET system_prompt_snapshot = ? WHERE id = ?")
+            .run(input.systemPrompt, current.id);
         });
         return this.getSession(current.id)!;
       }
@@ -126,21 +103,10 @@ export class SessionRepository {
       database
         .prepare(
           `INSERT INTO conversation_sessions
-           (id, conversation_id, ordinal, status, trigger, system_prompt_snapshot,
-            project_instructions_path, project_instructions_snapshot, project_instructions_hash,
-            project_instructions_loaded_at, started_at)
-           VALUES (?, ?, 1, 'active', 'conversation_started', ?, ?, ?, ?, ?, ?)`,
+           (id, conversation_id, ordinal, status, trigger, system_prompt_snapshot, started_at)
+           VALUES (?, ?, 1, 'active', 'conversation_started', ?, ?)`,
         )
-        .run(
-          id,
-          input.conversationId,
-          input.systemPrompt,
-          input.instructions.path,
-          input.instructions.content,
-          input.instructions.hash,
-          input.instructions.loadedAt,
-          now,
-        );
+        .run(id, input.conversationId, input.systemPrompt, now);
     });
     return this.getSession(id)!;
   }
@@ -347,7 +313,6 @@ export class SessionRepository {
     summary: string;
     usage?: ModelUsage;
     trigger: SessionTrigger;
-    instructions: ProjectInstructionSnapshot;
     estimatedInputTokens: number;
   }): Promise<{ summaryId: string; newSessionId: string }> {
     const summaryId = randomUUID();
@@ -400,9 +365,8 @@ export class SessionRepository {
         .prepare(
           `INSERT INTO conversation_sessions
            (id, conversation_id, ordinal, status, trigger, system_prompt_snapshot,
-            project_instructions_path, project_instructions_snapshot, project_instructions_hash,
-            project_instructions_loaded_at, inherited_summary_id, started_at)
-           VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)`,
+            inherited_summary_id, started_at)
+           VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
         )
         .run(
           newSessionId,
@@ -410,10 +374,6 @@ export class SessionRepository {
           input.sourceSession.ordinal + 1,
           input.trigger,
           input.sourceSession.systemPromptSnapshot,
-          input.instructions.path,
-          input.instructions.content,
-          input.instructions.hash,
-          input.instructions.loadedAt,
           summaryId,
           now,
         );
@@ -552,10 +512,6 @@ function mapSession(row: SessionRow): ConversationSession {
     status: row.status,
     trigger: row.trigger,
     systemPromptSnapshot: row.system_prompt_snapshot,
-    projectInstructionsPath: row.project_instructions_path,
-    projectInstructionsSnapshot: row.project_instructions_snapshot,
-    projectInstructionsHash: row.project_instructions_hash,
-    projectInstructionsLoadedAt: row.project_instructions_loaded_at,
     inheritedSummaryId: row.inherited_summary_id,
     estimatedInputTokens: Number(row.estimated_input_tokens),
     actualInputTokens: row.actual_input_tokens === null ? null : Number(row.actual_input_tokens),

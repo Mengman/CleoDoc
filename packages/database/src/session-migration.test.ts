@@ -83,6 +83,22 @@ describe("session migration", () => {
           )
           .map((column) => column.name),
       ).toEqual(["content"]);
+      const sessionColumns = database
+        .read(
+          (sqlite) =>
+            sqlite.prepare("PRAGMA table_info(conversation_sessions)").all() as Array<{
+              name: string;
+            }>,
+        )
+        .map((column) => column.name);
+      expect(sessionColumns).not.toEqual(
+        expect.arrayContaining([
+          "project_instructions_path",
+          "project_instructions_snapshot",
+          "project_instructions_hash",
+          "project_instructions_loaded_at",
+        ]),
+      );
       expect(
         database.read((sqlite) =>
           sqlite
@@ -281,7 +297,7 @@ describe("session migration", () => {
               }
             ).version,
         ),
-      ).toBe(6);
+      ).toBe(8);
       expect(await readdir(path.join(state, "backups"))).toEqual([
         expect.stringMatching(/^pre-migration-v5-.*\.sqlite$/),
       ]);
