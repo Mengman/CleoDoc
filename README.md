@@ -184,5 +184,6 @@ npm run cleo -- material remove <material-id>
 - [数据库设计与当前实现](./docs/DATABASE_DESIGN.md)
 - [开发计划](./docs/DEVELOPMENT_PLAN.md)
 - [会话上下文压缩设计](./docs/SESSION_COMPACTION_DESIGN.md)
+- [Tool Call 技术设计](./docs/TOOL_CALL_DESIGN.md)
 - [Draft 写入与文本统计设计](./docs/DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)
 - [编码 Agent 指南](./AGENTS.md)
