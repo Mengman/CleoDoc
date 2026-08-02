@@ -417,25 +417,15 @@ MyNovel.cleo/
 - `NamedVersion`：用户名称、说明和内部 annotated tag。
 - `DocumentDiff`：两个版本之间的文件、块和行内变化。
 
-## 9. 实施顺序
+## 9. 当前交付状态
 
-详细任务、依赖和验收门见 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)。版本顺序固定为：
+开发任务、依赖、顺序和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，PRD 不再保存重复的实施计划。
 
-### 9.1 v0.1 CLI 核心 MVP
+截至 2026-08-02：
 
-1. 建立 TypeScript Core、CLI、项目文件格式和 SQLite 基础。
-2. 接入 LLM Provider，实现对话、流式输出和生成结果落盘。
-3. 实现资料的添加、删除、查看、编辑和增量全文索引。
-4. 实现本地 Embedding、混合检索、`ContextManifest` 和检索可解释性。
-5. 让 LLM 通过受控 Tool 查询资料与正文，并完成端到端 CLI 验收。
-
-### 9.2 v0.2 Electron 桌面产品
-
-1. 建立 Electron、React、Typed IPC、Utility Process 和作品工作室。
-2. 集成 TipTap 正文编辑、证据视图、批注和 Agent 交互。
-3. 实现 Git 命名版本、安全恢复和文档语义 Diff。
-4. 完成知识图、设定审批、一致性检查和影响分析。
-5. 完成可持久化阶段工作流、导入导出、跨平台打包和长篇项目验证。
+- v0.1 已完成 CLI 与项目基础、LLM Provider、多轮对话与内容保存、资料管理、Session 压缩与历史回查、Reasoning/ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool。
+- v0.1 尚未实现统一知识索引、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool 和 CLI 发布验收。
+- v0.2 Electron、React、TipTap、Git 版本、语义 Diff、知识图和阶段 Agent 工作流尚未开始。
 
 ## 10. 验收标准
 

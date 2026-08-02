@@ -1,7 +1,7 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 状态：migration v5–v8 与 `session-compaction-v7` 已实现 Markdown 压缩、单一摘要存储、输入投影、最低校验、完整拼接 Debug 日志、逐次 ModelCall 审计和数据库原生项目指令
-> 计划位置：v0.1 步骤 5.5
+> 实现状态：migration v5–v8、`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地；当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
+> 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
 > 日期：2026-08-02
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
 
@@ -224,70 +224,7 @@ nextUserInputReserveTokens = Math.min(
 
 触发算法不能只依赖消息数量。
 
-### 4.5 1M 上下文下的旧实现（v6 前）
-
-本节保留 `session-compaction-v6` 之前的实际计算，作为参数迁移和历史日志排查依据。设：
-
-```text
-C = contextWindowTokens                     = 1,000,000
-O = reservedOutputTokens                    = min(4,096, floor(C × 0.20))
-U = nextUserInputReserveTokens              = min(2,048, floor(C × 0.10))
-S = floor(C × safetyMarginRatio)            = floor(C × 0.10)
-E = estimatedInputTokens                    = estimate(payload) + U
-L = effectiveLimitTokens                    = C - O - S
-```
-
-代入当时的默认值得到：
-
-```text
-O = 4,096
-U = 2,048
-S = 100,000
-L = 1,000,000 - 4,096 - 100,000
-  = 895,904
-```
-
-旧实现同样使用包含下一条用户输入预留的 `E`，Ratio 和 Token 边界分别为：
-
-```text
-软压缩比例：softCompactionRatio = 0.75
-软压缩条件：R = E / L >= softCompactionRatio
-软压缩阈值：E_soft = 895,904 × 0.75 = 671,928
-当前 Payload 触发点：P_soft = E_soft - U = 669,880
-
-硬阻塞比例：hardCompactionRatio = 0.90
-硬阻塞条件：R = E / L >= hardCompactionRatio
-硬阻塞阈值：E_hard = ceil(895,904 × 0.90) = 806,314
-当前 Payload 触发点：P_hard = E_hard - U = 804,266
-```
-
-因此，旧实现大约在 670K Payload 时启动后台压缩，在 804K Payload 时禁止继续提交。
-
-压缩任务自身还有另一套输入上限。旧公式为：
-
-```text
-T = summaryTargetTokens
-  = max(512, min(4,000, floor(C × 0.10)))
-  = 4,000
-
-P = estimateTokens(COMPACTION_SYSTEM_PROMPT)
-  = 576
-
-M = maximumPayloadTokens
-  = C - T - floor(C × 0.15) - P
-  = 1,000,000 - 4,000 - 150,000 - 576
-  = 845,424
-```
-
-`M` 是发送给压缩模型的安全输入上限，不是硬阻塞阈值，也不是接收回复的长度。压缩请求当时已经不发送 `max_tokens`，但本地公式仍为摘要长度建议目标 `T` 和 15% 安全余量预留空间。
-
-旧参数在 1M 模型下有三个问题：
-
-1. `O = 4,096` 仍是为小上下文模型设计的值，与模型最大 384K 输出能力不匹配。
-2. `U = 2,048` 不适合文档原生应用中的长委托或大段粘贴输入。
-3. `M = 845,424` 只为回复和估算误差留下约 155K；在不设置 `max_tokens` 时，无法覆盖模型允许的 384K 最大输出。
-
-### 4.6 1M 上下文的当前预算方案
+### 4.5 1M 上下文的当前预算方案
 
 当前实现把模型能力显式拆为上下文窗口和最大输出长度，并采用以下默认值：
 
@@ -347,7 +284,7 @@ M = C - O - S - P
 
 这意味着当前方案约在 392K Payload 时后台压缩，在 477K Payload 时必须先压缩。它没有把 1M 全部用于历史输入，因为还必须保证一次最大 384K 的模型回复能够完成，并为 Token 估算误差保留空间。
 
-本次参数更新仍沿用单层 Map-Reduce。后续还应改为递归归并，以处理分段摘要本身仍超出 `M` 的极端情况：
+当前编排使用单层 Map-Reduce。后续还应改为递归归并，以处理分段摘要本身仍超出 `M` 的极端情况：
 
 ```text
 原始消息分组
@@ -439,7 +376,7 @@ Summary 1 + Session 2 原始消息
 5. Assistant Tool Call 与其连续对应的全部 Tool Result 是不可拆分原子单元。若 Tool Call 消息自身带有超长可见正文，可以先把正文作为普通 Assistant 文本安全切分，但 Tool Call 元数据及结果仍必须保留在同一个原子单元中。
 6. 如果一个 Tool 原子单元投影后仍超过 `M`，本次压缩以 `PROVIDER_CONTEXT_LIMIT` 失败；不得拆散调用与结果，也不得把超限请求发送给 Provider。旧 Session 保持 active，可在调整上下文配置后重试。
 
-`session-compaction-v8-turn-segmentation` 用于标识上述分段编排算法；它不改变 v7 的 Markdown 摘要 Prompt 和输出格式。当前步骤仍使用单层 Reduce；Segment Summary 过多时的递归归并属于后续独立工作。
+`session-compaction-v8-turn-segmentation` 用于标识上述分段编排算法；它不改变 v7 的 Markdown 摘要 Prompt 和输出格式。当前实现仍使用单层 Reduce；Segment Summary 过多时的递归归并属于后续独立工作。
 
 ### 5.4 压缩输入
 
@@ -489,9 +426,7 @@ Tool Result 也必须经过按 Tool 名称区分的白名单投影，禁止截�
 
 ## 6. 压缩提示词
 
-压缩 Prompt 必须版本化。`session-compaction-v1` 至 v6 逐步增加完整 JSON Schema、JSON Mode、关闭思考模式、取消 Provider 输出 Token 硬上限，以及 1M 上下文预算参数。实践表明 v6 的复杂结构要求给模型带来不必要的格式失败，而这些分类字段当前没有足够的业务消费价值。
-
-下一版 `session-compaction-v7` 改为 Markdown 文本摘要：
+当前 Prompt 版本 `session-compaction-v7` 使用 Markdown 文本摘要，不要求模型生成 JSON、Session ID、Message ID 或其他数据库字段：
 
 - LLM 只生成 `summary` 正文，不生成 JSON。
 - 不向 OpenAI-compatible Provider 发送 `response_format: { type: "json_object" }`。
@@ -679,7 +614,7 @@ interface SessionSummary {
 - 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取最新 Revision。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
-- migration v8 已删除 migration v4 的文件路径和 Session 快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见 [数据库设计](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)。
+- migration v8 已删除 migration v4 的文件路径和 Session 快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
 ## 9. 会话历史查询 Tool
 
@@ -768,7 +703,7 @@ interface SessionSummaryRecord {
 }
 ```
 
-migration v5 已删除 migration v4 的 `content_json`、`handoff_text`、`parameters_json` 和 `validation_status`。不增加 `model_call_id` 或 `compaction_job_id`；仍由 `compaction_jobs.summary_id` 指向最终摘要。完整字段和旧数据转换规则见 [数据库设计](./DATABASE_DESIGN.md#17-已实现设计简化会话摘要)。
+migration v5 已将 `session_summaries` 收敛为单一 Markdown `summary`，不增加 `model_call_id` 或 `compaction_job_id`；仍由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#68-session_summaries)。
 
 ### 10.3 `compaction_jobs`
 
@@ -960,20 +895,15 @@ type CompactionEvent =
 - 普通日志不记录完整历史、摘要原文、Prompt 或密钥。
 - 显式 `--debug` 日志会记录请求和完整拼接摘要，必须只写入项目 `.cleo/logs/`、在终端提示隐私风险并排除在 Git 之外；鉴权 Header 继续脱敏。
 
-## 17. 实施顺序
+## 17. 当前实现边界
 
-migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、输入门、历史 Tool 和事务恢复。v7 按以下顺序前向修改：
+详细开发进度只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。本设计当前已经落地普通累计压缩、单层 Map-Reduce、按完整用户回合分段、Tool Call 原子性、Tool Result 白名单投影、Session 切换、失败恢复、历史回查和 ModelCall 审计。
 
-1. **已完成**：为 Debug 事件增加流结束后的完整拼接 `summary`，在任何校验之前写入本地文件。
-2. **已完成**：将压缩模型输出类型改为普通 Markdown 字符串，删除复杂 Zod 输出 Schema、JSON Mode 和格式修复调用。
-3. **主体已完成**：实现空内容、截断、长度和非法 Tool Call 的最低校验；标题缺失的非阻断质量警告仍待补充。
-4. **已完成**：更新普通、分段和归并 Payload 投影与 Prompt：Message 只发送 `role` 与正文 `content`，排除 `reasoning_content`，并返回相同的 Markdown 摘要。
-5. **已完成**：migration v5 在迁移前创建本地数据库备份，将 `session_summaries` 重建为单一 `summary` 正文加应用层元数据，并确定性转换旧摘要；无法解析的行保留兼容文本。
-6. **已完成**：ContextBuilder 按 active Session 的 `inherited_summary_id` 精确注入一份 `summary`，并在每次 Agent 调用前读取数据库中的最新项目指令 Revision。
-7. **已完成当前范围**：已增加流式边界、旧摘要迁移、失败恢复、Debug 日志、普通/Map-Reduce 以及 S1→Summary1→S2→Summary2→S3 连续继承的端到端回归测试。
-8. **已完成**：migration v6 已接入 CompactionJob→ModelCall 逐次审计；普通、分段和归并调用分别记录阶段、顺序、实际请求参数、结束原因和 Token 用量。
-9. **已完成**：Tool Result 已改为按 Tool 名称执行结构化白名单投影；文档正文、历史命中、项目指令内容、查询词、修改参数和未知 Tool 原文不会进入压缩 Payload。
-10. **已完成**：超大 Session 使用 `session-compaction-v8-turn-segmentation` 按完整用户回合分段；以最终 Segment Payload 执行 80% 装箱和压缩请求安全输入上限 `M` 校验，超长正文按 Unicode 安全语义边界切分，Tool Call 与结果保持原子性。
+当前尚未实现：
+
+- Segment Summary 的递归多层归并；目前 Reduce Payload 超过 `M` 时返回 `PROVIDER_CONTEXT_LIMIT`。
+- 推荐 Markdown 标题缺失时的非阻断质量警告；当前只执行空内容、截断、长度和非法 Tool Call 等最低完整性校验。
+- 跨 Conversation 历史回查和统一 `ContextManifest`；前者需要独立产品设计，后者随本地 RAG 基础设施实现。
 
 ## 18. 验收标准
 

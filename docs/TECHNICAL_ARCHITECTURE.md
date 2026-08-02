@@ -291,7 +291,7 @@ erDiagram
 
 ## 7. SQLite 架构
 
-当前 migration v6 已落地的表、字段、索引、External Content FTS、ModelCall 审计、实例审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
+当前 migration v8 已落地的表、字段、索引、External Content FTS、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
 
 ### 7.1 数据库拓扑
 
@@ -384,6 +384,8 @@ Agent
 SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialService` 打开时读取并校验元数据、项目归属、路径、UTF-8 内容、字节数和哈希，然后同步 SQLite。添加、重命名和删除采用原子文件写入并在数据库失败时回滚当前操作；进程在文件与数据库更新之间中断时，下次打开以文件事实源校准投影。
 
 ## 8. 自研 RAG 架构
+
+> 实现状态：本节为 v0.1 后续架构，统一知识 Chunk、作品/资料 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。当前已有的 `conversation_message_fts` 仅服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
 ### 8.1 边界
 
@@ -630,11 +632,11 @@ interface DocumentDiff {
 
 ## 12. Agent 运行时
 
-Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。migration v7 将项目指令改为 SQLite 追加式 Revision 事实源，migration v8 删除 Session 文件快照字段和遗留文件导入路径，详见 [数据库设计](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)。
+Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。migration v7 将项目指令改为 SQLite 追加式 Revision 事实源，migration v8 删除 Session 文件快照字段和遗留文件导入路径，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
-v0.1 已通过 SQLite migration v5–v8 落地 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 按名称投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，文档正文、历史片段、项目指令内容与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以最终 Segment Payload 执行 80% 软装箱和安全输入硬校验；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 硬上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。migration v5 会确定性转换旧结构化摘要，migration v6 会保留旧 Message 内容和 rowid 并重建历史 FTS，migration v8 删除 Session 文件快照字段；这些迁移均不调用 LLM。
+v0.1 已通过 SQLite migration v5–v8 落地 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 按名称投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，文档正文、历史片段、项目指令内容与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。migration v5 会确定性转换旧结构化摘要，migration v6 会保留旧 Message 内容和 rowid 并重建历史 FTS，migration v8 删除 Session 文件快照字段；这些迁移均不调用 LLM。
 
-模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，约在当前 Payload 391,732 Token 时启动压缩，在 476,632 Token 时阻止继续提交；压缩请求的安全 Payload 上限约为 565,424 Token，最终累计摘要软目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
+模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩比例/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，当前 Payload 触发点分别约为 391,732 Token 和 476,632 Token；压缩请求安全输入上限 `M` 约为 565,424 Token，最终累计摘要长度建议目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 
 ### 12.1 v0.1 前台 Tool Loop
 
@@ -644,9 +646,9 @@ Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下
 
 流式 Provider 将超时拆为三个阶段：连接/首响应超时、连续无原始流数据的空闲超时、单轮生成总时限。连接成功后必须停止连接计时；任意 SSE/NDJSON 数据块（包括 keep-alive）都会重置空闲计时。默认值分别为 60 秒、120 秒和 20 分钟，CLI 参数或环境变量可以覆盖。客户端超时原因与上游 HTTP 408/504 必须分别记录，不能统一误报为连接失败。
 
-CLI 的 `--debug` 只开启本次进程的 LLM 协议诊断：Provider 在解析前逐次发出实际 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header 和原始 SSE/NDJSON 数据块，Agent 再为日志标注主笔、上下文压缩、压缩修复及调用轮次。每次响应结束后记录 API 返回的输入 Token，缺少 usage 时记录本地保守估算，并记录输出 Token、结束原因和 Schema 校验错误。CLI 将这些信息按 UTF-8 写入 `<项目根目录>/.cleo/logs/` 下本次进程独立的日志文件，终端只显示文件路径；日志不得写入 SQLite，并由现有 `.cleo/` 忽略规则排除在 Git 之外。API Key、Authorization、Cookie 等鉴权 Header 必须脱敏。由于请求 body 包含发送给模型的作品内容，CLI 文档必须明确提示用户仅在排障时开启并在分享前检查日志。
+CLI 的 `--debug` 只开启本次进程的 LLM 协议诊断：Provider 在解析前逐次发出实际 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header 和原始 SSE/NDJSON 数据块，Agent 再为日志标注主笔、普通压缩、分段压缩、归并压缩及调用轮次。每次响应结束后记录 API 返回的输入 Token，缺少 usage 时记录本地保守估算，并记录输出 Token、结束原因、完整拼接摘要和最低完整性校验错误。CLI 将这些信息按 UTF-8 写入 `<项目根目录>/.cleo/logs/` 下本次进程独立的日志文件，终端只显示文件路径；日志不得写入 SQLite，并由现有 `.cleo/` 忽略规则排除在 Git 之外。API Key、Authorization、Cookie 等鉴权 Header 必须脱敏。由于请求 body 包含发送给模型的作品内容，CLI 文档必须明确提示用户仅在排障时开启并在分享前检查日志。
 
-CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料、对话记录和 `ContextManifest` 必须保持一致。
+CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料和对话记录必须保持一致。RAG 落地后，`ContextManifest` 也必须遵守相同的一致性要求。
 
 ### 12.2 v0.2 可持久化工作流
 
@@ -876,25 +878,15 @@ v0.2 在此基础上增加：
 - Agent 提交修改，用户预览 Diff 后接受。
 - 断网、模型超时、数据库忙和磁盘空间不足。
 
-## 19. 分阶段交付
+## 19. 当前实现状态
 
-### 19.1 v0.1 CLI 核心 MVP
+实施顺序、任务依赖和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，本架构文档不再保存重复的交付计划。
 
-1. **CLI 与项目基础**：TypeScript packages、项目格式、SQLite 和命令行入口。
-2. **LLM 文档创作**：OpenAI-compatible、Ollama、流式对话和 Markdown 保存。
-3. **资料管理**：文本、TXT、Markdown 的添加、删除、查看和去重。
-4. **本地检索**：Chunk、FTS5、本地 Embedding 和精确向量查询。
-5. **RAG Tool**：混合检索、ContextManifest 和 LLM Tool Loop。
-6. **CLI 稳定化**：跨平台包、错误恢复、隔离和端到端验收。
+截至 2026-08-02：
 
-### 19.2 v0.2 Electron 桌面产品
-
-1. **桌面框架**：Electron、React、Typed IPC 和 Utility Process。
-2. **作品工作室**：TipTap、正文、资料、主笔对话和证据视图。
-3. **版本内核**：isomorphic-git、命名版本、恢复和语义 Diff。
-4. **知识图**：实体、事实、事件、关系、候选审批和冲突。
-5. **Agent 闭环**：阶段工作流、ChangeSet 和审批。
-6. **稳定化**：导入导出、备份、安全、性能和安装包。
+- 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
+- 尚未实现：统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 尚未开始：v0.2 Electron/React/Tiptap、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流。
 
 ## 20. 已确认与延后决策
 
