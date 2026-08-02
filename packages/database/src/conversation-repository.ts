@@ -150,6 +150,20 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
+  getToolMessages(conversationId: string, toolName: string): StoredMessage[] {
+    const rows = this.projectDatabase.read(
+      (database) =>
+        database
+          .prepare(
+            `SELECT * FROM messages
+             WHERE conversation_id = ? AND role = 'tool' AND name = ?
+             ORDER BY sequence`,
+          )
+          .all(conversationId, toolName) as unknown as MessageRow[],
+    );
+    return rows.map(mapMessage);
+  }
+
   async addMessage(
     conversationId: string,
     message: ChatMessage,

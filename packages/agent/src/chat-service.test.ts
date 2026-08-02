@@ -156,8 +156,11 @@ describe("ChatService", () => {
         prompt: "总结并保存到项目",
         signal: new AbortController().signal,
         approveToolCall: async (request) => {
-          if (request.toolName === "write_project_document") approvals.push(request.path);
-          return true;
+          const toolInput = request.input as { path?: unknown };
+          if (request.toolName === "write_project_document" && typeof toolInput.path === "string") {
+            approvals.push(toolInput.path);
+          }
+          return "allow_once";
         },
         onEvent: (event) => {
           if (event.type === "reasoning-delta") reasoningDeltas.push(event.text);
@@ -231,7 +234,8 @@ describe("ChatService", () => {
         model: "instruction-tool-model",
         prompt: "把第三人称限知写入项目指令",
         signal: new AbortController().signal,
-        approveToolCall: async (request) => request.toolName === "set_project_instructions",
+        approveToolCall: async (request) =>
+          request.toolName === "set_project_instructions" ? "allow_once" : "reject",
       });
       expect(result.content).toBe("项目指令已经更新。");
       expect(chat.getProjectInstructions()).toMatchObject({
@@ -242,6 +246,47 @@ describe("ChatService", () => {
         "<project_instructions revision=1",
       );
       expect(provider.requests[2]?.messages[0]?.content).toContain("始终使用第三人称限知视角。");
+    } finally {
+      await chat.close();
+    }
+  });
+
+  it("restores a get_tool load on the next user message", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const chat = await ChatService.open(project.root);
+    const provider = new PersistentToolProvider();
+    try {
+      const first = await chat.send({
+        projectId: project.manifest.id,
+        provider,
+        model: "persistent-tool-model",
+        prompt: "加载历史搜索工具",
+        signal: new AbortController().signal,
+      });
+      expect(first.content).toBe("历史搜索工具已经加载。");
+
+      const second = await chat.send({
+        conversationId: first.conversationId,
+        projectId: project.manifest.id,
+        provider,
+        model: "persistent-tool-model",
+        prompt: "现在搜索旧对话",
+        signal: new AbortController().signal,
+      });
+      expect(second.content).toBe("历史搜索已经完成。");
+      expect(provider.requests[2]?.tools?.map((tool) => tool.name)).toContain(
+        "search_conversation_history",
+      );
+      expect(chat.getConversationHistory(first.conversationId)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            role: "tool",
+            name: "search_conversation_history",
+            content: expect.stringContaining('"version":1'),
+          }),
+        ]),
+      );
     } finally {
       await chat.close();
     }
@@ -295,7 +340,11 @@ class ProjectInstructionToolProvider implements ModelProvider {
     if (this.requests.length === 1) {
       yield {
         type: "tool-call",
-        call: { id: "read-instructions", name: "read_project_instructions", argumentsJson: "{}" },
+        call: {
+          id: "load-set-instructions",
+          name: "get_tool",
+          argumentsJson: JSON.stringify({ name: "set_project_instructions" }),
+        },
       };
       yield { type: "done", finishReason: "tool_calls" };
       return;
@@ -308,7 +357,6 @@ class ProjectInstructionToolProvider implements ModelProvider {
           name: "set_project_instructions",
           argumentsJson: JSON.stringify({
             content: "始终使用第三人称限知视角。",
-            expected_revision: 0,
           }),
         },
       };
@@ -316,6 +364,51 @@ class ProjectInstructionToolProvider implements ModelProvider {
       return;
     }
     yield { type: "text-delta", text: "项目指令已经更新。" };
+    yield { type: "done", finishReason: "stop" };
+  }
+}
+
+class PersistentToolProvider implements ModelProvider {
+  readonly id = "persistent-tool";
+  readonly displayName = "Persistent Tool Provider";
+  readonly requests: ModelRequest[] = [];
+
+  async validateConfiguration(): Promise<ProviderHealth> {
+    return { ok: true, message: "ready" };
+  }
+
+  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    this.requests.push(request);
+    if (this.requests.length === 1) {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "load-history-search",
+          name: "get_tool",
+          argumentsJson: JSON.stringify({ name: "search_conversation_history" }),
+        },
+      };
+      yield { type: "done", finishReason: "tool_calls" };
+      return;
+    }
+    if (this.requests.length === 2) {
+      yield { type: "text-delta", text: "历史搜索工具已经加载。" };
+      yield { type: "done", finishReason: "stop" };
+      return;
+    }
+    if (this.requests.length === 3) {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "search-history",
+          name: "search_conversation_history",
+          argumentsJson: JSON.stringify({ query: "旧对话" }),
+        },
+      };
+      yield { type: "done", finishReason: "tool_calls" };
+      return;
+    }
+    yield { type: "text-delta", text: "历史搜索已经完成。" };
     yield { type: "done", finishReason: "stop" };
   }
 }

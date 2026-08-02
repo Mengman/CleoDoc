@@ -385,8 +385,8 @@ Summary 1 + Session 2 原始消息
 - 上一份累计摘要，首次为 `null`。
 - 当前 Session 的用户和助手消息；每条消息只投影协议必需的 `role` 和正文 `content`，不得包含 `reasoning_content`。
 - 消息顺序由数组位置表达；消息 ID、时间和覆盖边界由 CompactionJob 在应用层冻结，不发送给压缩模型。
-- Tool 名称、目标对象、成功/失败/拒绝状态。
-- 写入文档的路径和内容哈希。
+- Tool 名称、契约版本、必要目标对象和成功/失败状态。
+- 写入文档的路径、更新时间和创建或更新动作；不发送内容哈希。
 
 不包含：
 
@@ -411,16 +411,17 @@ const compactionMessages = messages.map((message) => ({
 
 Reasoning 只用于保存 Provider 暴露的思考过程和支持需要回传 Reasoning 的 Tool Loop；它不是会话摘要的事实输入。压缩器不得读取、总结、引用或根据 Reasoning 推断用户决定。
 
-Tool Result 也必须经过按 Tool 名称区分的白名单投影，禁止截取或转发原始返回字符串：
+Tool Result 必须通过对应 Tool Class 的 `getCompactionMessage()` 投影，禁止截取或转发原始返回字符串：
 
 | Tool 类型 | 允许进入 `toolEvents` 的信息 | 明确排除 |
 |---|---|---|
-| 文档写入 | 状态、路径、内容哈希、创建或更新动作 | 写入正文、Tool 参数中的 `content` |
-| 文档读取 | 状态、路径、内容哈希、offset、nextOffset、总字符数和是否截断 | 返回的文档正文 |
-| 项目指令读取或修改 | 状态、Revision、内容哈希和操作类型 | 当前指令、追加文本、替换文本和完整新内容 |
-| 会话历史搜索 | 状态、限定 Session 数量、角色、命中数量和上限 | 查询词、命中片段和原始消息 |
-| 会话历史精确读取 | 状态、Session ID、分页限制、结果数量和是否还有下一页 | 历史消息正文 |
-| 未识别 Tool | Tool 名称和成功/失败/未知状态 | 参数和完整 Tool Result |
+| 文档写入 | Tool 名称/版本、状态、路径、更新时间、创建或更新动作 | 写入正文、Hash、Tool 参数中的 `content` |
+| 文档读取 | Tool 名称/版本、状态、路径、更新时间、offset、nextOffset、总字符数和是否截断 | 返回的文档正文和 Hash |
+| 项目指令读取或修改 | Tool 名称/版本、状态、更新时间、更新后字符数和操作类型 | 当前指令、追加文本、完整新内容、内部 Revision 和 Hash |
+| 会话历史搜索 | Tool 名称/版本、状态和命中数量 | 查询词、Message ID、命中片段和原始消息 |
+| 会话历史精确读取 | Tool 名称/版本、状态、读取字符数和是否截断 | Message ID 和历史消息正文 |
+| 元 Tool | 不进入 `toolEvents` | Tool 列表、Schema 和动态加载状态 |
+| 未识别 Tool | Tool 名称、版本 0 和成功/失败/未知状态 | 参数和完整 Tool Result |
 
 失败结果只允许投影稳定错误码，不发送错误消息原文。所有字符串字段设长度上限；结构不合法时降级为最小的 Tool 名称与 `unknown` 状态，不得回退为原文截取。
 
@@ -499,11 +500,14 @@ DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模
   ],
   "toolEvents": [
     {
-      "tool": "write_project_document",
+      "tool": {
+        "name": "write_project_document",
+        "version": 1
+      },
       "status": "completed",
       "operation": "document_created",
-      "target": "manuscript/character-notes.md",
-      "contentHash": "..."
+      "path": "manuscript/character-notes.md",
+      "updatedAt": "2026-08-03T10:00:00.000Z"
     }
   ]
 }
@@ -625,26 +629,23 @@ interface SessionSummary {
 ```ts
 interface SearchConversationHistoryInput {
   query: string;
-  sessionIds?: string[];
-  roles?: Array<"user" | "assistant">;
   limit?: number; // 默认 5，最大 10
 }
 ```
 
-返回 Session ID、Message ID、时间、角色、命中片段、相关度及是否被摘要引用。使用 SQLite FTS5 trigram 建立已关闭 Session 的消息索引。
+Runtime 固定搜索当前 Conversation 的已关闭 Session 中的 User/Assistant Content。返回 Message ID、时间、角色和命中片段，不返回 Session ID、数据库 Row ID、FTS Rank 或 Reasoning。使用 SQLite FTS5 建立消息索引。
 
-### 9.2 `read_conversation_history`
+### 9.2 `read_conversation_message`
 
 ```ts
-interface ReadConversationHistoryInput {
-  sessionId: string;
-  afterMessageId?: string;
-  limitMessages?: number; // 最大 20
+interface ReadConversationMessageInput {
+  messageId: string;
+  offset?: number; // 默认 0
   maxCharacters?: number; // 最大 20000
 }
 ```
 
-返回精确消息及继续读取游标。
+返回这一条不可变消息的角色、时间、当前内容片段、总字符数及继续读取 Offset。Message ID 必须来自历史搜索结果；不返回 Reasoning。
 
 ### 9.3 工具边界
 
@@ -652,7 +653,7 @@ interface ReadConversationHistoryInput {
 - 默认只能读取当前 Conversation 的已关闭 Session。
 - 禁止跨 Conversation、跨项目查询。
 - 默认索引 user 和 assistant 正文，不索引 System Prompt、项目指令和历史 Tool 输出。
-- 单次命中数、消息数和字符数必须设硬上限。
+- 单次命中数和精读字符数必须设硬上限。
 - 不允许一次加载全部历史。
 
 主笔 System Prompt 应明确：只有累计摘要缺少完成任务所需的具体细节时才查询历史，不得为了全面了解而批量读取全部历史。

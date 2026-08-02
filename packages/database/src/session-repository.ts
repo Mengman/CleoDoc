@@ -68,13 +68,10 @@ interface HistoryRow {
 }
 
 export interface HistorySearchResult {
-  sessionId: string;
   messageId: string;
-  sequence: number;
   role: "user" | "assistant";
   createdAt: string;
   excerpt: string;
-  rank: number;
 }
 
 export class SessionRepository {
@@ -403,94 +400,59 @@ export class SessionRepository {
   searchClosedHistory(input: {
     conversationId: string;
     query: string;
-    sessionIds?: readonly string[];
-    roles?: readonly ("user" | "assistant")[];
     limit: number;
   }): HistorySearchResult[] {
     const terms = input.query.trim();
     if (terms === "") return [];
-    const sessionFilter = input.sessionIds?.length
-      ? ` AND m.session_id IN (${input.sessionIds.map(() => "?").join(",")})`
-      : "";
-    const roles = input.roles?.length ? input.roles : (["user", "assistant"] as const);
-    const roleFilter = ` AND m.role IN (${roles.map(() => "?").join(",")})`;
     const match = `"${terms.replaceAll('"', '""')}"`;
     const rows = this.projectDatabase.read(
       (database) =>
         database
           .prepare(
-            `SELECT m.id AS message_id, m.session_id, m.role, m.sequence, m.created_at,
+            `SELECT m.id AS message_id, m.role, m.created_at,
                     snippet(conversation_message_fts, 0, '[', ']', '…', 24) AS excerpt,
                     bm25(conversation_message_fts) AS rank
              FROM conversation_message_fts f
              JOIN messages m ON m.message_rowid = f.rowid
              JOIN conversation_sessions s ON s.id = m.session_id
              WHERE conversation_message_fts MATCH ? AND m.conversation_id = ?
-               AND s.status = 'closed'${sessionFilter}${roleFilter}
+               AND s.status = 'closed' AND m.role IN ('user', 'assistant')
              ORDER BY rank LIMIT ?`,
           )
-          .all(
-            match,
-            input.conversationId,
-            ...(input.sessionIds ?? []),
-            ...roles,
-            input.limit,
-          ) as unknown as Array<{
+          .all(match, input.conversationId, input.limit) as unknown as Array<{
           message_id: string;
-          session_id: string;
           role: "user" | "assistant";
-          sequence: number;
           created_at: string;
           excerpt: string;
-          rank: number;
         }>,
     );
     return rows.map((row) => ({
-      sessionId: row.session_id,
       messageId: row.message_id,
-      sequence: Number(row.sequence),
       role: row.role,
       createdAt: row.created_at,
       excerpt: row.excerpt,
-      rank: Number(row.rank),
     }));
   }
 
-  readClosedHistory(input: {
-    conversationId: string;
-    sessionId: string;
-    afterMessageId?: string;
-    limitMessages: number;
-  }): StoredMessage[] {
-    const session = this.getSession(input.sessionId);
-    if (
-      session === null ||
-      session.conversationId !== input.conversationId ||
-      session.status !== "closed"
-    ) {
-      throw new AppError("VALIDATION_ERROR", "只能读取当前对话中已关闭的 Session。");
-    }
-    let afterSequence = -1;
-    if (input.afterMessageId !== undefined) {
-      const cursor = this.projectDatabase.read(
-        (database) =>
-          database
-            .prepare("SELECT sequence FROM messages WHERE id = ? AND session_id = ?")
-            .get(input.afterMessageId!, input.sessionId) as { sequence: number } | undefined,
-      );
-      if (cursor === undefined) throw new AppError("VALIDATION_ERROR", "历史消息游标无效。");
-      afterSequence = Number(cursor.sequence);
-    }
-    const rows = this.projectDatabase.read(
+  readClosedMessage(input: { conversationId: string; messageId: string }): StoredMessage {
+    const row = this.projectDatabase.read(
       (database) =>
         database
           .prepare(
-            `SELECT * FROM messages WHERE session_id = ? AND sequence > ?
-             AND role IN ('user', 'assistant') ORDER BY sequence LIMIT ?`,
+            `SELECT m.* FROM messages m
+             JOIN conversation_sessions s ON s.id = m.session_id
+             WHERE m.id = ? AND m.conversation_id = ? AND s.status = 'closed'
+               AND m.role IN ('user', 'assistant')`,
           )
-          .all(input.sessionId, afterSequence, input.limitMessages) as unknown as HistoryRow[],
+          .get(input.messageId, input.conversationId) as HistoryRow | undefined,
     );
-    return rows.map(mapHistoryMessage);
+    if (row === undefined) {
+      throw new AppError(
+        "HISTORY_MESSAGE_NOT_FOUND",
+        "找不到指定的已关闭历史消息，请重新搜索会话历史。",
+      );
+    }
+    return mapHistoryMessage(row);
   }
 }
 

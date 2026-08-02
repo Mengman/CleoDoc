@@ -38,7 +38,8 @@ v0.1 的核心闭环是：
 | 5.5 会话上下文管理 | 已完成 | Session 压缩、数据库项目指令注入、历史回查 Tool、分层压缩和可编辑草稿提交门 |
 | 5.6 Reasoning 流式体验与调用审计 | 已完成 | Reasoning 实时展示与持久化、DeepSeek Tool Loop 回传、逐次 ModelCall 审计、Session 必填的不可变 Message 和 External Content 历史 FTS |
 | 5.7 数据库原生项目指令 | 已完成 | 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及无文件快照的 Session Schema |
-| 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
+| 5.8 统一 Tool 契约 | 已完成 | 独立 Tool Class、Schema 推导类型、整数版本、动态披露、两个元 Tool、退出前授权、两阶段历史精读和自有压缩投影 |
+| 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、版本化 Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
@@ -306,9 +307,9 @@ CLI 交互示意：
 
 - 新增追加式 `project_instruction_revisions` 表；每个 Revision 保存修改后的完整指令、内容哈希和创建时间。
 - 当前项目指令由最大 Revision 确定，不增加项目指令主表、当前版本指针或 `project_id`。
-- 所有修改使用 `expected_revision` 做乐观并发检查；尾部追加、精确文本替换和全量替换最终都创建完整的新 Revision。
+- Repository 内部继续使用 Revision 做乐观并发检查；LLM 不接收或提交 `expected_revision`，Tool 总是针对执行时的最新指令操作。
 - 恢复旧版本时，将旧内容复制为新 Revision，不删除或改写历史。
-- 提供 `read_project_instructions`、`append_project_instructions`、`replace_project_instruction_text` 和 `set_project_instructions` Tool。
+- 提供 `read_project_instructions`、`append_project_instructions` 和 `set_project_instructions` Tool；不提供低价值的精确片段替换 Tool。
 - LLM 发起的写操作展示 Diff 并要求用户明确批准；拒绝、冲突或进程中断不得改变当前 Revision。
 - 从 `conversation_sessions` 移除项目指令路径、快照、哈希和加载时间字段，不增加 Session 到项目指令 Revision 的替代关联。
 - 任何需要项目指令的主笔或 Agent 请求在上下文组装前读取数据库最新 Revision，并按 System Prompt、项目指令、累计摘要、当前消息的顺序注入。
@@ -325,10 +326,33 @@ CLI 命令：
 验收：
 
 - CLI 可以显示当前完整项目指令、Revision、哈希和更新时间。
-- 查询、追加、精确文本替换和全量替换都生成完整且可恢复的新 Revision。
+- 查询、尾部追加和全量替换都生成完整且可恢复的新 Revision。
 - 恢复旧版本会新增 Revision，历史记录保持不变。
-- Tool 使用过期 Revision 写入时得到明确冲突，不会覆盖用户较新的修改。
+- Tool 不向 LLM 暴露 Revision；Repository 在内部检测并处理并发变化，不会覆盖用户较新的修改。
 - LLM 修改项目指令必须经过用户批准；读取无需批准。
+
+### 步骤 5.8：统一 Tool 契约与动态披露
+
+实施状态：已完成。详细契约见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。
+
+已完成内容：
+
+- Input/Output 以 Zod Schema 为事实源，通过 `z.infer` 生成类型；每个 Tool 使用独立 Class 实现公共接口。
+- Tool 使用递增整数版本；Runtime 在每次成功和失败结果中统一加入 `tool.name + tool.version`，ModelCall 记录本轮暴露的 Tool 版本。
+- 引入 Tool Registry 和 `full/summary/hidden` 三级披露；`list_tools` 分页列出全部已授权 Tool，`get_tool` 查询并加载完整定义。
+- 保留项目级 Service/Repository 构造绑定，不增加 `ToolContext` 或模型可填写的 `projectId`。
+- 从 LLM 可见文档结果和压缩投影删除 `contentHash`、文档 ID、Session ID、FTS Rank 等无用途内部信息。
+- 历史查询改为 `search_conversation_history` 返回 Message ID 与 Excerpt，再由 `read_conversation_message` 按 Message ID 分段读取原文。
+- `ask` Tool 支持拒绝、仅允许本次和退出前持续允许；临时授权只保存在当前 `ChatService` 内存中。
+- 压缩投影由具体 Tool 的 `getCompactionMessage()` 生成；正文、项目指令全文、历史原文、Reasoning 和元 Tool 操作不进入摘要请求。
+
+验收：
+
+- 默认模型请求只包含 `full` Tool；`list_tools` 始终返回全部已授权 Tool 的名称、版本和描述，摘要或隐藏 Tool 仍需通过 `get_tool` 加载后调用。成功加载的 `name + version` 从当前 Conversation 的历史结果恢复，版本变化后需要重新加载。
+- 未加载、未知或未授权 Tool 不能绕过 Registry 执行。
+- 每个 Tool Result 可定位名称、版本、成功数据或稳定错误及恢复建议。
+- 关键字搜索不会要求模型预先知道 Session ID，精读只能访问当前 Conversation 中已关闭的不可变消息。
+- Tool Result 和压缩投影不会泄露正文 Hash、内部 Row ID、历史 Reasoning 或无关大文本。
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
 - 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。

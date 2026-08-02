@@ -391,7 +391,7 @@ async function runInteractiveCli(
         child.stdin.write(`${inputs[sentInputs]}\n`);
         sentInputs += 1;
       }
-      const approvalPromptCount = stdout.split("允许本次写入？").length - 1;
+      const approvalPromptCount = stdout.split("允许写入？").length - 1;
       while (sentApprovals < approvalPromptCount && sentApprovals < approvals.length) {
         child.stdin.write(`${approvals[sentApprovals]}\n`);
         sentApprovals += 1;

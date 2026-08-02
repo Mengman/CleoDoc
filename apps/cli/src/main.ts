@@ -10,6 +10,7 @@ import {
   ChatInputController,
   ChatService,
   createInstructionDiff,
+  type ApprovalChoice,
   type LlmDebugHandler,
   type ToolApprovalHandler,
   type ToolApprovalRequest,
@@ -834,7 +835,7 @@ async function interactiveChat(
           model,
           prompt: line,
           ...(conversationId === undefined ? {} : { conversationId }),
-          approveToolCall: (request) => approveProjectWrite(readline, request),
+          approveToolCall: (request) => approveProjectWrite(chat, readline, request),
           contextWindowTokens: context.contextWindowTokens,
           ...(context.onDebugEvent === undefined ? {} : { onDebugEvent: context.onDebugEvent }),
         });
@@ -927,23 +928,54 @@ function printSession(details: ReturnType<ChatService["getSessionDetails"]>): vo
 }
 
 async function approveProjectWrite(
+  chat: ChatService,
   readline: Interface,
   request: ToolApprovalRequest,
-): Promise<boolean> {
+): Promise<ApprovalChoice> {
+  const toolInput = isRecord(request.input) ? request.input : {};
+  if (request.toolName === "append_project_instructions") {
+    const current = chat.getProjectInstructions()?.content ?? "";
+    const text = typeof toolInput.text === "string" ? toolInput.text : "";
+    output.write("\nLLM 请求追加项目指令（Tool v" + String(request.toolVersion) + "）：\n");
+    output.write(sanitizeTerminalMultiline(createInstructionDiff(current, current + text)) + "\n");
+    return askToolApproval(readline, "允许项目指令追加？");
+  }
+  if (request.toolName === "set_project_instructions") {
+    const current = chat.getProjectInstructions()?.content ?? "";
+    const content = typeof toolInput.content === "string" ? toolInput.content : "";
+    output.write("\nLLM 请求整体替换项目指令（Tool v" + String(request.toolVersion) + "）：\n");
+    output.write(sanitizeTerminalMultiline(createInstructionDiff(current, content)) + "\n");
+    return askToolApproval(readline, "允许整体替换项目指令？");
+  }
   if (request.toolName !== "write_project_document") {
-    output.write(`\nLLM 请求修改项目指令（当前 Revision ${request.currentRevision}）：\n`);
-    output.write(`${sanitizeTerminalMultiline(request.diff)}\n`);
-    const answer = (await readline.question("允许本次项目指令修改？[y/N] ")).trim().toLowerCase();
-    return answer === "y" || answer === "yes";
+    output.write(
+      "\nLLM 请求执行 " + request.toolName + " v" + String(request.toolVersion) + "。\n",
+    );
+    return askToolApproval(readline, "允许执行？");
   }
-  output.write(`\nLLM 请求${request.overwrite ? "覆盖" : "创建"}项目文档：${request.path}\n`);
-  output.write(`内容长度：${request.contentLength} 字符\n`);
-  const preview = sanitizeTerminalText(request.contentPreview);
+  const path = typeof toolInput.path === "string" ? toolInput.path : "";
+  const content = typeof toolInput.content === "string" ? toolInput.content : "";
+  const overwrite = toolInput.overwrite === true;
+  output.write("\nLLM 请求" + (overwrite ? "覆盖" : "创建") + "项目文档：" + path + "\n");
+  output.write("内容长度：" + String(content.length) + " 字符\n");
+  const preview = sanitizeTerminalText(content.slice(0, 240));
   if (preview !== "") {
-    output.write(`内容预览：${truncateText(preview, 240)}\n`);
+    output.write("内容预览：" + truncateText(preview, 240) + "\n");
   }
-  const answer = (await readline.question("允许本次写入？[y/N] ")).trim().toLowerCase();
-  return answer === "y" || answer === "yes";
+  return askToolApproval(readline, "允许写入？");
+}
+
+async function askToolApproval(readline: Interface, prompt: string): Promise<ApprovalChoice> {
+  const answer = (await readline.question(prompt + "[y]仅本次/[a]退出前允许/[N]拒绝 "))
+    .trim()
+    .toLowerCase();
+  if (answer === "y" || answer === "yes") return "allow_once";
+  if (answer === "a" || answer === "always") return "allow_until_exit";
+  return "reject";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function printRecentConversations(conversations: readonly ConversationSummary[]): void {

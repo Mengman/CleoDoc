@@ -480,9 +480,9 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ### 10.4 历史回查
 
-- `searchClosedHistory` 使用 FTS5 trigram、`snippet()` 和 `bm25()`。
+- `searchClosedHistory` 使用 FTS5、`snippet()` 和 `bm25()`，但只向 Tool Result 返回 Message ID、角色、时间和命中片段。
 - FTS 通过 `message_rowid` 关联 `messages`；查询强制限制当前 `conversation_id` 和已关闭 Session。
-- `readClosedHistory` 通过 `messages` 返回指定已关闭 Session 的原始消息。
+- `readClosedMessage` 只按搜索得到的 Message ID 返回当前 Conversation 中一条已关闭的 User/Assistant 消息；不按 Session 批量读取，也不返回 Reasoning。
 
 ### 10.5 项目指令
 

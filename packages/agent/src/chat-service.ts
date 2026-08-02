@@ -8,6 +8,7 @@ import type {
   ModelProvider,
   ModelRequest,
   ModelToolCall,
+  ModelToolDefinition,
   ModelUsage,
   ProjectInstructionRevision,
   SavedDocument,
@@ -22,7 +23,7 @@ import {
   SessionRepository,
 } from "../../database/src/index.js";
 import { DocumentService } from "../../project/src/index.js";
-import { ProjectToolRuntime, type ToolApprovalHandler } from "./project-tools.js";
+import { ProjectToolRuntime, type ToolApprovalHandler } from "./tool/index.js";
 import { CompactionService } from "./compaction-service.js";
 import {
   ContextBudgetService,
@@ -62,6 +63,7 @@ export class ChatService {
   private readonly modelCalls: ModelCallRepository;
   private readonly projectInstructions: ProjectInstructionRepository;
   private readonly documents: DocumentService;
+  private readonly toolApprovalsUntilExit = new Set<string>();
   private readonly contextBuilder = new ContextBuilder();
   private readonly budgetService = new ContextBudgetService();
 
@@ -125,8 +127,10 @@ export class ChatService {
     let usage: ModelUsage | undefined;
     const tools = new ProjectToolRuntime(this.projectRoot, {
       approve: input.approveToolCall,
+      approvedUntilExit: this.toolApprovalsUntilExit,
       history: { repository: this.sessions, conversationId: conversation.id },
       projectInstructions: this.projectInstructions,
+      toolStateMessages: this.repository.getToolMessages(conversation.id, "get_tool"),
     });
 
     try {
@@ -136,6 +140,7 @@ export class ChatService {
           this.projectInstructions.getCurrent(),
           this.sessions.getInheritedSummary(session),
           this.sessions.getSessionMessages(session.id),
+          tools.disclosurePrompt,
         );
         let roundContent = "";
         let roundReasoning = "";
@@ -246,7 +251,7 @@ export class ChatService {
             const toolResponseError = parseToolResponseError(result);
             if (
               toolResponseError !== null &&
-              ["VALIDATION_ERROR", "UNKNOWN_TOOL"].includes(toolResponseError.code)
+              ["INVALID_TOOL_INPUT", "TOOL_NOT_FOUND"].includes(toolResponseError.code)
             ) {
               emitLlmDebugEvent(input.onDebugEvent, {
                 type: "llm-response-error",
@@ -304,6 +309,8 @@ export class ChatService {
           conversation.id,
           input.contextWindowTokens,
           tools.definitions,
+          "",
+          tools.disclosurePrompt,
         );
         await this.sessions.updateBudget(
           session.id,
@@ -399,24 +406,30 @@ export class ChatService {
   getContextStatus(
     conversationId: string,
     contextWindowTokens?: number,
-    toolDefinitions = new ProjectToolRuntime(this.projectRoot, {
-      history: { repository: this.sessions, conversationId },
-      projectInstructions: this.projectInstructions,
-    }).definitions,
+    toolDefinitions?: readonly ModelToolDefinition[],
     draft = "",
+    toolDisclosure?: string,
   ): ContextBudgetStatus {
     this.assertConversation(conversationId);
     const session = this.sessions.getCurrentSession(conversationId);
     if (session === null) throw new AppError("VALIDATION_ERROR", "当前对话没有可用 Session。");
+    const defaultTools =
+      toolDefinitions === undefined || toolDisclosure === undefined
+        ? new ProjectToolRuntime(this.projectRoot, {
+            history: { repository: this.sessions, conversationId },
+            projectInstructions: this.projectInstructions,
+          })
+        : undefined;
     const messages = this.contextBuilder.build(
       session,
       this.projectInstructions.getCurrent(),
       this.sessions.getInheritedSummary(session),
       this.sessions.getSessionMessages(session.id),
+      toolDisclosure ?? defaultTools?.disclosurePrompt ?? "",
     );
     return this.budgetService.estimate(
       messages,
-      toolDefinitions,
+      toolDefinitions ?? defaultTools?.definitions ?? [],
       createContextBudgetPolicy(contextWindowTokens),
       draft,
     );
@@ -440,7 +453,13 @@ export class ChatService {
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可压缩或压缩已在进行中。");
     }
-    return new CompactionService(this.sessions, this.modelCalls).compact({
+    const tools = new ProjectToolRuntime(this.projectRoot, {
+      history: { repository: this.sessions, conversationId: input.conversationId },
+      projectInstructions: this.projectInstructions,
+    });
+    return new CompactionService(this.sessions, this.modelCalls, (messages) =>
+      tools.projectToolEventsForCompaction(messages),
+    ).compact({
       conversationId: input.conversationId,
       session,
       provider: input.provider,
@@ -506,6 +525,7 @@ function describeModelRequest(request: ModelRequest): Readonly<Record<string, un
     toolsEnabled: (request.tools?.length ?? 0) > 0,
     toolCount: request.tools?.length ?? 0,
     toolNames: request.tools?.map((tool) => tool.name) ?? [],
+    toolVersions: request.tools?.map((tool) => ({ name: tool.name, version: tool.version })) ?? [],
   };
 }
 

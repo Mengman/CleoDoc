@@ -12,15 +12,19 @@ import type {
   ProviderHealth,
   StoredMessage,
 } from "../../contracts/src/index.js";
-import { ProjectDatabase, ProjectInstructionRepository } from "../../database/src/index.js";
+import {
+  ProjectDatabase,
+  ProjectInstructionRepository,
+  SessionRepository,
+} from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import {
   projectMessagesForCompaction,
-  projectToolEventsForCompaction,
   segmentMessagesForCompaction,
 } from "./compaction-service.js";
 import type { LlmDebugEvent } from "./debug-events.js";
+import { ProjectToolRuntime } from "./tool/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -476,7 +480,17 @@ describe("session compaction", () => {
     expect(JSON.stringify(projected)).not.toContain("绝不能发送的思考内容");
   });
 
-  it("projects tool results through a metadata allowlist without leaking retrieved content", () => {
+  it("projects tool results through each Tool contract without leaking retrieved content", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const database = await ProjectDatabase.open(project.root);
+    const runtime = new ProjectToolRuntime(project.root, {
+      history: {
+        repository: new SessionRepository(database),
+        conversationId: "conversation-1",
+      },
+      projectInstructions: new ProjectInstructionRepository(database),
+    });
     const assistant = storedMessage({
       sequence: 1,
       role: "assistant",
@@ -506,19 +520,13 @@ describe("session compaction", () => {
         {
           id: "search-history-1",
           name: "search_conversation_history",
-          argumentsJson: JSON.stringify({
-            query: "HISTORY_QUERY_SECRET",
-            sessionIds: ["session-old"],
-            roles: ["user"],
-            limit: 5,
-          }),
+          argumentsJson: JSON.stringify({ query: "HISTORY_QUERY_SECRET", limit: 5 }),
         },
         {
           id: "read-history-1",
-          name: "read_conversation_history",
+          name: "read_conversation_message",
           argumentsJson: JSON.stringify({
-            sessionId: "session-old",
-            limitMessages: 10,
+            messageId: "old-message",
             maxCharacters: 2_000,
           }),
         },
@@ -539,10 +547,14 @@ describe("session compaction", () => {
         toolCallId: "write-1",
         content: JSON.stringify({
           ok: true,
-          document: {
-            path: "manuscript/summary.md",
-            contentHash: "write-hash",
-            created: true,
+          tool: { name: "write_project_document", version: 1 },
+          data: {
+            document: {
+              path: "manuscript/summary.md",
+              size: 10,
+              updatedAt: "2026-08-03T00:00:00.000Z",
+              created: true,
+            },
           },
         }),
       }),
@@ -553,7 +565,11 @@ describe("session compaction", () => {
         toolCallId: "write-failed",
         content: JSON.stringify({
           ok: false,
-          error: { code: "DOCUMENT_ALREADY_EXISTS", message: "ERROR_MESSAGE_SECRET" },
+          tool: { name: "write_project_document", version: 1 },
+          error: {
+            code: "DOCUMENT_ALREADY_EXISTS",
+            message: "ERROR_MESSAGE_SECRET",
+          },
         }),
       }),
       storedMessage({
@@ -563,14 +579,17 @@ describe("session compaction", () => {
         toolCallId: "read-doc-1",
         content: JSON.stringify({
           ok: true,
-          document: {
-            path: "manuscript/chapter.md",
-            contentHash: "chapter-hash",
-            offset: 0,
-            content: "DOCUMENT_CONTENT_SECRET",
-            truncated: false,
-            nextOffset: null,
-            totalCharacters: 100,
+          tool: { name: "read_project_document", version: 1 },
+          data: {
+            document: {
+              path: "manuscript/chapter.md",
+              updatedAt: "2026-08-03T00:00:00.000Z",
+              offset: 0,
+              content: "DOCUMENT_CONTENT_SECRET",
+              truncated: false,
+              nextOffset: null,
+              totalCharacters: 100,
+            },
           },
         }),
       }),
@@ -581,19 +600,39 @@ describe("session compaction", () => {
         toolCallId: "search-history-1",
         content: JSON.stringify({
           ok: true,
-          results: [{ excerpt: "HISTORY_EXCERPT_SECRET", messageId: "old-message" }],
+          tool: { name: "search_conversation_history", version: 1 },
+          data: {
+            results: [
+              {
+                excerpt: "HISTORY_EXCERPT_SECRET",
+                messageId: "old-message",
+                role: "user",
+                createdAt: "2026-08-03T00:00:00.000Z",
+              },
+            ],
+          },
         }),
       }),
       storedMessage({
         sequence: 6,
         role: "tool",
-        name: "read_conversation_history",
+        name: "read_conversation_message",
         toolCallId: "read-history-1",
         content: JSON.stringify({
           ok: true,
-          sessionId: "session-old",
-          messages: [{ content: "HISTORY_MESSAGE_SECRET" }],
-          nextAfterMessageId: "old-message",
+          tool: { name: "read_conversation_message", version: 1 },
+          data: {
+            message: {
+              messageId: "old-message",
+              role: "user",
+              createdAt: "2026-08-03T00:00:00.000Z",
+              content: "HISTORY_MESSAGE_SECRET",
+              offset: 0,
+              truncated: false,
+              nextOffset: null,
+              totalCharacters: 22,
+            },
+          },
         }),
       }),
       storedMessage({
@@ -603,10 +642,10 @@ describe("session compaction", () => {
         toolCallId: "read-instructions-1",
         content: JSON.stringify({
           ok: true,
-          projectInstructions: {
-            revision: 7,
-            contentHash: "instructions-hash",
+          tool: { name: "read_project_instructions", version: 1 },
+          data: {
             content: "PROJECT_INSTRUCTIONS_SECRET",
+            updatedAt: "2026-08-03T00:00:00.000Z",
           },
         }),
       }),
@@ -619,63 +658,60 @@ describe("session compaction", () => {
       }),
     ];
 
-    const projected = projectToolEventsForCompaction(messages);
-    expect(projected).toEqual([
-      expect.objectContaining({
-        tool: "write_project_document",
-        operation: "document_created",
-        status: "completed",
-        target: "manuscript/summary.md",
-        contentHash: "write-hash",
-      }),
-      expect.objectContaining({
-        tool: "write_project_document",
-        operation: "document_write",
-        status: "failed",
-        target: "manuscript/existing.md",
-        errorCode: "DOCUMENT_ALREADY_EXISTS",
-      }),
-      expect.objectContaining({
-        tool: "read_project_document",
-        operation: "document_read",
-        target: "manuscript/chapter.md",
-        contentHash: "chapter-hash",
-        range: { offset: 0, nextOffset: null, totalCharacters: 100, truncated: false },
-      }),
-      expect.objectContaining({
-        tool: "search_conversation_history",
-        operation: "conversation_history_searched",
-        resultCount: 1,
-        range: { sessionCount: 1, roles: ["user"], limit: 5 },
-      }),
-      expect.objectContaining({
-        tool: "read_conversation_history",
-        operation: "conversation_history_read",
-        target: "session-old",
-        resultCount: 1,
-      }),
-      expect.objectContaining({
-        tool: "read_project_instructions",
-        operation: "project_instructions_read",
-        revision: 7,
-        contentHash: "instructions-hash",
-      }),
-      { tool: "future_tool", operation: "unknown", status: "unknown" },
-    ]);
-    const serialized = JSON.stringify(projected);
-    for (const secret of [
-      "WRITE_ARGUMENT_SECRET",
-      "FAILED_WRITE_ARGUMENT_SECRET",
-      "ERROR_MESSAGE_SECRET",
-      "DOCUMENT_CONTENT_SECRET",
-      "HISTORY_QUERY_SECRET",
-      "HISTORY_EXCERPT_SECRET",
-      "HISTORY_MESSAGE_SECRET",
-      "PROJECT_INSTRUCTIONS_SECRET",
-      "ARG_SECRET",
-      "UNKNOWN_TOOL_RESULT_SECRET",
-    ]) {
-      expect(serialized).not.toContain(secret);
+    try {
+      const projected = runtime.projectToolEventsForCompaction(messages);
+      expect(projected).toEqual([
+        expect.objectContaining({
+          tool: { name: "write_project_document", version: 1 },
+          operation: "document_created",
+          status: "completed",
+          path: "manuscript/summary.md",
+        }),
+        expect.objectContaining({
+          tool: { name: "write_project_document", version: 1 },
+          status: "failed",
+          errorCode: "DOCUMENT_ALREADY_EXISTS",
+        }),
+        expect.objectContaining({
+          tool: { name: "read_project_document", version: 1 },
+          path: "manuscript/chapter.md",
+          totalCharacters: 100,
+          truncated: false,
+        }),
+        expect.objectContaining({
+          tool: { name: "search_conversation_history", version: 1 },
+          resultCount: 1,
+        }),
+        expect.objectContaining({
+          tool: { name: "read_conversation_message", version: 1 },
+          readCharacters: 22,
+          truncated: false,
+        }),
+        expect.objectContaining({
+          tool: { name: "read_project_instructions", version: 1 },
+          updatedAt: "2026-08-03T00:00:00.000Z",
+        }),
+        { tool: { name: "future_tool", version: 0 }, status: "unknown" },
+      ]);
+      const serialized = JSON.stringify(projected);
+      for (const secret of [
+        "WRITE_ARGUMENT_SECRET",
+        "FAILED_WRITE_ARGUMENT_SECRET",
+        "ERROR_MESSAGE_SECRET",
+        "DOCUMENT_CONTENT_SECRET",
+        "HISTORY_QUERY_SECRET",
+        "HISTORY_EXCERPT_SECRET",
+        "HISTORY_MESSAGE_SECRET",
+        "PROJECT_INSTRUCTIONS_SECRET",
+        "ARG_SECRET",
+        "UNKNOWN_TOOL_RESULT_SECRET",
+      ]) {
+        expect(serialized).not.toContain(secret);
+      }
+      expect(serialized).not.toContain("contentHash");
+      expect(serialized).not.toContain("revision");
+    } finally {
+      await database.close();
     }
   });
 });
@@ -713,6 +749,15 @@ class CompactionAwareProvider implements ModelProvider {
     if (this.normalCalls === 1) {
       yield { type: "text-delta", text: "已记录主角职业。" };
     } else if (this.normalCalls === 2) {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "load-history-search",
+          name: "get_tool",
+          argumentsJson: JSON.stringify({ name: "search_conversation_history" }),
+        },
+      };
+    } else if (this.normalCalls === 3) {
       yield {
         type: "tool-call",
         call: {

@@ -1,6 +1,6 @@
 # CleoDoc Tool Call 技术设计
 
-状态：设计讨论中
+状态：v0.1 Core 已实现
 适用范围：CleoDoc Core、CLI 和未来桌面端
 最后更新：2026-08-03
 
@@ -232,20 +232,20 @@ interface Tool<Input, Output> {
 
 ## 4. Tool 清单与披露等级
 
-当前代码实现了 9 个 Tool。目标设计删除 `replace_project_instruction_text`，把 `read_conversation_history` 重构并改名为 `read_conversation_message`，再新增两个元 Tool。完成重构后共有 10 个 Tool：
+当前代码已经删除 `replace_project_instruction_text`，把 `read_conversation_history` 重构为 `read_conversation_message`，并实现两个元 Tool，共有 10 个 Tool：
 
 | 类名 | Tool name | Exposure | Approval | 状态 |
 |---|---|---|---|---|
-| `ListProjectDocumentsTool` | `list_project_documents` | `full` | `auto` | 已实现，待接口化 |
-| `ReadProjectDocumentTool` | `read_project_document` | `full` | `auto` | 已实现，待接口化 |
-| `WriteProjectDocumentTool` | `write_project_document` | `full` | `ask` | 已实现，待接口化 |
-| `ReadProjectInstructionsTool` | `read_project_instructions` | `summary` | `auto` | 已实现，待简化 |
-| `AppendProjectInstructionsTool` | `append_project_instructions` | `hidden` | `ask` | 已实现，待简化 |
-| `SetProjectInstructionsTool` | `set_project_instructions` | `hidden` | `ask` | 已实现，待简化 |
-| `SearchConversationHistoryTool` | `search_conversation_history` | `summary` | `auto` | 已实现，待重构 |
-| `ReadConversationMessageTool` | `read_conversation_message` | `summary` | `auto` | 由现有读取 Tool 重构 |
-| `ListToolsTool` | `list_tools` | `full` | `auto` | 待实现 |
-| `GetToolTool` | `get_tool` | `full` | `auto` | 待实现 |
+| `ListProjectDocumentsTool` | `list_project_documents` | `full` | `auto` | 已实现 |
+| `ReadProjectDocumentTool` | `read_project_document` | `full` | `auto` | 已实现 |
+| `WriteProjectDocumentTool` | `write_project_document` | `full` | `ask` | 已实现 |
+| `ReadProjectInstructionsTool` | `read_project_instructions` | `summary` | `auto` | 已实现 |
+| `AppendProjectInstructionsTool` | `append_project_instructions` | `hidden` | `ask` | 已实现 |
+| `SetProjectInstructionsTool` | `set_project_instructions` | `hidden` | `ask` | 已实现 |
+| `SearchConversationHistoryTool` | `search_conversation_history` | `summary` | `auto` | 已实现 |
+| `ReadConversationMessageTool` | `read_conversation_message` | `summary` | `auto` | 已实现 |
+| `ListToolsTool` | `list_tools` | `full` | `auto` | 已实现 |
+| `GetToolTool` | `get_tool` | `full` | `auto` | 已实现 |
 
 `write_draft`、RAG 检索和资料管理 CLI 命令尚未成为已实现的 LLM Tool，不计入本清单。
 
@@ -487,16 +487,18 @@ Tool Registry 保存当前 Runtime 注册的 Tool，并负责：
 - 按当前项目、任务、阶段和授权过滤可用 Tool。
 - 生成 `full` 与 `summary` Provider 定义。
 - 为 `list_tools` 提供稳定排序和分页。
-- 为 `get_tool` 返回公共定义，并将目标 Tool 加入下一次模型请求。
+- 为 `get_tool` 返回公共定义，并将目标 Tool 的当前版本加入后续模型请求。
 - 阻止元 Tool 发现或加载未授权 Tool。
 
-通过 `get_tool` 加载的 Tool 只在当前用户输入触发的 Agent 回合中有效。下一次用户输入重新从默认披露集合开始，避免 Tool Schema 在 Conversation 中持续累积。
+通过 `get_tool` 成功加载的 Tool 在当前 Conversation 中持续有效。每次用户输入创建新 Runtime 时，CleoDoc 从该 Conversation 已保存的成功 `get_tool` 结果恢复 `name + version` 加载状态；Session 压缩和应用重启不会让模型已经取得的 Tool 突然变为不可调用。加载状态不跨 Conversation。Tool 升级后旧版本记录不会自动加载新版本，模型必须根据 `list_tools` 返回的新版本再次调用 `get_tool`。
 
 ### 8.2 list_tools
 
 用途描述：
 
-> 分页列出当前 Agent 回合中已授权但尚未完整加载的 Tool。只返回名称、版本和功能描述；需要调用某个 Tool 时，再使用 get_tool 查询完整定义。
+> 分页列出当前 Agent 回合中已授权的全部 Tool。只返回名称、版本和功能描述；需要查看某个 Tool 的完整定义时，再使用 get_tool。
+
+`list_tools` 不因 Tool 的 `exposure` 或当前是否已经加载而过滤结果。这样模型即使复用了旧上下文、没有再次收到 `full` Tool 定义，也能重新发现当前运行时中的完整 Tool 清单。`get_tool` 仍负责返回 Input/Output Schema、审批方式和错误定义，并让 `summary` 或 `hidden` Tool 从下一轮开始可调用。
 
 Input Schema：
 
@@ -523,7 +525,7 @@ Output Schema：
 
 用途描述：
 
-> 根据名称查询当前 Agent 回合允许使用的 Tool 完整定义，并将该 Tool 加入下一次模型请求的可调用 Tool 列表。
+> 根据名称查询当前 Conversation 允许使用的 Tool 完整定义，并将该版本加入后续模型请求的可调用 Tool 列表。
 
 Input Schema：
 
@@ -560,6 +562,8 @@ Output Schema：
 interface ApprovalRequest {
   toolName: string;
   toolVersion: number;
+  /** 已通过 inputSchema 校验，供 CLI/GUI 生成审批预览。 */
+  input: unknown;
 }
 
 type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
@@ -762,22 +766,17 @@ classDiagram
 
 类图中的项目隔离通过构造 Runtime 时绑定的 Service 和 Repository 实现，不依赖 `ToolContext.projectId`。两个元 Tool 只能访问已经过 Runtime 过滤的 Registry。
 
-## 14. 实现差异
+## 14. 实现状态
 
-当前 `ProjectToolRuntime` 仍以一个 Switch 集中执行 Tool，并将所有现有定义完整发送给模型。落地本设计时需要完成：
+v0.1 Core 已完成本文件定义的公共 Tool 契约、10 个 Tool Class、Tool Registry、动态披露、元 Tool、版本化结果信封、退出前临时授权、两阶段历史查询和 Tool 自有压缩投影。
 
-1. 将每个 Tool 拆为独立 Class，并从 Zod Schema 推导 Input/Output 类型。
-2. 引入 Tool Registry、三个披露等级和本轮加载状态。
-3. 增加 `list_tools` 与 `get_tool`。
-4. 删除 `replace_project_instruction_text`。
-5. 删除项目指令 Tool 对 LLM 暴露的 Revision，由 Runtime 操作最新版本。
-6. 将 `read_conversation_history` 重构为按 Message ID 读取的 `read_conversation_message`。
-7. 从历史搜索中删除 Session ID、Sequence 和 FTS Rank。
-8. 从所有 LLM 可见结果和压缩投影删除 `contentHash` 及无用途内部 ID。
-9. 为所有 Tool 增加整数版本，并由 Runtime 统一包装 `tool.name + tool.version`。
-10. 将现有集中式压缩投影迁移到各 Tool 的 `getCompactionMessage()`。
+当前实现边界：
 
-在这些代码改动完成前，本文件描述的是目标契约，不能据此声称当前实现已经具备动态披露或元 Tool。
+- Tool 动态加载状态按 `name + version` 在当前 Conversation 中恢复，不跨 Conversation；Tool 版本变化后必须重新调用 `get_tool`。
+- `allow_until_exit` 授权保存在 `ChatService` 内存中，关闭当前 CleoDoc 进程后清空。
+- OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，因此完整定义把版本加入描述；Tool Result、元 Tool 和 ModelCall 请求记录仍使用独立整数版本。
+- SQLite 中的文档 Hash 和项目指令 Revision 继续作为内部一致性与恢复数据，但不进入 LLM 可见 Tool Result。
+- `write_draft`、RAG 检索和资料管理 Tool 不在本轮实现范围，新增时必须实现相同接口。
 
 ## 15. 设计依据
 

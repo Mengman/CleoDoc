@@ -11,6 +11,7 @@ export interface ChatMessage {
 
 export interface ModelToolDefinition {
   name: string;
+  version: number;
   description: string;
   inputSchema: Readonly<Record<string, unknown>>;
 }
