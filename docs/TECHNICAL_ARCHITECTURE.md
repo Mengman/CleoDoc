@@ -649,7 +649,17 @@ CLI 的 `--debug` 只开启本次进程的 LLM 协议诊断：Provider 在解析
 
 CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料和对话记录必须保持一致。RAG 落地后，`ContextManifest` 也必须遵守相同的一致性要求。
 
-### 12.2 v0.2 可持久化工作流
+### 12.2 Draft 写入与文本统计（设计，未实现）
+
+未来主笔产出正文时使用专用 `write_draft` Tool，而不是先把文稿作为普通 Assistant Content 输出再复制到编辑器。一个 Assistant 轮次只能选择沟通或文稿模式：沟通模式输出 Content；文稿模式保持 Content 为空并直接调用 Tool。Tool Result 使用标准 `tool` 角色返回 Draft Revision 和本次写入的紧凑统计，Renderer 只将其投影为状态卡片，不定义 Provider 不兼容的 `agent` 角色。
+
+`write_draft` 以 Project 内文档 ID、操作类型、`baseRevision`、格式版本和内容为输入。Provider 的流式 Tool 参数必须完整拼接并通过 Schema 校验后才允许写入；本地执行需要安全写入、乐观并发和幂等键，避免重试造成重复追加。该 Tool 只修改可恢复的工作 Draft，正式正文仍通过 ChangeSet 和审批应用。现有 v0.1 `write_project_document` 继续承担通用的、逐次用户批准的文件写入，不能直接替换成自动 Draft 写入语义。
+
+文本统计由 Core 的确定性服务完成，不依赖模型估算。字符数按原始 `content` 的 Unicode Code Point 计数；字数和标点符号数先按声明的格式解析出可见文本，再分别统计汉字/英文单词与 Unicode Punctuation。结果携带算法版本；普通聊天不调用统计器。首版返回本次写入统计，整章或整篇总统计作为可扩展字段，不是首版阻塞项。
+
+Tool Loop 不包含 `finish_draft`。写入成功后模型可以再次调用 Tool 继续创作；不再调用 Tool 并输出简洁交付说明，即表示本轮完成。详细输入输出、消息投影、统计规则、协议违规处理和测试矩阵见 [Draft 写入与文本统计技术设计](./DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)。
+
+### 12.3 v0.2 可持久化工作流
 
 Agent 采用可持久化的确定性状态机，不实现多个 Agent 自由对话。
 
@@ -885,7 +895,7 @@ v0.2 在此基础上增加：
 
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
 - 尚未实现：统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
-- 尚未开始：v0.2 Electron/React/Tiptap、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流。
+- 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策
 
@@ -905,6 +915,7 @@ v0.2 在此基础上增加：
 - Agent 使用可持久化状态机和 ChangeSet 审批。
 - 一个 Project 可以包含多个 Conversation，一个 Conversation 可以因上下文压缩包含多个 Session。
 - 新 Session 延续当前 Conversation；新 Conversation 不继承其他 Conversation 的消息或摘要，但共享同一 Project 的长期资产。
+- 主笔创作文稿时直接调用 `write_draft`，正文不复制到 Assistant Content；本地统计通过 Tool Result 反馈，且不引入 `finish_draft`。
 
 ### 20.2 延后
 
@@ -917,6 +928,7 @@ v0.2 在此基础上增加：
 - 按句子接受或恢复 Diff。
 - 自动重写 Git 历史的永久清除。
 - 同一 Project 内跨 Conversation 历史查询的 Tool、触发条件、检索范围、权限、Schema 和权威规则。
+- 数字及汉字/英文以外文字的字数规则、整篇统计展示范围和 `cleodoc-richtext-v1` 最终格式。
 
 ## 21. 外部参考
 

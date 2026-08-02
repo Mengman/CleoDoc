@@ -39,6 +39,7 @@ v0.1 的核心闭环是：
 | 5.6 Reasoning 流式体验与调用审计 | 已完成 | Reasoning 实时展示与持久化、DeepSeek Tool Loop 回传、逐次 ModelCall 审计、Session 必填的不可变 Message 和 External Content 历史 FTS |
 | 5.7 数据库原生项目指令 | 已完成 | 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及无文件快照的 Session Schema |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
+| v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -507,6 +508,32 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 - 正文编辑、批注和字符级撤销。
 - 稳定块 ID 和 Markdown sidecar。
 - 自动保存和外部文件修改检测。
+
+### 步骤 3a：Draft 写入与文本统计（设计已确认）
+
+该能力的产品入口依赖作品工作室的 Draft 页面，因此不改变 v0.1 CLI 发布门；Core 部分必须先以独立 Application Service 和 Fake Provider 测试，Renderer 只消费该服务。
+
+工作内容：
+
+1. 实现带算法版本的文本统计器：原始 Unicode 字符数、去格式后的汉字/英文单词数和 Unicode 标点数。
+2. 为 `markdown-v1` 实现基于解析器的可见文本提取；在规则确定后再支持 `cleodoc-richtext-v1`。
+3. 定义 `write_draft` Schema、工作 Draft Revision、`baseRevision` 冲突和幂等执行语义；首个实现可以只支持 `append`。
+4. 改造 Tool Loop 输出协议：普通沟通使用 Assistant Content，文稿使用空 Content + `write_draft`，禁止同轮重复正文。
+5. 完整拼接流式 Tool 参数后再校验和提交，失败时不产生部分 Draft 或虚假统计。
+6. Tool Result 只返回文档 ID、Revision 和本次写入统计；不回传正文，不定义 `agent` 消息角色。
+7. GUI 将 Tool Call 渲染为写入状态卡片，将正文只展示在 Draft 页面；普通对话不显示文稿统计。
+8. 保留最大 Tool 轮数、取消和错误恢复；模型停止发起 Tool Call 即完成本轮，不实现 `finish_draft`。
+9. 将工作 Draft 通过 ChangeSet 和用户审批进入正式正文，不允许该 Tool 绕过已批准内容的版本保护。
+
+验收：
+
+- 同一篇文稿不会同时出现在聊天消息和 Draft 页面。
+- 固定中英混排、Markdown、标点、Emoji 和 Unicode 测试集在各平台得到一致统计。
+- 模型能依据实际写入统计选择继续写、停止或询问用户，而不是把 Tool Result 当成用户发言。
+- 相同 Tool Call 重试不会重复追加，Revision 冲突和无效流式参数不会修改 Draft。
+- 不调用 `finish_draft` 也能正常结束 Agent 回合。
+
+详细设计见 [Draft 写入与文本统计技术设计](./DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)。
 
 ### 步骤 4：Git 版本和语义 Diff
 
