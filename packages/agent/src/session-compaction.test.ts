@@ -15,7 +15,10 @@ import type {
 import { ProjectDatabase, ProjectInstructionRepository } from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
-import { projectMessagesForCompaction } from "./compaction-service.js";
+import {
+  projectMessagesForCompaction,
+  projectToolEventsForCompaction,
+} from "./compaction-service.js";
 import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
@@ -358,6 +361,209 @@ describe("session compaction", () => {
     expect(projected).toEqual([{ role: "assistant", content: "可以交接的正文" }]);
     expect(JSON.stringify(projected)).not.toContain("绝不能发送的思考内容");
   });
+
+  it("projects tool results through a metadata allowlist without leaking retrieved content", () => {
+    const assistant = storedMessage({
+      sequence: 1,
+      role: "assistant",
+      content: "准备调用工具。",
+      toolCalls: [
+        {
+          id: "write-1",
+          name: "write_project_document",
+          argumentsJson: JSON.stringify({
+            path: "manuscript/summary.md",
+            content: "WRITE_ARGUMENT_SECRET",
+          }),
+        },
+        {
+          id: "write-failed",
+          name: "write_project_document",
+          argumentsJson: JSON.stringify({
+            path: "manuscript/existing.md",
+            content: "FAILED_WRITE_ARGUMENT_SECRET",
+          }),
+        },
+        {
+          id: "read-doc-1",
+          name: "read_project_document",
+          argumentsJson: JSON.stringify({ document: "manuscript/chapter.md", offset: 0 }),
+        },
+        {
+          id: "search-history-1",
+          name: "search_conversation_history",
+          argumentsJson: JSON.stringify({
+            query: "HISTORY_QUERY_SECRET",
+            sessionIds: ["session-old"],
+            roles: ["user"],
+            limit: 5,
+          }),
+        },
+        {
+          id: "read-history-1",
+          name: "read_conversation_history",
+          argumentsJson: JSON.stringify({
+            sessionId: "session-old",
+            limitMessages: 10,
+            maxCharacters: 2_000,
+          }),
+        },
+        {
+          id: "read-instructions-1",
+          name: "read_project_instructions",
+          argumentsJson: "{}",
+        },
+        { id: "unknown-1", name: "future_tool", argumentsJson: '{"secret":"ARG_SECRET"}' },
+      ],
+    });
+    const messages = [
+      assistant,
+      storedMessage({
+        sequence: 2,
+        role: "tool",
+        name: "write_project_document",
+        toolCallId: "write-1",
+        content: JSON.stringify({
+          ok: true,
+          document: {
+            path: "manuscript/summary.md",
+            contentHash: "write-hash",
+            created: true,
+          },
+        }),
+      }),
+      storedMessage({
+        sequence: 3,
+        role: "tool",
+        name: "write_project_document",
+        toolCallId: "write-failed",
+        content: JSON.stringify({
+          ok: false,
+          error: { code: "DOCUMENT_ALREADY_EXISTS", message: "ERROR_MESSAGE_SECRET" },
+        }),
+      }),
+      storedMessage({
+        sequence: 4,
+        role: "tool",
+        name: "read_project_document",
+        toolCallId: "read-doc-1",
+        content: JSON.stringify({
+          ok: true,
+          document: {
+            path: "manuscript/chapter.md",
+            contentHash: "chapter-hash",
+            offset: 0,
+            content: "DOCUMENT_CONTENT_SECRET",
+            truncated: false,
+            nextOffset: null,
+            totalCharacters: 100,
+          },
+        }),
+      }),
+      storedMessage({
+        sequence: 5,
+        role: "tool",
+        name: "search_conversation_history",
+        toolCallId: "search-history-1",
+        content: JSON.stringify({
+          ok: true,
+          results: [{ excerpt: "HISTORY_EXCERPT_SECRET", messageId: "old-message" }],
+        }),
+      }),
+      storedMessage({
+        sequence: 6,
+        role: "tool",
+        name: "read_conversation_history",
+        toolCallId: "read-history-1",
+        content: JSON.stringify({
+          ok: true,
+          sessionId: "session-old",
+          messages: [{ content: "HISTORY_MESSAGE_SECRET" }],
+          nextAfterMessageId: "old-message",
+        }),
+      }),
+      storedMessage({
+        sequence: 7,
+        role: "tool",
+        name: "read_project_instructions",
+        toolCallId: "read-instructions-1",
+        content: JSON.stringify({
+          ok: true,
+          projectInstructions: {
+            revision: 7,
+            contentHash: "instructions-hash",
+            content: "PROJECT_INSTRUCTIONS_SECRET",
+          },
+        }),
+      }),
+      storedMessage({
+        sequence: 8,
+        role: "tool",
+        name: "future_tool",
+        toolCallId: "unknown-1",
+        content: "UNKNOWN_TOOL_RESULT_SECRET",
+      }),
+    ];
+
+    const projected = projectToolEventsForCompaction(messages);
+    expect(projected).toEqual([
+      expect.objectContaining({
+        tool: "write_project_document",
+        operation: "document_created",
+        status: "completed",
+        target: "manuscript/summary.md",
+        contentHash: "write-hash",
+      }),
+      expect.objectContaining({
+        tool: "write_project_document",
+        operation: "document_write",
+        status: "failed",
+        target: "manuscript/existing.md",
+        errorCode: "DOCUMENT_ALREADY_EXISTS",
+      }),
+      expect.objectContaining({
+        tool: "read_project_document",
+        operation: "document_read",
+        target: "manuscript/chapter.md",
+        contentHash: "chapter-hash",
+        range: { offset: 0, nextOffset: null, totalCharacters: 100, truncated: false },
+      }),
+      expect.objectContaining({
+        tool: "search_conversation_history",
+        operation: "conversation_history_searched",
+        resultCount: 1,
+        range: { sessionCount: 1, roles: ["user"], limit: 5 },
+      }),
+      expect.objectContaining({
+        tool: "read_conversation_history",
+        operation: "conversation_history_read",
+        target: "session-old",
+        resultCount: 1,
+      }),
+      expect.objectContaining({
+        tool: "read_project_instructions",
+        operation: "project_instructions_read",
+        revision: 7,
+        contentHash: "instructions-hash",
+      }),
+      { tool: "future_tool", operation: "unknown", status: "unknown" },
+    ]);
+    const serialized = JSON.stringify(projected);
+    for (const secret of [
+      "WRITE_ARGUMENT_SECRET",
+      "FAILED_WRITE_ARGUMENT_SECRET",
+      "ERROR_MESSAGE_SECRET",
+      "DOCUMENT_CONTENT_SECRET",
+      "HISTORY_QUERY_SECRET",
+      "HISTORY_EXCERPT_SECRET",
+      "HISTORY_MESSAGE_SECRET",
+      "PROJECT_INSTRUCTIONS_SECRET",
+      "ARG_SECRET",
+      "UNKNOWN_TOOL_RESULT_SECRET",
+    ]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
 });
 
 class CompactionAwareProvider implements ModelProvider {
@@ -523,4 +729,19 @@ async function setProjectInstructions(projectRoot: string, content: string): Pro
   } finally {
     await database.close();
   }
+}
+
+function storedMessage(
+  input: Pick<StoredMessage, "sequence" | "role" | "content"> &
+    Partial<Pick<StoredMessage, "name" | "toolCallId" | "toolCalls">>,
+): StoredMessage {
+  return {
+    messageRowid: input.sequence,
+    id: `message-${input.sequence}`,
+    conversationId: "conversation-1",
+    sessionId: "session-1",
+    modelCallId: null,
+    createdAt: "2026-08-02T00:00:00.000Z",
+    ...input,
+  };
 }

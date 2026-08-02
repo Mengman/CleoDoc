@@ -1,6 +1,7 @@
 import type {
   CompactionEvent,
   ConversationSession,
+  ModelToolCall,
   ModelProtocolDebugHandler,
   ModelProvider,
   ModelUsage,
@@ -63,6 +64,18 @@ export interface CompactInput {
 export interface CompactionMessagePayload {
   role: "user" | "assistant";
   content: string;
+}
+
+export interface CompactionToolEvent {
+  tool: string;
+  operation: string;
+  status: "completed" | "rejected" | "failed" | "unknown";
+  target?: string;
+  contentHash?: string;
+  revision?: number;
+  resultCount?: number;
+  errorCode?: string;
+  range?: Readonly<Record<string, string | number | boolean | readonly string[] | null>>;
 }
 
 interface CollectedSummary {
@@ -435,18 +448,140 @@ ${JSON.stringify({
 请只返回 Markdown 会话摘要正文。`;
 }
 
-function projectToolEventsForCompaction(messages: readonly StoredMessage[]): ReadonlyArray<{
-  tool: string;
-  status: string;
-  description: string;
-}> {
+export function projectToolEventsForCompaction(
+  messages: readonly StoredMessage[],
+): CompactionToolEvent[] {
+  const calls = new Map<string, ModelToolCall>();
+  for (const message of messages) {
+    if (message.role !== "assistant" || message.toolCalls === undefined) continue;
+    for (const call of message.toolCalls) calls.set(call.id, call);
+  }
+
   return messages
     .filter((message) => message.role === "tool")
-    .map((message) => ({
-      tool: message.name ?? "unknown",
-      status: inferToolStatus(message.content),
-      description: message.content.slice(0, 500),
-    }));
+    .map((message) =>
+      projectToolEvent(
+        message.name ?? "unknown",
+        message.content,
+        message.toolCallId === undefined ? undefined : calls.get(message.toolCallId),
+      ),
+    );
+}
+
+function projectToolEvent(
+  tool: string,
+  content: string,
+  call: ModelToolCall | undefined,
+): CompactionToolEvent {
+  const result = parseJsonObject(content);
+  const input = parseJsonObject(call?.argumentsJson);
+  const errorCode = readString(readObject(result?.error)?.code, 128);
+  const status = inferToolStatus(result);
+  const base = {
+    tool: readString(tool, 128) ?? "unknown",
+    status,
+    ...(errorCode === undefined ? {} : { errorCode }),
+  };
+
+  switch (tool) {
+    case "list_project_documents": {
+      const documents = Array.isArray(result?.documents) ? result.documents : [];
+      return { ...base, operation: "document_list", resultCount: documents.length };
+    }
+    case "read_project_document": {
+      const document = readObject(result?.document);
+      const offset =
+        readNonNegativeInteger(document?.offset) ?? readNonNegativeInteger(input?.offset);
+      const totalCharacters = readNonNegativeInteger(document?.totalCharacters);
+      const nextOffset = readNullableNonNegativeInteger(document?.nextOffset);
+      const target = readString(document?.path, 1_024) ?? readString(input?.document, 1_024);
+      const contentHash = readString(document?.contentHash, 256);
+      return compactObject({
+        ...base,
+        operation: "document_read",
+        target,
+        contentHash,
+        range: compactRange({
+          offset,
+          nextOffset,
+          totalCharacters,
+          truncated: typeof document?.truncated === "boolean" ? document.truncated : undefined,
+        }),
+      });
+    }
+    case "write_project_document": {
+      const document = readObject(result?.document);
+      const target = readString(document?.path, 1_024) ?? readString(input?.path, 1_024);
+      return compactObject({
+        ...base,
+        operation:
+          status !== "completed"
+            ? "document_write"
+            : document?.created === false
+              ? "document_updated"
+              : "document_created",
+        target,
+        contentHash: readString(document?.contentHash, 256),
+      });
+    }
+    case "read_project_instructions": {
+      const instructions = readObject(result?.projectInstructions);
+      return compactObject({
+        ...base,
+        operation: "project_instructions_read",
+        revision: readNonNegativeInteger(instructions?.revision),
+        contentHash: readString(instructions?.contentHash, 256),
+      });
+    }
+    case "append_project_instructions":
+    case "replace_project_instruction_text":
+    case "set_project_instructions": {
+      const instructions = readObject(result?.projectInstructions);
+      return compactObject({
+        ...base,
+        operation:
+          tool === "append_project_instructions"
+            ? "project_instructions_appended"
+            : tool === "replace_project_instruction_text"
+              ? "project_instructions_text_replaced"
+              : "project_instructions_set",
+        revision: readNonNegativeInteger(instructions?.revision),
+        contentHash: readString(instructions?.contentHash, 256),
+      });
+    }
+    case "search_conversation_history": {
+      const results = Array.isArray(result?.results) ? result.results : [];
+      const sessionIds = readStringArray(input?.sessionIds, 20, 128);
+      const roles = readStringArray(input?.roles, 2, 16);
+      return compactObject({
+        ...base,
+        operation: "conversation_history_searched",
+        resultCount: results.length,
+        range: compactRange({
+          sessionCount: sessionIds?.length,
+          roles,
+          limit: readPositiveInteger(input?.limit),
+        }),
+      });
+    }
+    case "read_conversation_history": {
+      const historyMessages = Array.isArray(result?.messages) ? result.messages : [];
+      return compactObject({
+        ...base,
+        operation: "conversation_history_read",
+        target: readString(result?.sessionId, 128) ?? readString(input?.sessionId, 128),
+        resultCount: historyMessages.length,
+        range: compactRange({
+          afterMessageId: readString(input?.afterMessageId, 128),
+          limitMessages: readPositiveInteger(input?.limitMessages),
+          maxCharacters: readPositiveInteger(input?.maxCharacters),
+          hasMore: result?.nextAfterMessageId !== null && result?.nextAfterMessageId !== undefined,
+        }),
+      });
+    }
+    default:
+      return { ...base, operation: "unknown" };
+  }
 }
 
 function estimateProjectedMessagesTokens(messages: readonly StoredMessage[]): number {
@@ -523,15 +658,72 @@ function validateSummary(collected: CollectedSummary, summaryTargetTokens: numbe
   return summary;
 }
 
-function inferToolStatus(content: string): string {
+function inferToolStatus(
+  result: Record<string, unknown> | undefined,
+): CompactionToolEvent["status"] {
+  if (result?.ok === true) return "completed";
+  if (readObject(result?.error)?.code === "USER_REJECTED") return "rejected";
+  if (result?.ok === false) return "failed";
+  return "unknown";
+}
+
+function parseJsonObject(value: string | undefined): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
   try {
-    const parsed = JSON.parse(content) as { ok?: boolean; error?: { code?: string } };
-    if (parsed.ok === true) return "completed";
-    if (parsed.error?.code === "USER_REJECTED") return "rejected";
-    return "failed";
+    return readObject(JSON.parse(value) as unknown);
   } catch {
-    return "unknown";
+    return undefined;
   }
+}
+
+function readObject(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readString(value: unknown, maximumLength: number): string | undefined {
+  return typeof value === "string" && value.length <= maximumLength ? value : undefined;
+}
+
+function readStringArray(
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+): string[] | undefined {
+  if (!Array.isArray(value) || value.length > maximumItems) return undefined;
+  const strings = value.map((item) => readString(item, maximumItemLength));
+  return strings.every((item): item is string => item !== undefined) ? strings : undefined;
+}
+
+function readNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const number = readNonNegativeInteger(value);
+  return number !== undefined && number > 0 ? number : undefined;
+}
+
+function readNullableNonNegativeInteger(value: unknown): number | null | undefined {
+  return value === null ? null : readNonNegativeInteger(value);
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => {
+      if (item === undefined) return false;
+      return !(item !== null && typeof item === "object" && Object.keys(item).length === 0);
+    }),
+  ) as T;
+}
+
+function compactRange(
+  value: Record<string, string | number | boolean | readonly string[] | null | undefined>,
+): CompactionToolEvent["range"] {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  ) as Readonly<Record<string, string | number | boolean | readonly string[] | null>>;
 }
 
 function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsage {

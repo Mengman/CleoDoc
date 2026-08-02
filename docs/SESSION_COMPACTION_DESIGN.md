@@ -429,6 +429,19 @@ const compactionMessages = messages.map((message) => ({
 
 Reasoning 只用于保存 Provider 暴露的思考过程和支持需要回传 Reasoning 的 Tool Loop；它不是会话摘要的事实输入。压缩器不得读取、总结、引用或根据 Reasoning 推断用户决定。
 
+Tool Result 也必须经过按 Tool 名称区分的白名单投影，禁止截取或转发原始返回字符串：
+
+| Tool 类型 | 允许进入 `toolEvents` 的信息 | 明确排除 |
+|---|---|---|
+| 文档写入 | 状态、路径、内容哈希、创建或更新动作 | 写入正文、Tool 参数中的 `content` |
+| 文档读取 | 状态、路径、内容哈希、offset、nextOffset、总字符数和是否截断 | 返回的文档正文 |
+| 项目指令读取或修改 | 状态、Revision、内容哈希和操作类型 | 当前指令、追加文本、替换文本和完整新内容 |
+| 会话历史搜索 | 状态、限定 Session 数量、角色、命中数量和上限 | 查询词、命中片段和原始消息 |
+| 会话历史精确读取 | 状态、Session ID、分页限制、结果数量和是否还有下一页 | 历史消息正文 |
+| 未识别 Tool | Tool 名称和成功/失败/未知状态 | 参数和完整 Tool Result |
+
+失败结果只允许投影稳定错误码，不发送错误消息原文。所有字符串字段设长度上限；结构不合法时降级为最小的 Tool 名称与 `unknown` 状态，不得回退为原文截取。
+
 ## 6. 压缩提示词
 
 压缩 Prompt 必须版本化。`session-compaction-v1` 至 v6 逐步增加完整 JSON Schema、JSON Mode、关闭思考模式、取消 Provider 输出 Token 硬上限，以及 1M 上下文预算参数。实践表明 v6 的复杂结构要求给模型带来不必要的格式失败，而这些分类字段当前没有足够的业务消费价值。
@@ -508,9 +521,9 @@ DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模
     {
       "tool": "write_project_document",
       "status": "completed",
+      "operation": "document_created",
       "target": "manuscript/character-notes.md",
-      "contentHash": "...",
-      "description": "保存人物设定摘要"
+      "contentHash": "..."
     }
   ]
 }
@@ -912,6 +925,7 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 6. **已完成**：ContextBuilder 按 active Session 的 `inherited_summary_id` 精确注入一份 `summary`，并在每次 Agent 调用前读取数据库中的最新项目指令 Revision。
 7. **已完成当前范围**：已增加流式边界、旧摘要迁移、失败恢复、Debug 日志、普通/Map-Reduce 以及 S1→Summary1→S2→Summary2→S3 连续继承的端到端回归测试。
 8. **已完成**：migration v6 已接入 CompactionJob→ModelCall 逐次审计；普通、分段和归并调用分别记录阶段、顺序、实际请求参数、结束原因和 Token 用量。
+9. **已完成**：Tool Result 已改为按 Tool 名称执行结构化白名单投影；文档正文、历史命中、项目指令内容、查询词、修改参数和未知 Tool 原文不会进入压缩 Payload。
 
 ## 18. 验收标准
 
@@ -926,6 +940,7 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 - 超大 Session 可以分层压缩，且不拆散 Tool Call 与结果。
 - LLM 只返回 Markdown `summary`，不返回 JSON、Session ID、Message ID 或消息数量。
 - 普通、分段和归并压缩请求中的 Message 除 `role` 外只包含正文 `content`；即使历史 Assistant Message 保存了 `reasoning_content` 也不会发送。
+- 压缩请求中的 `toolEvents` 只包含白名单元数据；文档读取正文、历史消息或命中片段、项目指令内容、写入参数和未知 Tool 原始结果不会发送。
 - 任意流式分片边界都能得到相同的完整拼接摘要，Debug 文件可以直接查看该结果。
 - 缺少推荐 Markdown 标题只产生质量警告，不导致压缩失败。
 - 空响应、`length` 截断、超长输出和非法 Tool Call 不会创建新 Session。

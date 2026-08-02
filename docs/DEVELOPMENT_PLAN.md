@@ -236,6 +236,7 @@ cleo material remove <material-id>
 - 新 Session 按 Core System Prompt、数据库最新项目指令、累计摘要、当前消息的顺序组装上下文。
 - 压缩期间允许用户编辑草稿，但 Enter 和发送按钮不能提交；草稿不清空、不排队、不自动发送。
 - 建立压缩前历史消息的搜索和精确读取 Tool。
+- 将 Tool Result 投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，不把文档正文、历史片段、项目指令内容或未知 Tool 原文发送给压缩模型。
 - 保存摘要引用、模型参数、用量和可恢复 CompactionJob；项目指令独立按 Revision 保存。
 
 验收：
@@ -245,6 +246,7 @@ cleo material remove <material-id>
 - 压缩期间用户草稿保持可编辑，完成后必须再次主动提交。
 - 新 Session 的 AGENTS 和摘要顺序稳定且可审计。
 - Agent 能按需找回压缩前的具体消息，且不能跨 Conversation 或项目查询。
+- Tool Result 原文不会进入压缩 Payload，已知 Tool 只发送完成交接所需的结构化元数据。
 - 压缩失败、取消或进程退出不会丢失消息和草稿。
 
 ### 步骤 5.6：Reasoning 流式体验与模型调用审计
