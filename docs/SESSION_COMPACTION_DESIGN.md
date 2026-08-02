@@ -60,7 +60,7 @@ flowchart LR
 → 主笔完成全部流式输出和 Tool Loop
 → 保存助手回复、Tool Call 和工具结果
 → 估算下一轮上下文
-→ 达到阈值时启动压缩
+→ 达到软压缩阈值时启动压缩
 → 用户可以继续编辑草稿，但不能提交
 → 压缩完成并创建新 Session
 → 用户再次主动提交草稿
@@ -137,7 +137,42 @@ interface ChatInputController {
 
 模型上下文窗口必须来自显式模型配置或用户配置，不根据模型名称进行不可靠猜测。
 
-### 4.2 默认阈值
+### 4.2 统一术语与默认配置
+
+本设计只使用下面这组术语。Ratio、Token 阈值、运行状态和事件原因属于不同层级，不应互换使用：
+
+| 层级 | 统一术语 | 代码名称或文档符号 | 含义 |
+|---|---|---|---|
+| 策略配置 | 软压缩比例 | `softCompactionRatio` | 无单位比例，默认 `0.75`；用于计算何时应自动启动压缩 |
+| 策略配置 | 硬阻塞比例 | `hardCompactionRatio` | 无单位比例，默认 `0.90`；用于计算何时必须阻止继续提交 |
+| Token 边界 | 软压缩阈值 | `E_soft`（文档符号） | `L × softCompactionRatio`，表示包含下一次用户输入预留后的预计输入 Token 边界 |
+| Token 边界 | 硬阻塞阈值 | `E_hard`（文档符号） | `L × hardCompactionRatio`，表示包含下一次用户输入预留后的预计输入 Token 边界 |
+| 当前状态 | 已达到软压缩阈值 | `softLimitReached` | 当前预算比率 `R` 已达到软压缩比例 |
+| 当前状态 | 已达到硬阻塞阈值 | `hardLimitReached` | 当前预算比率 `R` 已达到硬阻塞比例 |
+| 事件原因 | 由软压缩阈值触发 | `reason: "soft-threshold"` | 事件枚举值，说明为什么启动 CompactionJob；它本身不是 Token 数值 |
+| 事件原因 | 由硬阻塞阈值触发 | `reason: "hard-threshold"` | 事件枚举值，说明提交前安全检查为什么要求先压缩；它本身不是 Token 数值 |
+| 事件原因 | 用户手动触发 | `reason: "manual"` | 用户显式请求压缩 |
+
+预算计算统一使用：
+
+```text
+E = estimatedInputTokens = estimate(currentPayload) + U
+L = effectiveLimitTokens = C - O - S
+R = E / L
+```
+
+- 当 `R >= softCompactionRatio` 时，`softLimitReached = true`，达到**软压缩阈值**。
+- 当 `R >= hardCompactionRatio` 时，`hardLimitReached = true`，达到**硬阻塞阈值**。
+- 因为 `E` 已包含下一次用户输入预留 `U`，如果要表达“当前 Payload 在多少 Token 时触发”，必须使用“Payload 触发点”这一名称，并从相应 Token 阈值中减去 `U`。
+
+另外还有两个与上述阈值无关的量：
+
+- `M = maximumPayloadTokens` 是一次**压缩请求的安全输入上限**，用于决定是否分段以及 Segment 能否发送；它不是硬阻塞阈值。
+- `T = summaryTargetTokens` 是**摘要长度建议目标**，只写入 Prompt，不是触发阈值，也不是 Provider 输出 Token 上限。
+
+除代码枚举值和字段名外，后续正文统一使用“软压缩比例”“硬阻塞比例”“软压缩阈值”“硬阻塞阈值”“Payload 触发点”和“压缩请求安全输入上限 `M`”，不再单独使用含义不完整的“软阈值”“硬阈值”或“hard threshold”。
+
+默认策略配置如下：
 
 ```ts
 interface ContextBudgetPolicy {
@@ -162,7 +197,7 @@ nextUserInputReserveTokens = Math.min(
 
 因此 1M 窗口使用完整的 384K/32,768 预留；小窗口不会因预留量本身超过窗口而失效。
 
-完整回合保存后，如果包含下一条输入预留的预计占用达到 75%，标记并立即启动压缩。达到 90% 后，如果压缩失败，不允许继续提交新消息。
+完整回合保存后，如果预算比率 `R` 达到软压缩比例 75%，标记 `softLimitReached` 并立即启动压缩。如果 `R` 达到硬阻塞比例 90%，标记 `hardLimitReached`；此时如果压缩失败，不允许继续提交新消息。
 
 ### 4.3 提交前安全检查
 
@@ -171,8 +206,8 @@ nextUserInputReserveTokens = Math.min(
 ```text
 用户按 Enter
 → 估算草稿加入新 Session 后的 Token
-→ 未超过硬限制：正常提交
-→ 超过硬限制：保留草稿，先压缩旧 Session
+→ 未达到硬阻塞阈值：正常提交
+→ 已达到硬阻塞阈值：保留草稿，先压缩旧 Session
 → 压缩成功后解除提交门
 → 用户再次主动提交
 ```
@@ -212,17 +247,18 @@ L = 1,000,000 - 4,096 - 100,000
   = 895,904
 ```
 
-旧实现的软压缩与硬阻塞使用包含下一条用户输入预留的 `E`：
+旧实现同样使用包含下一条用户输入预留的 `E`，Ratio 和 Token 边界分别为：
 
 ```text
-软压缩条件：E / L >= 0.75
-软压缩阈值：895,904 × 0.75 = 671,928
-对应当前 Payload：671,928 - 2,048 = 669,880
+软压缩比例：softCompactionRatio = 0.75
+软压缩条件：R = E / L >= softCompactionRatio
+软压缩阈值：E_soft = 895,904 × 0.75 = 671,928
+当前 Payload 触发点：P_soft = E_soft - U = 669,880
 
-硬阻塞条件：E / L >= 0.90
-硬阻塞阈值：895,904 × 0.90 = 806,313.6
-最小整数估算值：806,314
-对应当前 Payload：806,314 - 2,048 = 804,266
+硬阻塞比例：hardCompactionRatio = 0.90
+硬阻塞条件：R = E / L >= hardCompactionRatio
+硬阻塞阈值：E_hard = ceil(895,904 × 0.90) = 806,314
+当前 Payload 触发点：P_hard = E_hard - U = 804,266
 ```
 
 因此，旧实现大约在 670K Payload 时启动后台压缩，在 804K Payload 时禁止继续提交。
@@ -243,7 +279,7 @@ M = maximumPayloadTokens
   = 845,424
 ```
 
-`M` 约束的是发送给压缩模型的输入 Payload，不是接收回复的长度。压缩请求当时已经不发送 `max_tokens`，但本地公式仍为摘要软目标 `T` 和 15% 安全余量预留空间。
+`M` 是发送给压缩模型的安全输入上限，不是硬阻塞阈值，也不是接收回复的长度。压缩请求当时已经不发送 `max_tokens`，但本地公式仍为摘要长度建议目标 `T` 和 15% 安全余量预留空间。
 
 旧参数在 1M 模型下有三个问题：
 
@@ -260,9 +296,9 @@ C = 1,000,000    // 模型上下文窗口
 O = 384,000      // 模型最大输出预留
 U = 32,768       // 下一次用户输入预留
 S = 50,000       // 固定 5% 安全余量
-softRatio = 0.75
-hardRatio = 0.90
-T = 8,000        // 最终累计摘要软目标
+softCompactionRatio = 0.75
+hardCompactionRatio = 0.90
+T = 8,000        // 最终累计摘要长度建议目标
 segmentTarget = 2,000
 ```
 
@@ -276,21 +312,21 @@ L = C - O - S
   = 566,000
 ```
 
-当前触发点为：
+当前 Token 阈值和 Payload 触发点为：
 
 ```text
-软压缩估算阈值 = L × 0.75
-                 = 424,500
-软压缩 Payload  ≈ 424,500 - U
-                 = 391,732
+软压缩阈值 E_soft = L × softCompactionRatio
+                    = 424,500
+当前 Payload 触发点 P_soft = E_soft - U
+                           = 391,732
 
-硬阻塞估算阈值 = L × 0.90
-                 = 509,400
-硬阻塞 Payload  ≈ 509,400 - U
-                 = 476,632
+硬阻塞阈值 E_hard = L × hardCompactionRatio
+                    = 509,400
+当前 Payload 触发点 P_hard = E_hard - U
+                           = 476,632
 ```
 
-硬阻塞附近的最坏情况预算为：
+达到硬阻塞阈值附近的最坏情况预算为：
 
 ```text
 当前 Payload       476,632
@@ -301,7 +337,7 @@ L = C - O - S
 额外缓冲            56,600
 ```
 
-压缩请求的安全输入上限不再使用独立的 15% 比例，而是复用模型最大输出与固定安全余量：
+压缩请求安全输入上限 `M` 不再使用独立的 15% 比例，而是复用模型最大输出与固定安全余量：
 
 ```text
 M = C - O - S - P
@@ -349,7 +385,7 @@ const compactionModelOptions = {
 };
 ```
 
-压缩请求不设置 Provider 的 `max_tokens`/`num_predict`，避免硬上限在模型完成摘要前截断输出。最终累计摘要的默认软目标在 1M 窗口下为 8,000 Token；分段摘要继续使用不超过 2,000 Token 的软目标。两者都只用于 Prompt 和本地分段，不会转换成 Provider 输出硬上限：
+压缩请求不设置 Provider 的 `max_tokens`/`num_predict`，避免 Provider 输出 Token 上限在模型完成摘要前截断结果。最终累计摘要的默认长度建议目标在 1M 窗口下为 8,000 Token；分段摘要的长度建议目标不超过 2,000 Token。两者都只用于 Prompt 和本地分段，不会转换成 Provider 输出 Token 上限，也不参与软压缩阈值或硬阻塞阈值计算：
 
 ```ts
 const summaryTargetTokens = Math.max(
@@ -394,7 +430,16 @@ Summary 1 + Session 2 原始消息
 → 新累计摘要
 ```
 
-正常情况为一次调用；超大情况为 N 次分段摘要加一次归并。分段不得拆开 assistant tool call 与对应 tool result。
+正常情况为一次调用；超大情况为 N 次分段摘要加一次归并。分段规则固定如下：
+
+1. 首先按完整用户回合形成分段单元：从一条 User Message 开始，包含其后所有 Assistant Tool Call、Tool Result、Assistant 最终回答，直到下一条 User Message 之前。
+2. 按原始消息顺序把完整回合装入 Segment，装箱目标为压缩请求安全输入上限 `M` 的 80%；预算使用最终 `buildPayload()` 字符串估算，必须同时计入压缩指令、JSON 结构、Message 投影和 Tool 事件投影。
+3. 80% 只是 Segment 装箱目标，不是软压缩比例或软压缩阈值。单个完整回合超过 80% 但不超过 `M` 时允许独占一个 Segment；每个 Segment 在调用 Provider 前都必须再次验证最终 Payload 不超过 `M`。
+4. 只有单个完整回合本身超过 `M` 时才允许降级拆分。优先在消息边界拆分；单条超长 User/Assistant 正文按段落、换行或句末标点附近切分，并保证 Unicode Code Point 不被截断、字符不丢失且顺序不变。
+5. Assistant Tool Call 与其连续对应的全部 Tool Result 是不可拆分原子单元。若 Tool Call 消息自身带有超长可见正文，可以先把正文作为普通 Assistant 文本安全切分，但 Tool Call 元数据及结果仍必须保留在同一个原子单元中。
+6. 如果一个 Tool 原子单元投影后仍超过 `M`，本次压缩以 `PROVIDER_CONTEXT_LIMIT` 失败；不得拆散调用与结果，也不得把超限请求发送给 Provider。旧 Session 保持 active，可在调整上下文配置后重试。
+
+`session-compaction-v8-turn-segmentation` 用于标识上述分段编排算法；它不改变 v7 的 Markdown 摘要 Prompt 和输出格式。当前步骤仍使用单层 Reduce；Segment Summary 过多时的递归归并属于后续独立工作。
 
 ### 5.4 压缩输入
 
@@ -452,7 +497,7 @@ Tool Result 也必须经过按 Tool 名称区分的白名单投影，禁止截�
 - 不向 OpenAI-compatible Provider 发送 `response_format: { type: "json_object" }`。
 - 不向 Ollama 发送 `format: "json"`。
 - 压缩继续显式关闭 Thinking，并保持 `tools: []`。
-- 不设置 Provider 输出 Token 硬上限，摘要目标仍是 Prompt 软目标。
+- 不设置 Provider 输出 Token 上限，摘要长度建议目标仍只写入 Prompt。
 - Session ID、消息边界、消息数量、模型和时间等字段全部由 CleoDoc 生成。
 
 DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模型可能把输出额度消耗在 `reasoning_content`，最终以 `finish_reason: "length"` 结束且没有最终 `content`。压缩是摘要转换任务，因此默认关闭思考；普通主笔对话不携带该参数，继续遵循所选模型的默认模式。参考 [DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)。
@@ -762,7 +807,7 @@ ProjectInstructionService
 
 ContextBudgetService
 ├─ Token 估算
-├─ 软/硬阈值判断
+├─ 软压缩阈值/硬阻塞阈值判断
 └─ 提交前预检
 
 CompactionService
@@ -854,11 +899,13 @@ type CompactionEvent =
     };
 ```
 
+这里的 `reason` 是压缩启动原因，不是阈值数值：`"soft-threshold"` 表示达到软压缩阈值后自动启动，`"hard-threshold"` 表示提交前检查发现达到硬阻塞阈值后必须先压缩，`"manual"` 表示用户主动触发。`estimatedRatio` 保存当时的预算比率 `R`。
+
 压缩模型的流式摘要不作为主笔回答显示，聊天界面只显示压缩状态事件。启用 `--debug` 时，完整拼接摘要写入本地 Debug 文件，不在交互终端输出。
 
 ## 14. 失败、取消与恢复
 
-### 14.1 软阈值失败
+### 14.1 达到软压缩阈值后的压缩失败
 
 旧 Session 保持 active，设置 `compactionRequired=true`，保留草稿并允许提交一轮：
 
@@ -866,7 +913,7 @@ type CompactionEvent =
 上下文压缩失败，原会话仍然有效。当前输入已保留，系统稍后会重试压缩。
 ```
 
-### 14.2 硬阈值失败
+### 14.2 达到硬阻塞阈值后的压缩失败
 
 草稿仍可编辑，但保持提交门关闭：
 
@@ -926,11 +973,12 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 7. **已完成当前范围**：已增加流式边界、旧摘要迁移、失败恢复、Debug 日志、普通/Map-Reduce 以及 S1→Summary1→S2→Summary2→S3 连续继承的端到端回归测试。
 8. **已完成**：migration v6 已接入 CompactionJob→ModelCall 逐次审计；普通、分段和归并调用分别记录阶段、顺序、实际请求参数、结束原因和 Token 用量。
 9. **已完成**：Tool Result 已改为按 Tool 名称执行结构化白名单投影；文档正文、历史命中、项目指令内容、查询词、修改参数和未知 Tool 原文不会进入压缩 Payload。
+10. **已完成**：超大 Session 使用 `session-compaction-v8-turn-segmentation` 按完整用户回合分段；以最终 Segment Payload 执行 80% 装箱和压缩请求安全输入上限 `M` 校验，超长正文按 Unicode 安全语义边界切分，Tool Call 与结果保持原子性。
 
 ## 18. 验收标准
 
-- 未达到软阈值时不调用压缩模型。
-- 达到阈值后在助手完整返回并持久化后启动压缩。
+- 未达到软压缩阈值时不调用压缩模型。
+- 达到软压缩阈值后，在助手完整返回并持久化后启动压缩。
 - 压缩期间用户可以编辑草稿，Enter 不提交且草稿不丢失。
 - 压缩完成后不会自动发送草稿，必须由用户再次主动提交。
 - 新模型请求不再携带已关闭 Session 的原始消息。
@@ -938,6 +986,9 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 - 项目指令从 SQLite 最新 Revision 读取，不复制进 Summary。
 - 正常压缩只进行一次独立 LLM 调用。
 - 超大 Session 可以分层压缩，且不拆散 Tool Call 与结果。
+- 普通超大 Session 优先只在完整用户回合之间分段；只有单个回合超过压缩请求安全输入上限 `M` 时才降级到消息或正文边界。
+- 每个 Segment 的最终 Payload 在调用 Provider 前均不超过压缩请求安全输入上限 `M`；超限 Tool 原子单元直接失败且不会发出请求。
+- 单条超长正文切分后重新拼接与原文完全一致，不截断 Unicode 字符。
 - LLM 只返回 Markdown `summary`，不返回 JSON、Session ID、Message ID 或消息数量。
 - 普通、分段和归并压缩请求中的 Message 除 `role` 外只包含正文 `content`；即使历史 Assistant Message 保存了 `reasoning_content` 也不会发送。
 - 压缩请求中的 `toolEvents` 只包含白名单元数据；文档读取正文、历史消息或命中片段、项目指令内容、写入参数和未知 Tool 原始结果不会发送。

@@ -18,6 +18,7 @@ import { ChatService } from "./chat-service.js";
 import {
   projectMessagesForCompaction,
   projectToolEventsForCompaction,
+  segmentMessagesForCompaction,
 } from "./compaction-service.js";
 import type { LlmDebugEvent } from "./debug-events.js";
 
@@ -334,8 +335,9 @@ describe("session compaction", () => {
           .prepare("SELECT orchestration_config_json FROM compaction_jobs LIMIT 1")
           .get() as { orchestration_config_json: string };
         expect(JSON.parse(job.orchestration_config_json)).toMatchObject({
-          algorithmVersion: "session-compaction-v7-map-reduce",
+          algorithmVersion: "session-compaction-v8-turn-segmentation",
           contextWindowTokens: 20_000,
+          segmentPayloadTargetRatio: 0.8,
         });
       } finally {
         raw.close();
@@ -343,6 +345,118 @@ describe("session compaction", () => {
     } finally {
       await chat.close();
     }
+  });
+
+  it("segments oversized sessions on complete user turns and keeps tool protocols atomic", () => {
+    const messages = [
+      storedMessage({ sequence: 1, role: "user", content: `turn-1-user ${"A".repeat(1_200)}` }),
+      storedMessage({
+        sequence: 2,
+        role: "assistant",
+        content: `turn-1-assistant ${"B".repeat(1_200)}`,
+      }),
+      storedMessage({ sequence: 3, role: "user", content: `turn-2-user ${"C".repeat(1_200)}` }),
+      storedMessage({
+        sequence: 4,
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "read-document-1",
+            name: "read_project_document",
+            argumentsJson: JSON.stringify({ relativePath: "materials/source.md" }),
+          },
+        ],
+      }),
+      storedMessage({
+        sequence: 5,
+        role: "tool",
+        name: "read_project_document",
+        toolCallId: "read-document-1",
+        content: JSON.stringify({
+          ok: true,
+          relativePath: "materials/source.md",
+          content: "RAW_DOCUMENT_CONTENT".repeat(4_000),
+          contentHash: "hash-1",
+          offset: 0,
+          nextOffset: null,
+          totalCharacters: 80_000,
+          truncated: false,
+        }),
+      }),
+      storedMessage({
+        sequence: 6,
+        role: "assistant",
+        content: `turn-2-assistant ${"D".repeat(1_200)}`,
+      }),
+      storedMessage({ sequence: 7, role: "user", content: `turn-3-user ${"E".repeat(1_200)}` }),
+      storedMessage({
+        sequence: 8,
+        role: "assistant",
+        content: `turn-3-assistant ${"F".repeat(1_200)}`,
+      }),
+    ];
+
+    const segments = segmentMessagesForCompaction(messages, 1_600, 512);
+    const segmentBySequence = new Map<number, number>();
+    segments.forEach((segment, segmentIndex) => {
+      for (const message of segment) segmentBySequence.set(message.sequence, segmentIndex);
+    });
+
+    expect(segments.length).toBeGreaterThan(1);
+    expect(segmentBySequence.get(1)).toBe(segmentBySequence.get(2));
+    expect(segmentBySequence.get(3)).toBe(segmentBySequence.get(4));
+    expect(segmentBySequence.get(4)).toBe(segmentBySequence.get(5));
+    expect(segmentBySequence.get(5)).toBe(segmentBySequence.get(6));
+    expect(segmentBySequence.get(7)).toBe(segmentBySequence.get(8));
+    expect(segments.flatMap((segment) => segment.map((message) => message.sequence))).toEqual(
+      messages.map((message) => message.sequence),
+    );
+  });
+
+  it("splits one oversized text message on Unicode-safe semantic boundaries without data loss", () => {
+    const content = "第一段🙂仍需保留。\n\n第二段继续讨论！\n".repeat(1_000);
+    const segments = segmentMessagesForCompaction(
+      [storedMessage({ sequence: 1, role: "user", content })],
+      1_000,
+      512,
+    );
+    const fragments = segments.flatMap((segment) => segment.map((message) => message.content));
+
+    expect(fragments.length).toBeGreaterThan(1);
+    expect(fragments.join("")).toBe(content);
+    for (const fragment of fragments) {
+      expect(fragment).not.toMatch(/[\uD800-\uDBFF]$/u);
+      expect(fragment).not.toMatch(/^[\uDC00-\uDFFF]/u);
+    }
+  });
+
+  it("rejects an oversized atomic tool protocol instead of splitting calls from results", () => {
+    const toolCalls = Array.from({ length: 300 }, (_, index) => ({
+      id: `call-${index}`,
+      name: "unknown_tool",
+      argumentsJson: JSON.stringify({ secret: `argument-${index}` }),
+    }));
+    const messages = [
+      storedMessage({ sequence: 1, role: "user", content: "执行一组工具调用。" }),
+      storedMessage({ sequence: 2, role: "assistant", content: "", toolCalls }),
+      ...toolCalls.map((call, index) =>
+        storedMessage({
+          sequence: index + 3,
+          role: "tool",
+          name: call.name,
+          toolCallId: call.id,
+          content: JSON.stringify({ ok: true, secret: `result-${index}` }),
+        }),
+      ),
+    ];
+
+    expect(() => segmentMessagesForCompaction(messages, 2_000, 512)).toThrowError(
+      expect.objectContaining({
+        code: "PROVIDER_CONTEXT_LIMIT",
+        message: expect.stringContaining("Tool Call"),
+      }),
+    );
   });
 
   it("projects messages explicitly so future reasoning fields cannot enter compaction", () => {

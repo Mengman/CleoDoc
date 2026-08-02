@@ -19,6 +19,9 @@ import { emitLlmDebugEvent, type LlmDebugHandler, type LlmDebugOperation } from 
 
 export const COMPACTION_PROMPT_VERSION = "session-compaction-v7";
 
+const SEGMENT_PAYLOAD_TARGET_RATIO = 0.8;
+const SEMANTIC_SPLIT_SEARCH_RATIO = 0.6;
+
 const COMPACTION_SYSTEM_PROMPT = `你是 CleoDoc 的会话上下文压缩器，不是小说主笔，也不是用户对话参与者。
 你的任务是把一个已经完成的创作会话压缩为可供后续 Session 继续工作的 Markdown 会话摘要。
 
@@ -115,13 +118,14 @@ export class CompactionService {
       messages,
       previousSummaryId: previous?.id ?? null,
       orchestrationConfig: {
-        algorithmVersion: "session-compaction-v7-map-reduce",
+        algorithmVersion: "session-compaction-v8-turn-segmentation",
         contextWindowTokens: input.contextWindowTokens,
         reservedOutputTokens: budgetPolicy.reservedOutputTokens,
         nextUserInputReserveTokens: budgetPolicy.nextUserInputReserveTokens,
         safetyMarginRatio: budgetPolicy.safetyMarginRatio,
         summaryTargetTokens: targetTokens,
         segmentTargetTokens,
+        segmentPayloadTargetRatio: SEGMENT_PAYLOAD_TARGET_RATIO,
       },
     });
     emitCompactionEvent(input.onEvent, {
@@ -265,19 +269,28 @@ export class CompactionService {
 
     try {
       const payload = buildPayload(targetTokens, previousSummary, messages);
-      const maximumPayloadTokens = Math.max(
-        512,
+      const maximumPayloadTokens = Math.floor(
         input.contextWindowTokens -
           budgetPolicy.reservedOutputTokens -
           Math.floor(input.contextWindowTokens * budgetPolicy.safetyMarginRatio) -
           estimateTokens(COMPACTION_SYSTEM_PROMPT),
       );
+      if (maximumPayloadTokens < 1) {
+        throw new AppError(
+          "PROVIDER_CONTEXT_LIMIT",
+          "压缩模型上下文无法同时容纳系统提示词和安全输出预留，请提高上下文配置后重试。",
+        );
+      }
 
       let summary: string;
       if (estimateTokens(payload) <= maximumPayloadTokens) {
         summary = await requestSummary(payload, "compaction", targetTokens, "primary");
       } else {
-        const chunks = chunkMessages(messages, maximumPayloadTokens);
+        const chunks = segmentMessagesForCompaction(
+          messages,
+          maximumPayloadTokens,
+          segmentTargetTokens,
+        );
         const segmentSummaries: string[] = [];
         for (const [segmentIndex, chunk] of chunks.entries()) {
           const segmentPayload = buildPayload(segmentTargetTokens, null, chunk);
@@ -356,11 +369,120 @@ function emitCompactionEvent(
   }
 }
 
-function chunkMessages(
+export function segmentMessagesForCompaction(
   messages: readonly StoredMessage[],
   maximumPayloadTokens: number,
+  segmentTargetTokens: number,
 ): StoredMessage[][] {
+  if (!Number.isFinite(maximumPayloadTokens) || maximumPayloadTokens < 1) {
+    throw new AppError("VALIDATION_ERROR", "压缩分段的 Payload Token 上限无效。");
+  }
+  if (!Number.isFinite(segmentTargetTokens) || segmentTargetTokens < 1) {
+    throw new AppError("VALIDATION_ERROR", "压缩分段的摘要 Token 目标无效。");
+  }
+
+  const hardLimit = Math.floor(maximumPayloadTokens);
+  const targetLimit = Math.max(1, Math.floor(hardLimit * SEGMENT_PAYLOAD_TARGET_RATIO));
+  const turns = groupMessagesByUserTurn(messages);
+  const units = turns.flatMap((turn) => splitOversizedTurn(turn, hardLimit, segmentTargetTokens));
+  const segments: StoredMessage[][] = [];
+  let current: StoredMessage[] = [];
+
+  for (const unit of units) {
+    const unitTokens = estimateSegmentPayloadTokens(unit, segmentTargetTokens);
+    if (unitTokens > hardLimit) {
+      throw oversizedAtomicUnitError();
+    }
+
+    if (current.length > 0) {
+      const candidate = [...current, ...unit];
+      if (estimateSegmentPayloadTokens(candidate, segmentTargetTokens) > targetLimit) {
+        segments.push(current);
+        current = [];
+      }
+    }
+
+    if (current.length === 0 && unitTokens > targetLimit) {
+      segments.push([...unit]);
+      continue;
+    }
+
+    current.push(...unit);
+  }
+
+  if (current.length > 0) segments.push(current);
+  for (const segment of segments) {
+    if (estimateSegmentPayloadTokens(segment, segmentTargetTokens) > hardLimit) {
+      throw new AppError(
+        "PROVIDER_CONTEXT_LIMIT",
+        "压缩分段生成的 Payload 超过模型上下文限制，未向模型发送该分段。",
+      );
+    }
+  }
+  return segments;
+}
+
+function groupMessagesByUserTurn(messages: readonly StoredMessage[]): StoredMessage[][] {
+  const turns: StoredMessage[][] = [];
+  let current: StoredMessage[] = [];
+
+  for (const message of messages) {
+    if (message.role === "user" && current.length > 0) {
+      turns.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+
+  if (current.length > 0) turns.push(current);
+  return turns;
+}
+
+function splitOversizedTurn(
+  turn: readonly StoredMessage[],
+  hardLimit: number,
+  segmentTargetTokens: number,
+): StoredMessage[][] {
+  if (estimateSegmentPayloadTokens(turn, segmentTargetTokens) <= hardLimit) {
+    return [[...turn]];
+  }
+
+  return groupToolProtocolUnits(turn).flatMap((unit) => {
+    if (estimateSegmentPayloadTokens(unit, segmentTargetTokens) <= hardLimit) {
+      return [unit];
+    }
+
+    const first = unit[0];
+    if (first === undefined) return [];
+    if (unit.length === 1 && isSplittableTextMessage(first)) {
+      return splitTextMessage(first, hardLimit, segmentTargetTokens);
+    }
+
+    if (first.role === "assistant" && first.toolCalls !== undefined) {
+      const toolProtocolMessage = { ...first, content: "" };
+      const toolProtocolUnit = [toolProtocolMessage, ...unit.slice(1)];
+      if (estimateSegmentPayloadTokens(toolProtocolUnit, segmentTargetTokens) > hardLimit) {
+        throw oversizedAtomicUnitError();
+      }
+
+      const contentUnits =
+        first.content === ""
+          ? []
+          : splitTextMessage(
+              { ...first, role: "assistant", content: first.content, toolCalls: undefined },
+              hardLimit,
+              segmentTargetTokens,
+            );
+      return [...contentUnits, toolProtocolUnit];
+    }
+
+    throw oversizedAtomicUnitError();
+  });
+}
+
+function groupToolProtocolUnits(messages: readonly StoredMessage[]): StoredMessage[][] {
   const units: StoredMessage[][] = [];
+
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]!;
     const unit = [message];
@@ -379,40 +501,110 @@ function chunkMessages(
         index += 1;
       }
     }
+    units.push(unit);
+  }
 
-    const unitTokens = estimateProjectedMessagesTokens(unit);
-    if (
-      unitTokens > maximumPayloadTokens * 0.8 &&
-      unit.length === 1 &&
-      (message.role === "user" || message.role === "assistant") &&
-      message.toolCalls === undefined
-    ) {
-      const maximumCharacters = Math.max(200, Math.floor(maximumPayloadTokens * 0.5));
-      for (let offset = 0; offset < message.content.length; offset += maximumCharacters) {
-        units.push([
-          { ...message, content: message.content.slice(offset, offset + maximumCharacters) },
-        ]);
+  return units;
+}
+
+function isSplittableTextMessage(
+  message: StoredMessage,
+): message is StoredMessage & { role: "user" | "assistant" } {
+  return (
+    (message.role === "user" || message.role === "assistant") && message.toolCalls === undefined
+  );
+}
+
+function splitTextMessage(
+  message: StoredMessage & { role: "user" | "assistant" },
+  hardLimit: number,
+  segmentTargetTokens: number,
+): StoredMessage[][] {
+  if (message.content === "") {
+    throw new AppError("PROVIDER_CONTEXT_LIMIT", "压缩模型上下文过小，无法容纳分段 Prompt。");
+  }
+  const boundaries = codePointBoundaries(message.content);
+  const result: StoredMessage[][] = [];
+  let startIndex = 0;
+
+  while (startIndex < boundaries.length - 1) {
+    let low = startIndex + 1;
+    let high = boundaries.length - 1;
+    let best = startIndex;
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = {
+        ...message,
+        content: message.content.slice(boundaries[startIndex], boundaries[middle]),
+      };
+      if (estimateSegmentPayloadTokens([candidate], segmentTargetTokens) <= hardLimit) {
+        best = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
       }
-    } else {
-      units.push(unit);
     }
+
+    if (best === startIndex) {
+      throw new AppError(
+        "PROVIDER_CONTEXT_LIMIT",
+        "压缩模型上下文过小，无法容纳分段 Prompt 和单个文本字符。",
+      );
+    }
+
+    const splitIndex = findSemanticSplitIndex(message.content, boundaries, startIndex, best);
+    result.push([
+      {
+        ...message,
+        content: message.content.slice(boundaries[startIndex], boundaries[splitIndex]),
+      },
+    ]);
+    startIndex = splitIndex;
   }
 
-  const chunks: StoredMessage[][] = [];
-  let current: StoredMessage[] = [];
-  let currentTokens = 0;
-  for (const unit of units) {
-    const unitTokens = estimateProjectedMessagesTokens(unit);
-    if (current.length > 0 && currentTokens + unitTokens > maximumPayloadTokens * 0.8) {
-      chunks.push(current);
-      current = [];
-      currentTokens = 0;
-    }
-    current.push(...unit);
-    currentTokens += unitTokens;
+  return result;
+}
+
+function codePointBoundaries(content: string): number[] {
+  const boundaries = [0];
+  let offset = 0;
+  for (const character of content) {
+    offset += character.length;
+    boundaries.push(offset);
   }
-  if (current.length > 0) chunks.push(current);
-  return chunks;
+  return boundaries;
+}
+
+function findSemanticSplitIndex(
+  content: string,
+  boundaries: readonly number[],
+  startIndex: number,
+  maximumIndex: number,
+): number {
+  if (maximumIndex >= boundaries.length - 1) return maximumIndex;
+  const minimumIndex =
+    startIndex + Math.floor((maximumIndex - startIndex) * SEMANTIC_SPLIT_SEARCH_RATIO);
+
+  for (let index = maximumIndex; index > minimumIndex; index -= 1) {
+    const character = content.slice(boundaries[index - 1], boundaries[index]);
+    if (/\s|[。！？；.!?;]/u.test(character)) return index;
+  }
+  return maximumIndex;
+}
+
+function estimateSegmentPayloadTokens(
+  messages: readonly StoredMessage[],
+  segmentTargetTokens: number,
+): number {
+  return estimateTokens(buildPayload(segmentTargetTokens, null, messages));
+}
+
+function oversizedAtomicUnitError(): AppError {
+  return new AppError(
+    "PROVIDER_CONTEXT_LIMIT",
+    "单个完整 Tool Call 及其结果超过压缩模型上下文限制；为避免破坏 Tool 语义，未拆分或发送该单元。",
+  );
 }
 
 function buildReducePayload(
@@ -582,15 +774,6 @@ function projectToolEvent(
     default:
       return { ...base, operation: "unknown" };
   }
-}
-
-function estimateProjectedMessagesTokens(messages: readonly StoredMessage[]): number {
-  return estimateTokens(
-    JSON.stringify({
-      messages: projectMessagesForCompaction(messages),
-      toolEvents: projectToolEventsForCompaction(messages),
-    }),
-  );
 }
 
 async function collect(
