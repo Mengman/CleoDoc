@@ -3,6 +3,7 @@ export type ChatRole = "system" | "user" | "assistant" | "tool";
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  reasoningContent?: string;
   name?: string;
   toolCallId?: string;
   toolCalls?: readonly ModelToolCall[];
@@ -65,6 +66,7 @@ export interface ModelToolCall {
 }
 
 export type ModelEvent =
+  | { type: "reasoning-delta"; text: string }
   | { type: "text-delta"; text: string }
   | { type: "tool-call"; call: ModelToolCall }
   | { type: "usage"; usage: ModelUsage }

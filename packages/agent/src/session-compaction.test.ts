@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -308,6 +309,31 @@ describe("session compaction", () => {
       expect(chat.getSessionDetails(first.conversationId, 1).summary?.summary).toBe(
         "# 当前成果\n\n已完成所有分段摘要的归并。",
       );
+      const raw = new DatabaseSync(path.join(project.root, ".cleo", "project.sqlite"));
+      try {
+        const mappings = raw
+          .prepare(
+            `SELECT mapping.phase, calls.status
+             FROM compaction_job_model_call_mapping mapping
+             JOIN model_calls calls ON calls.id = mapping.model_call_id
+             ORDER BY mapping.ordinal`,
+          )
+          .all() as Array<{ phase: string; status: string }>;
+        expect(mappings).toHaveLength(provider.compactionCalls);
+        expect(mappings.map((mapping) => mapping.phase)).toEqual(
+          expect.arrayContaining(["segment", "reduce"]),
+        );
+        expect(mappings.every((mapping) => mapping.status === "completed")).toBe(true);
+        const job = raw
+          .prepare("SELECT orchestration_config_json FROM compaction_jobs LIMIT 1")
+          .get() as { orchestration_config_json: string };
+        expect(JSON.parse(job.orchestration_config_json)).toMatchObject({
+          algorithmVersion: "session-compaction-v7-map-reduce",
+          contextWindowTokens: 20_000,
+        });
+      } finally {
+        raw.close();
+      }
     } finally {
       await chat.close();
     }

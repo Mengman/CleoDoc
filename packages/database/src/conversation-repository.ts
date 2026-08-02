@@ -28,15 +28,18 @@ interface ConversationSummaryRow extends ConversationRow {
 }
 
 interface MessageRow {
+  message_rowid: number;
   id: string;
   conversation_id: string;
   session_id: string | null;
   sequence: number;
   role: StoredMessage["role"];
   content: string;
+  reasoning_content: string | null;
   name: string | null;
   tool_call_id: string | null;
   tool_calls_json: string | null;
+  model_call_id: string | null;
   created_at: string;
 }
 
@@ -156,10 +159,11 @@ export class ConversationRepository {
     conversationId: string,
     message: ChatMessage,
     sessionId: string | null = null,
+    modelCallId: string | null = null,
   ): Promise<StoredMessage> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const sequence = await this.projectDatabase.transaction((database) => {
+    const inserted = await this.projectDatabase.transaction((database) => {
       const exists = database
         .prepare("SELECT 1 AS found FROM conversations WHERE id = ?")
         .get(conversationId);
@@ -173,19 +177,30 @@ export class ConversationRepository {
         )
         .get(conversationId) as { next_sequence: number };
       const nextSequence = Number(row.next_sequence);
-      this.insertMessage(database, conversationId, message, nextSequence, now, id, sessionId);
+      const messageRowid = this.insertMessage(
+        database,
+        conversationId,
+        message,
+        nextSequence,
+        now,
+        id,
+        sessionId,
+        modelCallId,
+      );
       database
         .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
         .run(now, conversationId);
-      return nextSequence;
+      return { messageRowid, sequence: nextSequence };
     });
 
     return {
       ...message,
+      messageRowid: inserted.messageRowid,
       id,
       conversationId,
       sessionId,
-      sequence,
+      modelCallId,
+      sequence: inserted.sequence,
       createdAt: now,
     };
   }
@@ -231,6 +246,8 @@ export class ConversationRepository {
     errorCode?: string;
     addAssistantMessage?: boolean;
     sessionId?: string;
+    reasoningContent?: string;
+    modelCallId?: string;
   }): Promise<void> {
     const completedAt = new Date().toISOString();
     await this.projectDatabase.transaction((database) => {
@@ -265,11 +282,18 @@ export class ConversationRepository {
         this.insertMessage(
           database,
           row.conversation_id,
-          { role: "assistant", content: input.content },
+          {
+            role: "assistant",
+            content: input.content,
+            ...(input.reasoningContent === undefined
+              ? {}
+              : { reasoningContent: input.reasoningContent }),
+          },
           Number(sequenceRow.next_sequence),
           completedAt,
           undefined,
           input.sessionId ?? null,
+          input.modelCallId ?? null,
         );
         database
           .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
@@ -326,12 +350,14 @@ export class ConversationRepository {
     createdAt: string,
     id = randomUUID(),
     sessionId: string | null = null,
-  ): void {
-    database
+    modelCallId: string | null = null,
+  ): number {
+    const result = database
       .prepare(
         `INSERT INTO messages
-         (id, conversation_id, sequence, role, content, name, tool_call_id, tool_calls_json, created_at, session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, sequence, role, content, reasoning_content, name, tool_call_id,
+          tool_calls_json, created_at, session_id, model_call_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -339,12 +365,15 @@ export class ConversationRepository {
         sequence,
         message.role,
         message.content,
+        message.reasoningContent ?? null,
         message.name ?? null,
         message.toolCallId ?? null,
         message.toolCalls === undefined ? null : JSON.stringify(message.toolCalls),
         createdAt,
         sessionId,
+        modelCallId,
       );
+    return Number(result.lastInsertRowid);
   }
 }
 
@@ -369,12 +398,15 @@ function mapConversationSummary(row: ConversationSummaryRow): ConversationSummar
 
 function mapMessage(row: MessageRow): StoredMessage {
   return {
+    messageRowid: Number(row.message_rowid),
     id: row.id,
     conversationId: row.conversation_id,
     sessionId: row.session_id,
+    modelCallId: row.model_call_id,
     sequence: Number(row.sequence),
     role: row.role,
     content: row.content,
+    ...(row.reasoning_content === null ? {} : { reasoningContent: row.reasoning_content }),
     ...(row.name === null ? {} : { name: row.name }),
     ...(row.tool_call_id === null ? {} : { toolCallId: row.tool_call_id }),
     ...(row.tool_calls_json === null

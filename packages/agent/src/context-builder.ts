@@ -32,6 +32,9 @@ export class ContextBuilder {
       messages.push({
         role: message.role,
         content: message.content,
+        ...(message.reasoningContent === undefined
+          ? {}
+          : { reasoningContent: message.reasoningContent }),
         ...(message.name === undefined ? {} : { name: message.name }),
         ...(message.toolCallId === undefined ? {} : { toolCallId: message.toolCallId }),
         ...(message.toolCalls === undefined ? {} : { toolCalls: message.toolCalls }),

@@ -56,15 +56,18 @@ interface CompactionJobCompletionRow {
 }
 
 interface HistoryRow {
+  message_rowid: number;
   id: string;
   conversation_id: string;
   session_id: string | null;
   sequence: number;
   role: StoredMessage["role"];
   content: string;
+  reasoning_content: string | null;
   name: string | null;
   tool_call_id: string | null;
   tool_calls_json: string | null;
+  model_call_id: string | null;
   created_at: string;
 }
 
@@ -259,6 +262,7 @@ export class SessionRepository {
     promptVersion: string;
     messages: readonly StoredMessage[];
     previousSummaryId: string | null;
+    orchestrationConfig: Readonly<Record<string, unknown>>;
   }): Promise<string> {
     if (input.messages.length === 0) {
       throw new AppError("VALIDATION_ERROR", "当前 Session 没有可压缩的消息。");
@@ -279,7 +283,7 @@ export class SessionRepository {
           `INSERT INTO compaction_jobs
            (id, conversation_id, source_session_id, previous_summary_id, status, trigger,
             provider_id, model, prompt_version, first_message_id, last_message_id,
-            message_count, attempt_count, parameters_json, created_at)
+            message_count, attempt_count, orchestration_config_json, created_at)
            VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         )
         .run(
@@ -294,7 +298,7 @@ export class SessionRepository {
           input.messages[0]!.id,
           input.messages.at(-1)!.id,
           input.messages.length,
-          JSON.stringify({ temperature: 0.1 }),
+          JSON.stringify(input.orchestrationConfig),
           now,
         );
     });
@@ -456,22 +460,22 @@ export class SessionRepository {
     const terms = input.query.trim();
     if (terms === "") return [];
     const sessionFilter = input.sessionIds?.length
-      ? ` AND f.session_id IN (${input.sessionIds.map(() => "?").join(",")})`
+      ? ` AND m.session_id IN (${input.sessionIds.map(() => "?").join(",")})`
       : "";
     const roles = input.roles?.length ? input.roles : (["user", "assistant"] as const);
-    const roleFilter = ` AND f.role IN (${roles.map(() => "?").join(",")})`;
+    const roleFilter = ` AND m.role IN (${roles.map(() => "?").join(",")})`;
     const match = `"${terms.replaceAll('"', '""')}"`;
     const rows = this.projectDatabase.read(
       (database) =>
         database
           .prepare(
-            `SELECT f.message_id, f.session_id, f.role, m.sequence, m.created_at,
-                    snippet(conversation_message_fts, 4, '[', ']', '…', 24) AS excerpt,
+            `SELECT m.id AS message_id, m.session_id, m.role, m.sequence, m.created_at,
+                    snippet(conversation_message_fts, 0, '[', ']', '…', 24) AS excerpt,
                     bm25(conversation_message_fts) AS rank
              FROM conversation_message_fts f
-             JOIN conversation_sessions s ON s.id = f.session_id
-             JOIN messages m ON m.id = f.message_id
-             WHERE conversation_message_fts MATCH ? AND f.conversation_id = ?
+             JOIN messages m ON m.message_rowid = f.rowid
+             JOIN conversation_sessions s ON s.id = m.session_id
+             WHERE conversation_message_fts MATCH ? AND m.conversation_id = ?
                AND s.status = 'closed'${sessionFilter}${roleFilter}
              ORDER BY rank LIMIT ?`,
           )
@@ -600,12 +604,15 @@ function parseModelUsage(value: string | null): ModelUsage | null {
 
 function mapHistoryMessage(row: HistoryRow): StoredMessage {
   return {
+    messageRowid: Number(row.message_rowid),
     id: row.id,
     conversationId: row.conversation_id,
     sessionId: row.session_id,
+    modelCallId: row.model_call_id,
     sequence: Number(row.sequence),
     role: row.role,
     content: row.content,
+    ...(row.reasoning_content === null ? {} : { reasoningContent: row.reasoning_content }),
     ...(row.name === null ? {} : { name: row.name }),
     ...(row.tool_call_id === null ? {} : { toolCallId: row.tool_call_id }),
     ...(row.tool_calls_json === null

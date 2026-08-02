@@ -8,7 +8,11 @@ import type {
   StoredMessage,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
-import type { SessionRepository } from "../../database/src/index.js";
+import type {
+  CompactionModelCallPhase,
+  ModelCallRepository,
+  SessionRepository,
+} from "../../database/src/index.js";
 import { createContextBudgetPolicy, estimateTokens } from "./context-budget.js";
 import { emitLlmDebugEvent, type LlmDebugHandler, type LlmDebugOperation } from "./debug-events.js";
 import { loadProjectInstructions } from "./project-instructions.js";
@@ -72,6 +76,7 @@ export class CompactionService {
   constructor(
     private readonly projectRoot: string,
     private readonly sessions: SessionRepository,
+    private readonly modelCalls: ModelCallRepository,
   ) {}
 
   async compact(input: CompactInput): Promise<CompactionEvent & { type: "compaction-completed" }> {
@@ -89,6 +94,7 @@ export class CompactionService {
       Math.min(8_000, Math.floor(input.contextWindowTokens * 0.01)),
     );
     const budgetPolicy = createContextBudgetPolicy(input.contextWindowTokens);
+    const segmentTargetTokens = Math.min(targetTokens, 2_000);
     const jobId = await this.sessions.beginCompaction({
       session: input.session,
       trigger: input.trigger,
@@ -97,6 +103,15 @@ export class CompactionService {
       promptVersion: COMPACTION_PROMPT_VERSION,
       messages,
       previousSummaryId: previous?.id ?? null,
+      orchestrationConfig: {
+        algorithmVersion: "session-compaction-v7-map-reduce",
+        contextWindowTokens: input.contextWindowTokens,
+        reservedOutputTokens: budgetPolicy.reservedOutputTokens,
+        nextUserInputReserveTokens: budgetPolicy.nextUserInputReserveTokens,
+        safetyMarginRatio: budgetPolicy.safetyMarginRatio,
+        summaryTargetTokens: targetTokens,
+        segmentTargetTokens,
+      },
     });
     emitCompactionEvent(input.onEvent, {
       type: "compaction-started",
@@ -114,9 +129,28 @@ export class CompactionService {
       requestPayload: string,
       operation: LlmDebugOperation,
       summaryTargetTokens: number,
+      phase: CompactionModelCallPhase,
+      segmentIndex?: number,
     ): Promise<string> => {
       await this.sessions.recordCompactionAttempt(jobId);
       const round = ++debugCallCount;
+      const modelCall = await this.modelCalls.beginCompactionCall({
+        compactionJobId: jobId,
+        providerId: input.provider.id,
+        model: input.model,
+        requestOptions: {
+          thinking: "disabled",
+          reasoningEffort: "provider_default",
+          temperature: 0.1,
+          maxTokens: null,
+          responseFormat: null,
+          toolsEnabled: false,
+          toolCount: 0,
+          toolNames: [],
+        },
+        phase,
+        ...(segmentIndex === undefined ? {} : { segmentIndex }),
+      });
       const estimatedContextTokens = estimateTokens(
         JSON.stringify({
           messages: [
@@ -127,6 +161,7 @@ export class CompactionService {
         }),
       );
       let callUsage: ModelUsage | undefined;
+      let callFinished = false;
 
       try {
         const collected = await collect(
@@ -148,6 +183,14 @@ export class CompactionService {
               protocol,
             }),
         );
+
+        await this.modelCalls.finish({
+          modelCallId: modelCall.id,
+          status: "completed",
+          finishReason: collected.finishReason,
+          ...(callUsage === undefined ? {} : { usage: callUsage }),
+        });
+        callFinished = true;
 
         emitLlmDebugEvent(input.onDebugEvent, {
           type: "llm-response",
@@ -187,6 +230,14 @@ export class CompactionService {
         return validateSummary(collected, summaryTargetTokens);
       } catch (error) {
         const appError = asAppError(error);
+        if (!callFinished) {
+          await this.modelCalls.finish({
+            modelCallId: modelCall.id,
+            status: input.signal.aborted ? "cancelled" : "failed",
+            errorCode: appError.code,
+            ...(callUsage === undefined ? {} : { usage: callUsage }),
+          });
+        }
         emitLlmDebugEvent(input.onDebugEvent, {
           type: "llm-response-error",
           operation,
@@ -213,15 +264,20 @@ export class CompactionService {
 
       let summary: string;
       if (estimateTokens(payload) <= maximumPayloadTokens) {
-        summary = await requestSummary(payload, "compaction", targetTokens);
+        summary = await requestSummary(payload, "compaction", targetTokens, "primary");
       } else {
         const chunks = chunkMessages(messages, maximumPayloadTokens);
         const segmentSummaries: string[] = [];
-        for (const chunk of chunks) {
-          const segmentTargetTokens = Math.min(targetTokens, 2_000);
+        for (const [segmentIndex, chunk] of chunks.entries()) {
           const segmentPayload = buildPayload(segmentTargetTokens, null, chunk);
           segmentSummaries.push(
-            await requestSummary(segmentPayload, "compaction-segment", segmentTargetTokens),
+            await requestSummary(
+              segmentPayload,
+              "compaction-segment",
+              segmentTargetTokens,
+              "segment",
+              segmentIndex,
+            ),
           );
         }
 
@@ -232,7 +288,7 @@ export class CompactionService {
             "分段摘要仍超过压缩模型上下文限制，请提高模型上下文配置后重试。",
           );
         }
-        summary = await requestSummary(reducePayload, "compaction-reduce", targetTokens);
+        summary = await requestSummary(reducePayload, "compaction-reduce", targetTokens, "reduce");
       }
 
       const instructions = await loadProjectInstructions(this.projectRoot);

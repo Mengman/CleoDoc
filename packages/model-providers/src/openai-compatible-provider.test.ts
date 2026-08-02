@@ -11,6 +11,7 @@ describe("OpenAICompatibleProvider", () => {
         return Response.json({ data: [{ id: "test-model" }] });
       }
       const body = [
+        'data: {"choices":[{"delta":{"content":null,"reasoning_content":"先分析"},"finish_reason":null}]}\n\n',
         'data: {"choices":[{"delta":{"content":"你好"},"finish_reason":null}]}\n\n',
         'data: {"choices":[{"delta":{"content":"，世界"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7,"completion_tokens_details":{"reasoning_tokens":2}}}\n\n',
         "data: [DONE]\n\n",
@@ -35,6 +36,7 @@ describe("OpenAICompatibleProvider", () => {
     expect(
       events.filter((event) => event.type === "text-delta").map((event) => event.text),
     ).toEqual(["你好", "，世界"]);
+    expect(events).toContainEqual({ type: "reasoning-delta", text: "先分析" });
     expect(events).toContainEqual({
       type: "usage",
       usage: { inputTokens: 3, outputTokens: 4, reasoningTokens: 2, totalTokens: 7 },
@@ -183,7 +185,13 @@ describe("OpenAICompatibleProvider", () => {
         messages: [
           {
             role: "assistant",
+            content: "普通历史回答",
+            reasoningContent: "普通历史不应默认重发",
+          },
+          {
+            role: "assistant",
             content: "",
+            reasoningContent: "需要先查询项目文档。",
             toolCalls: [
               {
                 id: "prior-call",
@@ -210,9 +218,11 @@ describe("OpenAICompatibleProvider", () => {
     });
     expect(requestBody).toMatchObject({
       messages: [
+        { role: "assistant", content: "普通历史回答" },
         {
           role: "assistant",
           content: null,
+          reasoning_content: "需要先查询项目文档。",
           tool_calls: [
             {
               id: "prior-call",
@@ -226,6 +236,7 @@ describe("OpenAICompatibleProvider", () => {
     });
     expect(requestBody).not.toHaveProperty("response_format");
     expect(requestBody).not.toHaveProperty("thinking");
+    expect(JSON.stringify(requestBody)).not.toContain("普通历史不应默认重发");
   });
 
   it("does not treat the connection timeout as a total streaming deadline", async () => {

@@ -33,6 +33,7 @@ const streamChunkSchema = z
             delta: z
               .object({
                 content: z.string().nullable().optional(),
+                reasoning_content: z.string().nullable().optional(),
                 tool_calls: z
                   .array(
                     z
@@ -218,6 +219,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
         }
 
         for (const choice of parsed.data.choices) {
+          if (choice.delta.reasoning_content) {
+            yield { type: "reasoning-delta", text: choice.delta.reasoning_content };
+          }
           if (choice.delta.content) {
             yield { type: "text-delta", text: choice.delta.content };
           }
@@ -276,6 +280,9 @@ function toOpenAIMessage(message: ChatMessage): Record<string, unknown> {
     return {
       role: "assistant",
       content: message.content === "" ? null : message.content,
+      ...(message.reasoningContent === undefined
+        ? {}
+        : { reasoning_content: message.reasoningContent }),
       tool_calls: message.toolCalls.map((call) => ({
         id: call.id,
         type: "function",

@@ -204,7 +204,147 @@ export const migrations: readonly Migration[] = [
     sql: "",
     apply: migrateSessionSummariesToMarkdown,
   },
+  {
+    version: 6,
+    sql: "",
+    apply: migrateReasoningModelCallsAndExternalMessageFts,
+  },
 ];
+
+function migrateReasoningModelCallsAndExternalMessageFts(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE model_calls (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      request_options_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
+      finish_reason TEXT,
+      error_code TEXT,
+      prompt_tokens INTEGER CHECK (prompt_tokens IS NULL OR prompt_tokens >= 0),
+      completion_tokens INTEGER CHECK (completion_tokens IS NULL OR completion_tokens >= 0),
+      reasoning_tokens INTEGER CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0),
+      total_tokens INTEGER CHECK (total_tokens IS NULL OR total_tokens >= 0),
+      created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE TABLE generation_model_call_mapping (
+      generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+      model_call_id TEXT NOT NULL UNIQUE REFERENCES model_calls(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+      PRIMARY KEY (generation_id, model_call_id),
+      UNIQUE (generation_id, ordinal)
+    );
+
+    CREATE TABLE compaction_job_model_call_mapping (
+      compaction_job_id TEXT NOT NULL REFERENCES compaction_jobs(id) ON DELETE CASCADE,
+      model_call_id TEXT NOT NULL UNIQUE REFERENCES model_calls(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+      phase TEXT NOT NULL CHECK (phase IN ('primary', 'segment', 'reduce', 'repair')),
+      segment_index INTEGER CHECK (segment_index IS NULL OR segment_index >= 0),
+      PRIMARY KEY (compaction_job_id, model_call_id),
+      UNIQUE (compaction_job_id, ordinal)
+    );
+
+    ALTER TABLE compaction_jobs RENAME COLUMN parameters_json TO orchestration_config_json;
+
+    DROP TRIGGER conversation_message_fts_insert;
+    DROP TRIGGER conversation_message_fts_delete;
+    DROP TABLE conversation_message_fts;
+    DROP INDEX messages_conversation_sequence;
+    DROP INDEX messages_session_sequence;
+
+    CREATE TABLE messages_v6 (
+      message_rowid INTEGER PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      sequence INTEGER NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
+      content TEXT NOT NULL,
+      reasoning_content TEXT,
+      name TEXT,
+      tool_call_id TEXT,
+      tool_calls_json TEXT,
+      created_at TEXT NOT NULL,
+      session_id TEXT REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+      model_call_id TEXT UNIQUE REFERENCES model_calls(id),
+      UNIQUE (conversation_id, sequence)
+    );
+
+    INSERT INTO messages_v6
+      (message_rowid, id, conversation_id, sequence, role, content, reasoning_content,
+       name, tool_call_id, tool_calls_json, created_at, session_id, model_call_id)
+    SELECT rowid, id, conversation_id, sequence, role, content, NULL,
+           name, tool_call_id, tool_calls_json, created_at, session_id, NULL
+    FROM messages
+    ORDER BY rowid;
+
+    DROP TABLE messages;
+    ALTER TABLE messages_v6 RENAME TO messages;
+
+    CREATE INDEX messages_session_sequence ON messages(session_id, sequence);
+    CREATE INDEX messages_conversation_rowid ON messages(conversation_id, message_rowid);
+
+    CREATE VIEW searchable_conversation_messages AS
+    SELECT message_rowid, content
+    FROM messages
+    WHERE role IN ('user', 'assistant');
+
+    CREATE VIRTUAL TABLE conversation_message_fts USING fts5(
+      content,
+      content='searchable_conversation_messages',
+      content_rowid='message_rowid',
+      tokenize='trigram'
+    );
+
+    INSERT INTO conversation_message_fts(conversation_message_fts) VALUES('rebuild');
+
+    CREATE TRIGGER conversation_message_fts_insert AFTER INSERT ON messages
+    WHEN new.role IN ('user', 'assistant')
+    BEGIN
+      INSERT INTO conversation_message_fts(rowid, content)
+      VALUES (new.message_rowid, new.content);
+    END;
+
+    CREATE TRIGGER conversation_message_fts_delete AFTER DELETE ON messages
+    WHEN old.role IN ('user', 'assistant')
+    BEGIN
+      INSERT INTO conversation_message_fts(conversation_message_fts, rowid, content)
+      VALUES ('delete', old.message_rowid, old.content);
+    END;
+
+    CREATE TRIGGER messages_immutable_update BEFORE UPDATE ON messages
+    BEGIN
+      SELECT RAISE(ABORT, 'messages are immutable');
+    END;
+  `);
+
+  const sourceCount = Number(
+    (
+      database
+        .prepare("SELECT COUNT(*) AS count FROM messages WHERE role IN ('user', 'assistant')")
+        .get() as { count: number }
+    ).count,
+  );
+  const ftsCount = Number(
+    (
+      database.prepare("SELECT COUNT(*) AS count FROM conversation_message_fts").get() as {
+        count: number;
+      }
+    ).count,
+  );
+  if (sourceCount !== ftsCount) {
+    throw new Error(
+      `conversation_message_fts migration row count mismatch: ${sourceCount} -> ${ftsCount}`,
+    );
+  }
+
+  const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyFailures.length > 0) {
+    throw new Error("reasoning/model-call migration produced invalid foreign keys");
+  }
+}
 
 interface LegacySummaryRow {
   id: string;

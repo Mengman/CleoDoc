@@ -11,9 +11,12 @@ describe("OllamaProvider", () => {
       baseUrl: "http://ollama.test",
       fetchImplementation: async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        return new Response('{"message":{"content":"完成"},"done":true,"done_reason":"stop"}\n', {
-          headers: { "Content-Type": "application/x-ndjson" },
-        });
+        return new Response(
+          '{"message":{"thinking":"先检查工具结果","content":"完成"},"done":true,"done_reason":"stop"}\n',
+          {
+            headers: { "Content-Type": "application/x-ndjson" },
+          },
+        );
       },
     });
 
@@ -25,6 +28,7 @@ describe("OllamaProvider", () => {
           {
             role: "assistant",
             content: "",
+            reasoningContent: "需要读取文档",
             toolCalls: [
               {
                 id: "call-1",
@@ -50,6 +54,7 @@ describe("OllamaProvider", () => {
     }
 
     expect(events).toContainEqual({ type: "text-delta", text: "完成" });
+    expect(events).toContainEqual({ type: "reasoning-delta", text: "先检查工具结果" });
 
     expect(requestBody).toMatchObject({
       format: "json",
@@ -58,6 +63,7 @@ describe("OllamaProvider", () => {
         {
           role: "assistant",
           content: "",
+          thinking: "需要读取文档",
           tool_calls: [
             {
               type: "function",
@@ -83,7 +89,8 @@ describe("OllamaProvider", () => {
         expect.objectContaining({ type: "response-head", status: 200 }),
         expect.objectContaining({
           type: "response-chunk",
-          chunk: '{"message":{"content":"完成"},"done":true,"done_reason":"stop"}\n',
+          chunk:
+            '{"message":{"thinking":"先检查工具结果","content":"完成"},"done":true,"done_reason":"stop"}\n',
         }),
       ]),
     );

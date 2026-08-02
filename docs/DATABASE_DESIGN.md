@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 migration v5 现状基线；第 15–16 章为已确认、尚未实施的设计，第 17 章已实现
+> 状态：v0.1 migration v6 现状基线；第 15、17、18 章已实现，第 16 章为已确认但尚未实施的设计
 > 审计日期：2026-08-02
 > Schema 来源：`packages/database/src/migrations.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -11,7 +11,7 @@
 
 本文严格区分：
 
-- **当前实现**：migration v1–v5 已经创建的表、索引、Trigger 和 Repository 行为。
+- **当前实现**：migration v1–v6 已经创建的表、索引、Trigger 和 Repository 行为。
 - **后续规划**：技术架构中规划但尚未实现的文档 Chunk、Embedding、RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 - **实例审计**：2026-08-02 对 `TestNovel.cleo` 的一次只读检查，只用于验证 Schema 和一致性，不作为固定产品数据。
 
@@ -36,7 +36,7 @@ conversation_message_fts 及影子表
 | 正文与资料 | Markdown、JSON、原始资料文件 | 是 |
 | 资料元数据投影 | `sources` | 是 |
 | 完整聊天历史 | `conversations`、`messages` | 否 |
-| 模型调用和保存审计 | `generations` | 否 |
+| 模型调用和保存审计 | `generations`、`model_calls` 及业务映射表 | 否 |
 | Session 与压缩运行状态 | `conversation_sessions`、`session_summaries`、`compaction_jobs` | 不能完整重建 |
 | 历史消息全文索引 | `conversation_message_fts*` | 是，可从 `messages` 重建 |
 
@@ -53,6 +53,11 @@ erDiagram
     conversation_sessions ||--o{ session_summaries : summarized_as
     conversation_sessions ||--o{ compaction_jobs : compacted_by
     messages ||--o| conversation_message_fts : indexed_as
+    generations ||--o{ generation_model_call_mapping : contains
+    model_calls ||--o| generation_model_call_mapping : mapped_by
+    compaction_jobs ||--o{ compaction_job_model_call_mapping : contains
+    model_calls ||--o| compaction_job_model_call_mapping : mapped_by
+    model_calls o|--o| messages : produces
 ```
 
 逻辑上还有以下关联，但当前 Schema 没有外键：
@@ -62,7 +67,7 @@ erDiagram
 - `compaction_jobs.summary_id → session_summaries.id`
 - 摘要及压缩任务的 `first_message_id/last_message_id → messages.id`
 - `messages.tool_call_id` 与 Assistant 消息 `tool_calls_json` 中的 Tool Call ID
-- 完成的 `generations` 与最终写入 `messages` 的 Assistant 消息
+- Generation 与 Assistant Message 通过映射到同一个最终 ModelCall 间接关联；Generation 和 Message 的重复正文仍待后续单独处理
 
 ## 4. 连接、事务与迁移
 
@@ -85,6 +90,7 @@ PRAGMA busy_timeout = 5000;
 - migration 版本保存在 `schema_migrations`，当前没有使用 `PRAGMA user_version`。
 - 已有项目存在待执行 migration 时，先执行 WAL 完整 checkpoint，并在 `.cleo/backups/` 创建 `pre-migration-v<版本>-<时间>.sqlite`；全新空数据库不创建无意义备份。
 - migration v5 除 SQL DDL 外还使用同一事务内的确定性 TypeScript 转换函数，将旧结构化摘要渲染为 Markdown；转换不调用 LLM。
+- migration v6 重建 `messages`，保留旧隐式 rowid 为稳定 `message_rowid`，增加 Reasoning/ModelCall 字段，并从 Message 完整重建 External Content FTS；迁移不调用 LLM。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
 - `quickCheck()` 已实现，但项目打开时尚未自动调用。
 - `backup()` 当前执行完整 checkpoint 后复制主数据库文件，尚未使用 SQLite Backup API 或 `VACUUM INTO`。
@@ -99,12 +105,13 @@ PRAGMA busy_timeout = 5000;
 | v3 | 增加资料元数据投影 `sources` |
 | v4 | 增加 Session、压缩摘要、压缩任务、`messages.session_id` 和会话历史 FTS5 |
 | v5 | 将 `session_summaries` 迁移为单一 Markdown `summary`，确定性转换旧摘要并增加查询索引 |
+| v6 | 增加 ModelCall 审计与业务映射；重建不可变 `messages`；增加 Reasoning；压缩配置改名；历史 FTS 改为 External Content |
 
 ## 6. 表与字段字典
 
 ### 6.1 类型约定
 
-- ID 使用 `TEXT`，由应用层生成 UUID；legacy Session 可使用 `legacy-<conversation-id>`。
+- 业务 ID 使用 `TEXT`，由应用层生成 UUID；legacy Session 可使用 `legacy-<conversation-id>`。`messages.message_rowid` 是仅供 SQLite/FTS 使用的稳定整数存储主键。
 - 时间使用 ISO 8601 UTC 字符串并保存在 `TEXT`。
 - 布尔值使用 `INTEGER` 的 `0/1`。
 - 枚举使用 `TEXT + CHECK`。
@@ -142,16 +149,19 @@ PRAGMA busy_timeout = 5000;
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
-| `id` | TEXT | 主键 | Message UUID |
+| `message_rowid` | INTEGER | 主键 | SQLite/FTS 内部稳定整数标识，不作为业务 ID 暴露 |
+| `id` | TEXT | NOT NULL、UNIQUE | Message UUID，业务层公开标识 |
 | `conversation_id` | TEXT | NOT NULL、外键 | 所属 Conversation；删除 Conversation 时级联删除 |
 | `sequence` | INTEGER | NOT NULL | 消息在整个 Conversation 内的递增顺序 |
 | `role` | TEXT | NOT NULL、CHECK | `system`、`user`、`assistant` 或 `tool` |
 | `content` | TEXT | NOT NULL | 消息正文；Tool Result 也保存在此字段 |
+| `reasoning_content` | TEXT | 可空 | Provider 返回并允许暴露的 Assistant Reasoning；与最终正文分开保存 |
 | `name` | TEXT | 可空 | Tool 消息对应的工具名称等附加信息 |
 | `tool_call_id` | TEXT | 可空 | Tool Result 对应的模型 Tool Call ID；不是数据库外键 |
 | `created_at` | TEXT | NOT NULL | 消息创建时间 |
 | `tool_calls_json` | TEXT | 可空 | Assistant 消息发起的 Tool Call 列表 JSON |
 | `session_id` | TEXT | 可空、外键 | 所属内部 Session；删除 Session 时级联删除消息 |
+| `model_call_id` | TEXT | 可空、外键、UNIQUE | 直接产生该 Assistant Message 的 ModelCall；User/System/Tool Message 为空 |
 
 约束：
 
@@ -159,7 +169,7 @@ PRAGMA busy_timeout = 5000;
 UNIQUE(conversation_id, sequence)
 ```
 
-`session_id` 在 Schema 中保持可空以兼容 migration；当前正常聊天流程应为消息指定 Session。消息目前按追加式记录设计，Repository 不提供修改历史消息的方法。
+`session_id` 在 Schema 中保持可空以兼容 migration；当前正常聊天流程应为消息指定 Session。Message 完成后一次性插入，Repository 不提供修改方法，数据库 `messages_immutable_update` Trigger 也会拒绝任何 UPDATE。纠正历史只能追加新 Message。
 
 ### 6.5 `generations`
 
@@ -180,7 +190,7 @@ UNIQUE(conversation_id, sequence)
 | `created_at` | TEXT | NOT NULL | Generation 开始时间 |
 | `completed_at` | TEXT | 可空 | 完成、失败或取消时间；运行中为空 |
 
-当前 `generations` 表示模型调用，`messages` 表示进入对话上下文的消息。完成的 Generation 内容通常还会写入一条 Assistant Message，但两者没有 ID 关联，且 `generations` 没有 `session_id`。
+当前 `generations` 表示用户可感知的生成任务，`messages` 表示进入对话上下文的消息。完成的 Generation 正文通常还会写入 Assistant Message，正文重复问题仍存在；migration v6 已通过 `generation_model_call_mapping` 和 `messages.model_call_id` 建立可审计的间接来源关联。
 
 ### 6.6 `sources`
 
@@ -289,7 +299,7 @@ UNIQUE(conversation_id, ordinal)
 | `last_message_id` | TEXT | NOT NULL | 输入快照的最后一条消息 ID；当前不是外键 |
 | `message_count` | INTEGER | NOT NULL | 输入快照包含的消息数量 |
 | `attempt_count` | INTEGER | NOT NULL、默认 0 | 实际发起的 Provider 调用次数，包括分段或修复调用 |
-| `parameters_json` | TEXT | NOT NULL | 压缩请求参数 JSON |
+| `orchestration_config_json` | TEXT | NOT NULL | 压缩算法和编排配置 JSON，不重复保存逐次模型请求参数 |
 | `usage_json` | TEXT | 可空 | 所有压缩调用累计 Token 用量 |
 | `summary_id` | TEXT | 可空 | 成功产生的 Summary ID；当前不是外键 |
 | `error_code` | TEXT | 可空 | 失败、取消或中断时的稳定错误码 |
@@ -304,30 +314,17 @@ FTS5 虚拟表，用于搜索压缩前的历史消息。
 
 | 字段 | FTS 属性 | 说明 |
 |---|---|---|
-| `message_id` | UNINDEXED | 来源 Message ID |
-| `session_id` | UNINDEXED | 所属 Session ID |
-| `conversation_id` | UNINDEXED | 所属 Conversation，用于查询隔离 |
-| `role` | UNINDEXED | 当前为 `user` 或 `assistant` |
-| `content` | 全文索引 | 消息正文，使用 trigram tokenizer |
+| `content` | 全文索引、External Content | 使用 trigram tokenizer；原文按 FTS rowid=`messages.message_rowid` 从 `searchable_conversation_messages` 视图读取 |
 
-所有 User/Assistant 消息写入时都会进入 FTS；执行历史 Tool 查询时再通过 `conversation_sessions.status = 'closed'` 限制为已关闭 Session。System Prompt、项目指令和 Tool Result 不进入该索引。
+所有 User/Assistant `content` 写入时都会进入 FTS；Reasoning、System Prompt、项目指令和 Tool Result 不进入索引。Conversation、Session、角色和 Message UUID 不在 FTS 重复保存，查询时通过 `message_rowid` 关联 `messages`，并强制限制当前 Conversation 与已关闭 Session。
 
 ## 7. FTS5 内部影子表
 
 以下表由 SQLite 自动创建和维护，不属于 CleoDoc 领域模型，不得由业务代码单独修改或删除。
 
-### 7.1 `conversation_message_fts_content`
+### 7.1 External Content 模式
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | INTEGER | FTS 内部 rowid |
-| `c0` | 无声明类型 | 对应 `message_id` |
-| `c1` | 无声明类型 | 对应 `session_id` |
-| `c2` | 无声明类型 | 对应 `conversation_id` |
-| `c3` | 无声明类型 | 对应 `role` |
-| `c4` | 无声明类型 | 对应 `content` |
-
-它是当前 FTS 产生消息文本重复存储的主要位置。
+migration v6 后不再存在 `conversation_message_fts_content`。原始正文只保存在 `messages.content`；FTS 保留下面列出的倒排索引、文档长度和配置影子表。
 
 ### 7.2 `conversation_message_fts_data`
 
@@ -362,27 +359,29 @@ FTS5 虚拟表，用于搜索压缩前的历史消息。
 
 | 索引 | 字段 | 当前用途 |
 |---|---|---|
-| `messages_conversation_sequence` | `conversation_id, sequence` | 按 Conversation 顺序读取消息 |
 | `messages_session_sequence` | `session_id, sequence` | 按 Session 顺序读取消息 |
+| `messages_conversation_rowid` | `conversation_id, message_rowid` | Conversation 作用域过滤与 FTS 整数关联 |
 | `generations_conversation_created` | `conversation_id, created_at DESC` | 查询 Conversation 的生成记录 |
 | `generations_status_created` | `status, created_at DESC` | 查询指定状态的最近 Generation |
 | `sources_project_updated` | `project_id, updated_at DESC` | 按更新时间列出项目资料 |
 | `sources_project_content_hash` | `project_id, content_hash` | 按项目和内容哈希查询资料 |
 | `conversation_sessions_one_active` | `conversation_id`，部分唯一索引 | 保证每个 Conversation 最多一个 active/compacting Session |
 
-SQLite 还会为主键和 UNIQUE 约束创建自动索引。`messages_conversation_sequence` 与 `UNIQUE(conversation_id, sequence)` 的自动索引存在重复，后续 migration 可评估删除普通索引。
+SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删除与 `UNIQUE(conversation_id, sequence)` 重复的 `messages_conversation_sequence` 普通索引。
 
 ## 9. FTS 同步 Trigger
 
 ### 9.1 `conversation_message_fts_insert`
 
-在 `messages` 插入 User 或 Assistant 消息后，将消息同步加入 FTS。
+在 `messages` 插入 User 或 Assistant 消息后，以 `message_rowid` 和 `content` 同步加入 FTS。
 
 ### 9.2 `conversation_message_fts_delete`
 
-在 `messages` 删除 User 或 Assistant 消息后，从 FTS 删除对应记录。
+在 `messages` 删除 User 或 Assistant 消息后，使用 External Content FTS delete 命令和旧正文删除对应词项。
 
-当前没有 UPDATE Trigger，因为业务层把消息视为追加后不可修改。如果未来允许修改历史消息，必须补充 UPDATE 同步、改为 external-content FTS5，或明确执行索引重建。
+### 9.3 `messages_immutable_update`
+
+任何 Message UPDATE 都通过 `RAISE(ABORT, ...)` 拒绝。没有 FTS UPDATE Trigger；修改历史必须追加新 Message。
 
 ## 10. Repository 行为
 
@@ -411,7 +410,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。`messages_conversati
 ### 10.4 历史回查
 
 - `searchClosedHistory` 使用 FTS5 trigram、`snippet()` 和 `bm25()`。
-- 查询强制限制当前 `conversation_id` 和已关闭 Session。
+- FTS 通过 `message_rowid` 关联 `messages`；查询强制限制当前 `conversation_id` 和已关闭 Session。
 - `readClosedHistory` 通过 `messages` 返回指定已关闭 Session 的原始消息。
 
 ## 11. 实例一致性审计快照
@@ -446,9 +445,9 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。`messages_conversati
 
 ## 12. 当前设计评审结论
 
-### 12.1 高优先级：Generation 与 Message 重复且未关联
+### 12.1 中优先级：Generation 与 Message 正文仍重复
 
-实例中 86 条 Completed Generation 全部存在内容完全相同的 Assistant Message。两者职责不同，但缺少稳定的 `generation_id/message_id/session_id` 关联，无法直接审计某条 Assistant Message 来自哪次模型调用。
+实例审计中 Completed Generation 普遍存在内容完全相同的 Assistant Message。migration v6 已通过 Generation→ModelCall 映射与 Message→ModelCall 外键建立来源关联，但两张业务表的正文重复仍待后续单独设计；当前不得直接删除任一事实源字段。
 
 ### 12.2 高优先级：数据库健康检查与备份 API 仍低于架构目标
 
@@ -458,17 +457,17 @@ migration v5 已落实已有项目的迁移前 checkpoint 与本地备份，但�
 
 摘要继承、压缩前序摘要、成功摘要以及消息边界只保存文本 ID。应用事务维持了当前一致性，但数据库不能阻止悬空引用。
 
-### 12.4 中优先级：压缩审计参数不完整
+### 12.4 已解决：压缩审计参数拆分
 
-`parameters_json` 当前主要记录 `temperature: 0.1`，没有完整记录结构化响应、Thinking 设置、上下文窗口和本地预算参数，尚不能仅根据 Job/Summary 完整复现压缩请求。
+migration v6 将任务级算法参数保存到 `orchestration_config_json`，逐次 Temperature、Thinking、最大输出、Response Format 和 Tool 设置保存到 `model_calls.request_options_json`，避免任务编排与实际请求参数重复。
 
-### 12.5 中优先级：FTS 更新策略依赖消息不可变
+### 12.5 已解决：不可变 Message 与 External Content FTS
 
-当前只有 INSERT/DELETE Trigger。直接更新 `messages.content` 会导致 FTS 过期，后续必须明确消息不可变约束或补充同步机制。
+migration v6 已通过数据库 Trigger 拒绝 Message UPDATE，并把历史 FTS 改为以 `messages.content` 为唯一原文的 External Content 投影。INSERT、级联 DELETE、完整 rebuild 和中文 `snippet()` 已有回归测试。
 
 ### 12.6 低优先级：索引重复和查询索引不足
 
-- `messages_conversation_sequence` 与 UNIQUE 自动索引重复。
+- migration v6 已删除重复的 `messages_conversation_sequence`，并增加 `messages_conversation_rowid`。
 - `sources.content_hash` 已全局 UNIQUE，项目组合索引在单项目数据库中收益有限。
 - migration v5 已为 `session_summaries` 增加 Conversation/时间与来源 Session 索引；`compaction_jobs` 尚无按 Conversation、Session、状态和时间的辅助索引。
 
@@ -491,24 +490,24 @@ migration v5 已落实已有项目的迁移前 checkpoint 与本地备份，但�
 
 进入下一阶段数据库设计前，需要确认：
 
-1. `messages` 是完整会话事实源，FTS 只是可重建索引。
-2. `generations` 是模型调用任务，`messages` 是对话消息；两者是否继续共存，以及如何建立关联。
+1. ~~`messages` 是完整会话事实源，FTS 只是可重建索引。~~ 已由 migration v6 的 External Content FTS 落实。
+2. Generation 与 Message 已通过 ModelCall 建立来源关联；两者正文是否继续共存仍待后续单独设计。
 3. Conversation、Message、Session 和运行审计需要怎样的备份与恢复等级。
-4. v0.1 是否继续接受 FTS `_content` 的文本重复，后续再评估 external-content FTS5。
-5. 是否将消息确立为数据库层不可变事件，还是允许受控修改并同步全文索引。
+4. ~~v0.1 是否继续接受 FTS `_content` 的文本重复，后续再评估 external-content FTS5。~~ 已在第 18 章确认改为 external-content FTS5。
+5. ~~是否将消息确立为数据库层不可变事件，还是允许受控修改并同步全文索引。~~ 已在第 18 章确认 Message 是数据库层不可变的追加式历史事件。
 
-## 15. 已确认的下一版设计：Reasoning 与模型调用审计
+## 15. 已实现设计：Reasoning 与模型调用审计
 
-本章记录已经通过评审、但尚未进入 migration 和业务代码的设计。第 3–10 章仍描述 migration v4 的当前实现；在新 migration 完成前，不得把本章字段视为已经存在。
+> 实施状态：已由 migration v6、Provider Adapter、ChatService、CompactionService 和 CLI 落地。
 
 ### 15.1 设计目标与职责边界
 
-下一版将“业务结果”和“实际 LLM API 调用”分开建模：
+migration v6 已将“业务结果”和“实际 LLM API 调用”分开建模：
 
 - `messages` 保存进入会话历史的消息正文、Assistant Reasoning 和 Tool Call 信息。
 - `generations` 继续表示一次用户可感知的主笔生成任务。一个 Generation 可以因为 Tool Loop 发起多次 LLM API 调用。
 - `compaction_jobs` 继续表示一次会话压缩任务。分段、归并和修复都属于同一个 Job，但可以发起多次 LLM API 调用。
-- 新增的 `model_calls` 只审计一次真实的 LLM API 请求，不保存响应的 `content` 或 `reasoning_content`。
+- `model_calls` 只审计一次真实的 LLM API 请求，不保存响应的 `content` 或 `reasoning_content`。
 - 业务对象与 `model_calls` 的一对多关系通过映射表表达，不向通用的 `model_calls` 添加 Generation 或 Compaction 专用字段。
 
 ```mermaid
@@ -527,7 +526,7 @@ erDiagram
 
 ### 15.2 `messages` 变更
 
-新增以下字段：
+migration v6 已新增以下字段：
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -547,7 +546,7 @@ Reasoning 的数据规则：
 
 ### 15.3 `model_calls`
 
-新增通用模型调用审计表。每一行对应一次实际发往 Provider 的 API 请求，包括 Tool Loop、压缩分段、归并和格式修复请求。
+migration v6 已新增通用模型调用审计表。每一行对应一次实际发往 Provider 的 API 请求，包括 Tool Loop、压缩分段、归并和未来的格式修复请求。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -636,15 +635,14 @@ UNIQUE(compaction_job_id, ordinal)
 - Generation 与 Assistant Message 的 `content` 重复问题留在后续单独设计，不在本次 migration 中改变两者的事实源地位。
 - `generations` 的任务级状态和汇总用量是否继续保留，后续需与 `model_calls` 的逐调用用量一起评审；在明确迁移方案前不得直接删除现有字段。
 
-### 15.8 Migration 与实施顺序
+### 15.8 Migration 与实施结果
 
-1. 新建 `model_calls` 及两个业务映射表。
-2. 为 `messages` 增加 `reasoning_content` 和可空且唯一的 `model_call_id`。
-3. 将 `compaction_jobs.parameters_json` 迁移为 `orchestration_config_json`，保留现有编排配置数据。
-4. 按第 17 章重建 `session_summaries`，删除 `content_json`、`handoff_text`、`parameters_json` 和 `validation_status`，新增 `summary`。SQLite migration 应通过建新表、转换旧摘要、校验和原子替换完成，不要求用户删除数据库。
-5. Provider 层为每次真实请求创建并结束 ModelCall；Generation 和 Compaction 服务分别写入自己的映射表。
-6. Tool Loop 将每次 Assistant 响应的 `content`、`reasoning_content` 和 `tool_calls_json` 作为不同字段持久化。
-7. 旧数据无法可靠还原逐次 API 调用，不伪造历史 `model_calls`；旧 Message 的新增字段保持为空。
+1. migration v5 已按第 17 章先完成 `session_summaries` 的单一 Markdown 正文迁移。
+2. migration v6 一次性重建 `messages`，同时增加 `message_rowid`、`reasoning_content` 和可空且唯一的 `model_call_id`，避免重复迁移聊天历史。
+3. migration v6 新建 `model_calls` 及两个业务映射表，并把 `compaction_jobs.parameters_json` 迁移为 `orchestration_config_json`。
+4. Provider 层为每次真实请求创建并结束 ModelCall；Generation 和 Compaction 服务分别写入自己的映射表。
+5. Tool Loop 将每次 Assistant 响应的 `content`、`reasoning_content` 和 `tool_calls_json` 作为不同字段持久化。
+6. 旧数据无法可靠还原逐次 API 调用，因此不伪造历史 `model_calls`；旧 Message 的 Reasoning 和 ModelCall 来源保持为空。
 
 ### 15.9 验收要求
 
@@ -919,3 +917,152 @@ Debug 模式必须在每次压缩、分段、归并和重试调用的响应流�
 - 空响应、截断响应、超长响应和 Tool Call 会阻止创建新 Session，并保留旧 Session 和用户草稿。
 - 成功摘要只保存一份正文，不再在 `content_json` 与 `handoff_text` 中重复。
 - 旧版复杂摘要能够前向迁移，历史消息和 CompactionJob 关联不丢失。
+
+## 18. 已实现设计：不可变 Message 与 External Content FTS5
+
+> 实施状态：已由 migration v6、Repository 和历史查询 Tool 落地。
+
+### 18.1 设计结论
+
+- `messages` 是完整会话历史的唯一内容事实源。Message 一旦成功写入便不可修改；纠正或补充通过追加新 Message 表达，不覆盖旧记录。
+- 为 `messages` 增加稳定的整数存储主键 `message_rowid`。现有 UUID `id` 继续作为业务层 Message ID，并改为 `NOT NULL UNIQUE`。
+- `conversation_message_fts` 改为 FTS5 external-content 虚拟表，只维护 `content` 的全文倒排索引，不再独立保存 `message_id`、`session_id`、`conversation_id`、`role` 和原始 `content` 副本。
+- FTS 以 `message_rowid` 作为稳定 rowid，查询原文、角色及归属信息时关联回 `messages`。
+- Reasoning、System Message 和 Tool Result 不进入历史全文索引；当前只索引 `user` 与 `assistant` 的 `content`。
+- 普通历史查询必须限定一个明确的 Conversation。跨 Conversation 查询属于独立、显式的能力，具体 Tool、授权和产品交互仍待后续设计。
+
+### 18.2 `messages` 目标主键与不可变语义
+
+目标表在保留现有业务字段的基础上调整主键：
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `message_rowid` | INTEGER | PRIMARY KEY | SQLite 内部稳定整数标识；供 FTS rowid 和高效关联使用，不暴露为业务 Message ID |
+| `id` | TEXT | NOT NULL、UNIQUE | Message UUID；继续用于 Tool、领域对象、日志和跨表逻辑引用 |
+| `conversation_id` | TEXT | NOT NULL、外键 | 所属 Conversation；也是默认历史检索的强制作用域 |
+| `session_id` | TEXT | 可空、外键 | 所属 Session；正常新消息必须具有 Session，保留可空只用于兼容迁移 |
+| `sequence` | INTEGER | NOT NULL | Message 在整个 Conversation 内的不可变顺序 |
+| `content` | TEXT | NOT NULL | 唯一的消息正文事实源 |
+
+`message_rowid` 使用 SQLite `INTEGER PRIMARY KEY`，不依赖可能在数据库重建操作中变化的隐式 rowid。无需把该内部标识编码进 UUID，也不要求业务接口接受它。
+
+Message 采用完成后一次性落库：流式 `content`、`reasoning_content` 和 Tool Call 数据先在运行时拼接，形成完整 Message 后统一插入。数据库和 Repository 均不提供历史 Message 更新能力。建议增加数据库级 `BEFORE UPDATE` Trigger，使用 `RAISE(ABORT, ...)` 阻止绕过 Repository 的修改。
+
+删除不是“修改历史”的手段。只有删除所属 Conversation、Session、项目数据或执行未来明确设计的数据保留操作时，才允许硬删除 Message；相应 FTS 索引必须在同一事务中清理。
+
+### 18.3 可搜索消息外部内容视图
+
+External Content FTS 的内容源使用过滤视图，而不是直接扫描全部 `messages`：
+
+```sql
+CREATE VIEW searchable_conversation_messages AS
+SELECT message_rowid, content
+FROM messages
+WHERE role IN ('user', 'assistant');
+```
+
+使用视图有两个目的：
+
+1. FTS `rebuild` 时只重建 User/Assistant 正文，不会把 System Message 或 Tool Result 意外加入索引。
+2. FTS 只需要读取稳定整数 ID 和正文；Conversation、Session、角色及时间等元数据继续由 `messages` 统一提供。
+
+### 18.4 `conversation_message_fts` 目标结构
+
+```sql
+CREATE VIRTUAL TABLE conversation_message_fts USING fts5(
+    content,
+    content = 'searchable_conversation_messages',
+    content_rowid = 'message_rowid',
+    tokenize = 'trigram'
+);
+```
+
+目标 FTS 只有一个逻辑列：
+
+| 字段 | FTS 属性 | 说明 |
+|---|---|---|
+| `content` | 全文索引、External Content | 倒排索引的输入文本；原文按 `message_rowid` 从外部内容视图读取 |
+
+External Content 模式消除当前 `conversation_message_fts_content` 对 Message 原文和元数据的第二份存储，但不会也不能消除 FTS 必需的倒排索引、词项、文档长度和配置影子表。`snippet()`、`highlight()` 和 BM25 需要的原文由外部内容视图读取。
+
+不采用 contentless FTS：当前历史 Tool 需要生成命中片段，contentless 模式无法满足原文读取和 `snippet()` 需求。
+
+### 18.5 索引同步与重建
+
+由于 Message 不可修改，FTS 同步只有两条正常路径：
+
+- 插入 User/Assistant Message 后，以 `message_rowid` 和 `content` 写入 FTS。
+- 硬删除 User/Assistant Message 时，使用 External Content FTS 的 delete 命令及旧正文删除对应词项。
+
+不创建用于业务更新的 FTS UPDATE Trigger。数据库级 Message 不可变 Trigger 应直接拒绝 UPDATE，而不是尝试同步修改后的正文。
+
+FTS 是可重建投影。索引损坏、Tokenizer 版本变化或迁移校验失败时，可根据 `searchable_conversation_messages` 执行完整 `rebuild`；重建不改变 `messages`，也不生成新的 Message。
+
+### 18.6 Conversation 查询边界与索引
+
+`conversation_id` 不再存入 `conversation_message_fts`。将其保留为 `UNINDEXED` 列不会建立等值检索索引，只会继续复制元数据；将 UUID 作为 trigram 全文列还会污染文本索引。因此 Conversation 隔离通过 `messages` 关联和应用接口共同保证。
+
+普通历史全文查询的目标形式为：
+
+```sql
+SELECT
+    m.id,
+    m.session_id,
+    m.role,
+    m.sequence,
+    m.created_at,
+    snippet(conversation_message_fts, 0, '[', ']', '…', 24) AS excerpt,
+    bm25(conversation_message_fts) AS rank
+FROM conversation_message_fts AS f
+JOIN messages AS m
+  ON m.message_rowid = f.rowid
+JOIN conversation_sessions AS s
+  ON s.id = m.session_id
+WHERE conversation_message_fts MATCH :query
+  AND m.conversation_id = :conversation_id
+  AND s.status = 'closed';
+```
+
+为关联和作用域过滤增加普通 B-tree 索引：
+
+```sql
+CREATE INDEX messages_conversation_rowid
+ON messages(conversation_id, message_rowid);
+```
+
+该索引用于加速 `messages` 的 Conversation 过滤和整数关联，不宣称对 FTS5 的全文 MATCH 本身进行分区。若未来基准测试证明全项目 FTS 候选过多，应单独设计可测量的检索分区方案，不能通过恢复重复的 `UNINDEXED conversation_id` 冒充分区索引。
+
+Repository/Application Service 必须区分两类入口：
+
+- 默认历史查询：调用方必须传入且只能查询一个 `conversation_id`。
+- 跨 Conversation 查询：必须调用独立的显式接口，并明确允许查询的 Conversation 集合；当前具体 Tool、触发条件、权限和结果权威规则仍待后续评审。
+
+不得提供一个通过省略 `conversation_id` 就自动搜索整个项目历史的默认接口。每项目独立数据库已经隔离 Project，但不能替代 Conversation 级的默认隔离。
+
+### 18.7 已实施的前向 Migration
+
+该变更不能通过简单 `ALTER TABLE` 把现有 TEXT 主键变为 `INTEGER PRIMARY KEY`，需要采用建新表、复制、校验和原子替换：
+
+1. migration 前执行 WAL checkpoint 并创建项目数据库备份。
+2. 创建具有 `message_rowid INTEGER PRIMARY KEY` 和 `id TEXT NOT NULL UNIQUE` 的新 Message 表，保留全部现有字段、外键和唯一约束。
+3. 按确定性顺序复制旧 Message；为每行生成稳定整数 `message_rowid`，保持 UUID、Conversation、Session、Sequence、Content、Reasoning 和 Tool 数据不变。
+4. 校验新旧 Message 行数、UUID 集合、内容哈希、Conversation/Session 归属和外键。
+5. 重建引用 `messages` 的索引与 Trigger，并原子替换旧表。
+6. 创建 `searchable_conversation_messages` 视图和新的 External Content FTS 表。
+7. 从过滤视图完整重建 FTS，并校验每条 User/Assistant Message 恰好有一条索引记录，其他角色没有索引记录。
+8. 更新 Repository 查询，以 `m.message_rowid = f.rowid` 关联，并将 `snippet()` 的内容列序号从当前 `4` 改为 `0`。
+9. 完成 `foreign_key_check`、`quick_check`、固定中文检索样例和跨 Conversation 隔离测试后提交 migration。
+
+Migration 不调用 LLM，不修改 Message 正文，不要求用户删除数据库。任何校验失败都必须回滚并保留迁移前备份。
+
+### 18.8 验收要求
+
+- `messages.content` 是数据库中唯一可直接读取的 Message 正文，不再存在 FTS `_content` 正文副本。
+- 所有现有 Message UUID、顺序、正文、Reasoning、Tool 信息和 Session 归属在迁移后保持不变。
+- 对任何历史 Message 执行 UPDATE 都会被数据库拒绝；纠正通过新 Message 表达。
+- User/Assistant Message 可被搜索，System、Tool 和 Reasoning 不可被该 FTS 命中。
+- `snippet()` 和 BM25 在 External Content 模式下保持现有行为。
+- 删除 Conversation 或 Session 后，不留下对应 FTS 孤立词项。
+- 执行 FTS `rebuild` 后，结果与迁移完成时一致。
+- 默认历史查询不返回其他 Conversation 的内容；跨 Conversation 查询不能通过省略作用域隐式触发。
+- migration 失败不会损坏或丢失原始聊天历史。

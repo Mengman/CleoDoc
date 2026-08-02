@@ -30,6 +30,7 @@ const chatChunkSchema = z
     message: z
       .object({
         content: z.string().default(""),
+        thinking: z.string().optional(),
         tool_calls: z
           .array(
             z.object({
@@ -184,6 +185,9 @@ export class OllamaProvider implements ModelProvider {
             },
           });
         }
+        if (parsed.data.message?.thinking) {
+          yield { type: "reasoning-delta", text: parsed.data.message.thinking };
+        }
         if (parsed.data.message?.content) {
           yield { type: "text-delta", text: parsed.data.message.content };
         }
@@ -234,6 +238,7 @@ function toOllamaMessage(message: ChatMessage): Record<string, unknown> {
     return {
       role: "assistant",
       content: message.content,
+      ...(message.reasoningContent === undefined ? {} : { thinking: message.reasoningContent }),
       tool_calls: message.toolCalls.map((call, index) => ({
         type: "function",
         function: {

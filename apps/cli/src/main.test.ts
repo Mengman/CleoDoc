@@ -33,6 +33,9 @@ describe("CleoDoc CLI", () => {
     const server = createServer((request, response) => {
       if (request.url === "/v1/chat/completions") {
         response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.write(
+          'data: {"choices":[{"delta":{"content":null,"reasoning_content":"先确定悬疑氛围。"}}]}\n\n',
+        );
         response.write('data: {"choices":[{"delta":{"content":"# 第一章\\n\\n"}}]}\n\n');
         response.write(
           'data: {"choices":[{"delta":{"content":"钟声在雨里停了。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":321,"completion_tokens":18,"total_tokens":339}}\n\n',
@@ -73,6 +76,9 @@ describe("CleoDoc CLI", () => {
         environment,
       );
       expect(generated.exitCode).toBe(0);
+      expect(generated.stdout).toContain("思考中：");
+      expect(generated.stdout).toContain("先确定悬疑氛围。");
+      expect(generated.stdout).toContain("回答：");
       expect(generated.stdout).toContain("钟声在雨里停了。");
       expect(generated.stdout).not.toContain("[debug][raw]");
       const debugLogPath = generated.stdout.match(/Debug 日志：(.+)\r?\n/)?.[1]?.trim();
@@ -92,6 +98,7 @@ describe("CleoDoc CLI", () => {
       expect(shown.exitCode).toBe(0);
       expect(shown.stdout).toContain("# 第一章");
       expect(shown.stdout).toContain("钟声在雨里停了。");
+      expect(shown.stdout).not.toContain("先确定悬疑氛围。");
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));

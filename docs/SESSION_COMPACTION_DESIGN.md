@@ -1,6 +1,6 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 状态：migration v5 与 `session-compaction-v7` 已实现 Markdown 压缩、单一摘要存储、输入投影、最低校验和完整拼接 Debug 日志；数据库项目指令仍待实施
+> 状态：migration v5–v6 与 `session-compaction-v7` 已实现 Markdown 压缩、单一摘要存储、输入投影、最低校验、完整拼接 Debug 日志和逐次 ModelCall 审计；数据库项目指令仍待实施
 > 计划位置：v0.1 步骤 5.5
 > 日期：2026-08-02
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -724,15 +724,15 @@ type CompactionJobStatus =
   | "cancelled";
 ```
 
-任务保存输入快照边界、上一摘要 ID、失败错误码、尝试次数和生成用量。不得保存密钥。
+任务保存输入快照边界、上一摘要 ID、失败错误码、尝试次数、累计用量和 `orchestration_config_json`。逐次模型请求参数保存在 `model_calls.request_options_json`，各调用通过 `compaction_job_model_call_mapping` 按阶段和顺序关联。不得保存密钥。
 
 ### 10.4 `messages`
 
-现有表增加 `session_id`。迁移已有项目时，为每个 Conversation 创建 legacy Session，并把原消息全部绑定到该 Session，不删除或重写任何历史内容。
+migration v6 已增加稳定整数 `message_rowid`、`reasoning_content` 和 `model_call_id`。Message 完成后一次性插入，数据库禁止 UPDATE；迁移旧消息时保留 UUID、顺序、正文、Session 和原隐式 rowid，不伪造历史 Reasoning 或 ModelCall。
 
 ### 10.5 `conversation_message_fts`
 
-FTS 投影只索引允许历史 Tool 读取的消息。删除 Conversation 时同步级联清理 Session、摘要、任务和 FTS 投影。
+FTS 使用 `messages.content` 作为 External Content，只索引允许历史 Tool 读取的 User/Assistant 正文，不索引 Reasoning。FTS rowid 等于 `messages.message_rowid`；Conversation、Session 和角色通过关联 Message 过滤。删除 Conversation 时同步级联清理 Session、摘要、任务和 FTS 投影。
 
 ## 11. Application Service 设计
 
@@ -911,6 +911,7 @@ migration v4 和 `session-compaction-v6` 已经完成 Session、触发预算、�
 5. **已完成**：migration v5 在迁移前创建本地数据库备份，将 `session_summaries` 重建为单一 `summary` 正文加应用层元数据，并确定性转换旧摘要；无法解析的行保留兼容文本。
 6. **部分完成**：ContextBuilder 已按 active Session 的 `inherited_summary_id` 精确注入一份 `summary`；数据库原生项目指令尚待实施，当前项目指令仍沿用文件快照。
 7. **已完成当前范围**：已增加流式边界、旧摘要迁移、失败恢复、Debug 日志、普通/Map-Reduce 以及 S1→Summary1→S2→Summary2→S3 连续继承的端到端回归测试。
+8. **已完成**：migration v6 已接入 CompactionJob→ModelCall 逐次审计；普通、分段和归并调用分别记录阶段、顺序、实际请求参数、结束原因和 Token 用量。
 
 ## 18. 验收标准
 

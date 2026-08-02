@@ -15,11 +15,28 @@ export interface ConversationSummary extends ConversationRecord {
 }
 
 export interface StoredMessage extends ChatMessage {
+  messageRowid: number;
   id: string;
   conversationId: string;
   sessionId: string | null;
+  modelCallId: string | null;
   sequence: number;
   createdAt: string;
+}
+
+export type ModelCallStatus = "running" | "completed" | "cancelled" | "failed";
+
+export interface ModelCallRecord {
+  id: string;
+  providerId: string;
+  model: string;
+  requestOptions: Readonly<Record<string, unknown>>;
+  status: ModelCallStatus;
+  finishReason: string | null;
+  errorCode: string | null;
+  usage: ModelUsage | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 export type GenerationStatus = "running" | "completed" | "cancelled" | "failed";

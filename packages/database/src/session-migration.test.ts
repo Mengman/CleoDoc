@@ -59,11 +59,72 @@ describe("session migration", () => {
       expect(current).toMatchObject({ id: "legacy-conversation-1", ordinal: 1, status: "active" });
       expect(new ConversationRepository(database).getMessages("conversation-1")).toEqual([
         expect.objectContaining({
+          messageRowid: expect.any(Number),
           id: "message-1",
           sessionId: "legacy-conversation-1",
           content: "不可丢失的旧消息",
         }),
       ]);
+      expect(
+        database
+          .read(
+            (sqlite) =>
+              sqlite.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>,
+          )
+          .map((column) => column.name),
+      ).toEqual(expect.arrayContaining(["message_rowid", "reasoning_content", "model_call_id"]));
+      expect(
+        database
+          .read(
+            (sqlite) =>
+              sqlite.prepare("PRAGMA table_info(conversation_message_fts)").all() as Array<{
+                name: string;
+              }>,
+          )
+          .map((column) => column.name),
+      ).toEqual(["content"]);
+      expect(
+        database.read((sqlite) =>
+          sqlite
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE name = 'conversation_message_fts_content'",
+            )
+            .get(),
+        ),
+      ).toBeUndefined();
+
+      await database.write((sqlite) =>
+        sqlite
+          .prepare("UPDATE conversation_sessions SET status = 'closed' WHERE id = ?")
+          .run("legacy-conversation-1"),
+      );
+      expect(
+        new SessionRepository(database).searchClosedHistory({
+          conversationId: "conversation-1",
+          query: "不可丢失",
+          limit: 5,
+        }),
+      ).toEqual([expect.objectContaining({ messageId: "message-1", excerpt: expect.any(String) })]);
+      await expect(
+        database.write((sqlite) =>
+          sqlite
+            .prepare("UPDATE messages SET content = '不允许修改' WHERE id = ?")
+            .run("message-1"),
+        ),
+      ).rejects.toMatchObject({ code: "DATABASE_ERROR" });
+      await database.write((sqlite) =>
+        sqlite.prepare("DELETE FROM conversations WHERE id = ?").run("conversation-1"),
+      );
+      expect(
+        database.read((sqlite) =>
+          sqlite
+            .prepare(
+              `SELECT COUNT(*) AS count FROM conversation_message_fts
+                 WHERE conversation_message_fts MATCH '"不可丢失"'`,
+            )
+            .get(),
+        ),
+      ).toEqual({ count: 0 });
     } finally {
       await database.close();
     }
@@ -220,7 +281,7 @@ describe("session migration", () => {
               }
             ).version,
         ),
-      ).toBe(5);
+      ).toBe(6);
       expect(await readdir(path.join(state, "backups"))).toEqual([
         expect.stringMatching(/^pre-migration-v5-.*\.sqlite$/),
       ]);

@@ -6,6 +6,7 @@ import type {
   CompactionEvent,
   ModelEvent,
   ModelProvider,
+  ModelRequest,
   ModelToolCall,
   ModelUsage,
   SavedDocument,
@@ -14,6 +15,7 @@ import type {
 import { AppError, asAppError } from "../../contracts/src/index.js";
 import {
   ConversationRepository,
+  ModelCallRepository,
   ProjectDatabase,
   SessionRepository,
 } from "../../database/src/index.js";
@@ -54,6 +56,7 @@ export interface SendMessageInput {
 export class ChatService {
   private readonly repository: ConversationRepository;
   private readonly sessions: SessionRepository;
+  private readonly modelCalls: ModelCallRepository;
   private readonly documents: DocumentService;
   private readonly contextBuilder = new ContextBuilder();
   private readonly budgetService = new ContextBudgetService();
@@ -64,12 +67,14 @@ export class ChatService {
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
+    this.modelCalls = new ModelCallRepository(database);
     this.documents = new DocumentService(projectRoot);
   }
 
   static async open(projectRoot: string): Promise<ChatService> {
     const service = new ChatService(projectRoot, await ProjectDatabase.open(projectRoot));
     await service.sessions.recoverInterruptedJobs();
+    await service.modelCalls.recoverInterruptedCalls();
     return service;
   }
 
@@ -128,36 +133,44 @@ export class ChatService {
           this.sessions.getSessionMessages(session.id),
         );
         let roundContent = "";
+        let roundReasoning = "";
         const toolCalls: ModelToolCall[] = [];
         let roundUsage: ModelUsage | undefined;
         let finishReason: string | null = null;
+        const modelRequest: ModelRequest = {
+          model: input.model,
+          messages,
+          tools: tools.definitions,
+          ...(input.onDebugEvent === undefined
+            ? {}
+            : {
+                onProtocolEvent: (protocol) =>
+                  emitLlmDebugEvent(input.onDebugEvent, {
+                    type: "llm-protocol",
+                    operation: "agent",
+                    round: round + 1,
+                    providerId: input.provider.id,
+                    model: input.model,
+                    protocol,
+                  }),
+              }),
+        };
         const estimatedContextTokens = estimateTokens(
-          JSON.stringify({ model: input.model, messages, tools: tools.definitions }),
+          JSON.stringify(modelRequestForBudget(modelRequest)),
         );
+        const modelCall = await this.modelCalls.beginGenerationCall({
+          generationId: generation.id,
+          ordinal: round + 1,
+          providerId: input.provider.id,
+          model: input.model,
+          requestOptions: describeModelRequest(modelRequest),
+        });
 
         try {
-          for await (const event of input.provider.stream(
-            {
-              model: input.model,
-              messages,
-              tools: tools.definitions,
-              ...(input.onDebugEvent === undefined
-                ? {}
-                : {
-                    onProtocolEvent: (protocol) =>
-                      emitLlmDebugEvent(input.onDebugEvent, {
-                        type: "llm-protocol",
-                        operation: "agent",
-                        round: round + 1,
-                        providerId: input.provider.id,
-                        model: input.model,
-                        protocol,
-                      }),
-                  }),
-            },
-            input.signal,
-          )) {
-            if (event.type === "text-delta") {
+          for await (const event of input.provider.stream(modelRequest, input.signal)) {
+            if (event.type === "reasoning-delta") {
+              roundReasoning += event.text;
+            } else if (event.type === "text-delta") {
               roundContent += event.text;
               streamedContent += event.text;
             } else if (event.type === "usage") {
@@ -172,6 +185,12 @@ export class ChatService {
           }
         } catch (error) {
           const appError = asAppError(error);
+          await this.modelCalls.finish({
+            modelCallId: modelCall.id,
+            status: input.signal.aborted ? "cancelled" : "failed",
+            errorCode: appError.code,
+            ...(roundUsage === undefined ? {} : { usage: roundUsage }),
+          });
           emitLlmDebugEvent(input.onDebugEvent, {
             type: "llm-response-error",
             operation: "agent",
@@ -184,6 +203,12 @@ export class ChatService {
           });
           throw appError;
         }
+        await this.modelCalls.finish({
+          modelCallId: modelCall.id,
+          status: "completed",
+          finishReason,
+          ...(roundUsage === undefined ? {} : { usage: roundUsage }),
+        });
         emitLlmDebugEvent(input.onDebugEvent, {
           type: "llm-response",
           operation: "agent",
@@ -202,8 +227,14 @@ export class ChatService {
         if (toolCalls.length > 0) {
           await this.repository.addMessage(
             conversation.id,
-            { role: "assistant", content: roundContent, toolCalls },
+            {
+              role: "assistant",
+              content: roundContent,
+              ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
+              toolCalls,
+            },
             session.id,
+            modelCall.id,
           );
           for (const call of toolCalls) {
             const result = await tools.execute(call);
@@ -261,6 +292,8 @@ export class ChatService {
           ...(usage === undefined ? {} : { usage }),
           addAssistantMessage: true,
           sessionId: session.id,
+          ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
+          modelCallId: modelCall.id,
         });
         const status = this.getContextStatus(
           conversation.id,
@@ -385,7 +418,7 @@ export class ChatService {
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可压缩或压缩已在进行中。");
     }
-    return new CompactionService(this.projectRoot, this.sessions).compact({
+    return new CompactionService(this.projectRoot, this.sessions, this.modelCalls).compact({
       conversationId: input.conversationId,
       session,
       provider: input.provider,
@@ -439,6 +472,36 @@ export class ChatService {
     if (conversation === null) throw new AppError("VALIDATION_ERROR", "指定的对话不存在。");
     return conversation;
   }
+}
+
+function describeModelRequest(request: ModelRequest): Readonly<Record<string, unknown>> {
+  return {
+    thinking: request.thinking?.type ?? "provider_default",
+    reasoningEffort: "provider_default",
+    temperature: request.temperature ?? null,
+    maxTokens: request.maxTokens ?? null,
+    responseFormat: request.responseFormat ?? null,
+    toolsEnabled: (request.tools?.length ?? 0) > 0,
+    toolCount: request.tools?.length ?? 0,
+    toolNames: request.tools?.map((tool) => tool.name) ?? [],
+  };
+}
+
+function modelRequestForBudget(request: ModelRequest): Record<string, unknown> {
+  return {
+    model: request.model,
+    messages: request.messages.map((message) => {
+      const { reasoningContent, ...base } = message;
+      return message.role === "assistant" && message.toolCalls !== undefined
+        ? { ...base, ...(reasoningContent === undefined ? {} : { reasoningContent }) }
+        : base;
+    }),
+    tools: request.tools,
+    temperature: request.temperature,
+    maxTokens: request.maxTokens,
+    responseFormat: request.responseFormat,
+    thinking: request.thinking,
+  };
 }
 
 function mergeUsage(current: ModelUsage | undefined, next: ModelUsage): ModelUsage {

@@ -542,15 +542,27 @@ async function generateOnce(
 ): Promise<ChatGenerationResult> {
   const controller = new AbortController();
   const removeHandler = installInterruptHandler(controller);
+  let displayPhase: "idle" | "reasoning" | "answer" | "tool" = "idle";
   try {
     const result = await chat.send({
       ...inputValue,
       signal: controller.signal,
       onEvent: (event) => {
-        if (event.type === "text-delta") {
+        if (event.type === "reasoning-delta") {
+          if (displayPhase !== "reasoning") {
+            output.write(`${displayPhase === "idle" ? "\n" : "\n\n"}思考中：\n`);
+            displayPhase = "reasoning";
+          }
+          output.write(event.text);
+        } else if (event.type === "text-delta") {
+          if (displayPhase === "reasoning" || displayPhase === "tool") {
+            output.write("\n\n回答：\n");
+          }
+          displayPhase = "answer";
           output.write(event.text);
         } else if (event.type === "tool-call") {
           output.write(`\n[工具请求] ${event.call.name}\n`);
+          displayPhase = "tool";
         }
       },
     });
@@ -984,6 +996,10 @@ function printConversationHistory(
     output.write(`[${message.createdAt}] ${role}：\n`);
     if (message.toolCalls !== undefined) {
       output.write(`[调用工具] ${message.toolCalls.map((call) => call.name).join(", ")}\n`);
+    }
+    if (message.reasoningContent !== undefined) {
+      output.write(`思考中：\n${message.reasoningContent}\n`);
+      if (message.content !== "") output.write("回答：\n");
     }
     if (message.role === "tool") {
       output.write(`[${message.name ?? "未知工具"}] ${message.content}\n\n`);

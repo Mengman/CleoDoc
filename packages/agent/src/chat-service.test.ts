@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -145,6 +146,7 @@ describe("ChatService", () => {
     const chat = await ChatService.open(project.root);
     const provider = new ToolCallingModelProvider();
     const approvals: string[] = [];
+    const reasoningDeltas: string[] = [];
 
     try {
       const result = await chat.send({
@@ -157,6 +159,9 @@ describe("ChatService", () => {
           approvals.push(request.path);
           return true;
         },
+        onEvent: (event) => {
+          if (event.type === "reasoning-delta") reasoningDeltas.push(event.text);
+        },
       });
 
       expect(result.content).toBe("总结已经保存到项目中。");
@@ -167,17 +172,48 @@ describe("ChatService", () => {
       expect(provider.requests).toHaveLength(2);
       expect(provider.requests[1]?.messages).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ role: "assistant", toolCalls: [expect.any(Object)] }),
+          expect.objectContaining({
+            role: "assistant",
+            reasoningContent: "需要先保存用户确认的内容。",
+            toolCalls: [expect.any(Object)],
+          }),
           expect.objectContaining({ role: "tool", toolCallId: "call-write-1" }),
         ]),
       );
-      expect(chat.getConversationHistory(result.conversationId)).toEqual(
+      const history = chat.getConversationHistory(result.conversationId);
+      expect(history).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ role: "assistant", toolCalls: [expect.any(Object)] }),
+          expect.objectContaining({
+            role: "assistant",
+            reasoningContent: "需要先保存用户确认的内容。",
+            modelCallId: expect.any(String),
+            toolCalls: [expect.any(Object)],
+          }),
           expect.objectContaining({ role: "tool", toolCallId: "call-write-1" }),
-          expect.objectContaining({ role: "assistant", content: result.content }),
+          expect.objectContaining({
+            role: "assistant",
+            reasoningContent: "工具执行成功，可以向用户确认。",
+            modelCallId: expect.any(String),
+            content: result.content,
+          }),
         ]),
       );
+      expect(reasoningDeltas).toEqual([
+        "需要先保存用户确认的内容。",
+        "工具执行成功，可以向用户确认。",
+      ]);
+
+      const raw = new DatabaseSync(path.join(project.root, ".cleo", "project.sqlite"));
+      try {
+        expect(
+          raw.prepare("SELECT COUNT(*) AS count FROM model_calls WHERE status = 'completed'").get(),
+        ).toEqual({ count: 2 });
+        expect(
+          raw.prepare("SELECT COUNT(*) AS count FROM generation_model_call_mapping").get(),
+        ).toEqual({ count: 2 });
+      } finally {
+        raw.close();
+      }
     } finally {
       await chat.close();
     }
@@ -196,6 +232,7 @@ class ToolCallingModelProvider implements ModelProvider {
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
     this.requests.push(request);
     if (this.requests.length === 1) {
+      yield { type: "reasoning-delta", text: "需要先保存用户确认的内容。" };
       yield {
         type: "tool-call",
         call: {
@@ -210,6 +247,7 @@ class ToolCallingModelProvider implements ModelProvider {
       yield { type: "done", finishReason: "tool_calls" };
       return;
     }
+    yield { type: "reasoning-delta", text: "工具执行成功，可以向用户确认。" };
     yield { type: "text-delta", text: "总结已经保存到项目中。" };
     yield { type: "done", finishReason: "stop" };
   }
