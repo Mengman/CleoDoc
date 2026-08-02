@@ -1,6 +1,6 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 实现状态：migration v5–v8、`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地；当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
+> 实现状态：Schema v8 基线、`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地；当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
 > 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
 > 日期：2026-08-02
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -355,7 +355,7 @@ Summary 1 + Session 2 原始消息
 
 ### 5.3 超大 Session 的分层压缩
 
-旧项目迁移或异常情况下，如果待压缩内容本身无法放入一次请求，则执行 Map-Reduce：
+如果待压缩内容本身无法放入一次请求，则执行 Map-Reduce：
 
 ```text
 消息按完整回合分段
@@ -614,7 +614,7 @@ interface SessionSummary {
 - 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取最新 Revision。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
-- migration v8 已删除 migration v4 的文件路径和 Session 快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
+- 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
 ## 9. 会话历史查询 Tool
 
@@ -703,7 +703,7 @@ interface SessionSummaryRecord {
 }
 ```
 
-migration v5 已将 `session_summaries` 收敛为单一 Markdown `summary`，不增加 `model_call_id` 或 `compaction_job_id`；仍由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#68-session_summaries)。
+`session_summaries` 使用单一 Markdown `summary`，不包含 `model_call_id` 或 `compaction_job_id`；由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#68-session_summaries)。
 
 ### 10.3 `compaction_jobs`
 
@@ -721,7 +721,7 @@ type CompactionJobStatus =
 
 ### 10.4 `messages`
 
-migration v6 已增加稳定整数 `message_rowid`、`reasoning_content` 和 `model_call_id`。Message 完成后一次性插入，数据库禁止 UPDATE；迁移旧消息时保留 UUID、顺序、正文、Session 和原隐式 rowid，不伪造历史 Reasoning 或 ModelCall。
+当前 `messages` 包含稳定整数 `message_rowid`、`reasoning_content` 和 `model_call_id`。Message 完成后一次性插入，数据库禁止 UPDATE。
 
 ### 10.5 `conversation_message_fts`
 
@@ -931,7 +931,7 @@ type CompactionEvent =
 - 重启 CLI 后能恢复唯一的 active Session 和未完成压缩状态。
 - 连续多次压缩只注入最新累计摘要，不重复注入所有旧摘要。
 - `session_summaries` 只保存一份 `summary` 正文，不再重复保存 JSON 和注入文本。
-- 旧项目迁移后原有聊天记录完整保留。
+- 已经完整达到 Schema v8 的项目在打开时不会被重写，原有聊天记录保持不变。
 
 ## 19. 明确不做
 

@@ -1,10 +1,9 @@
-import { copyFileSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 
 import { AppError } from "../../contracts/src/index.js";
-import { migrations } from "./migrations.js";
+import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
 
 type DatabaseOperation<T> = (database: DatabaseSync) => T;
 
@@ -24,13 +23,20 @@ export class ProjectDatabase {
     await mkdir(stateDirectory, { recursive: true });
     const filePath = path.join(stateDirectory, "project.sqlite");
 
+    let database: DatabaseSync | undefined;
     try {
-      const database = new DatabaseSync(filePath);
+      database = new DatabaseSync(filePath);
       const instance = new ProjectDatabase(filePath, database);
       instance.configure();
-      instance.migrate();
+      instance.initializeSchema();
       return instance;
     } catch (error) {
+      try {
+        database?.close();
+      } catch {
+        // Preserve the original open/schema error.
+      }
+      if (error instanceof AppError) throw error;
       throw new AppError("DATABASE_ERROR", "无法打开项目数据库。", { cause: error });
     }
   }
@@ -110,7 +116,7 @@ export class ProjectDatabase {
     this.database.exec("PRAGMA busy_timeout = 5000");
   }
 
-  private migrate(): void {
+  private initializeSchema(): void {
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -121,39 +127,43 @@ export class ProjectDatabase {
     const appliedRows = this.database
       .prepare("SELECT version FROM schema_migrations ORDER BY version")
       .all() as Array<{ version: number }>;
-    const applied = new Set(appliedRows.map((row) => Number(row.version)));
-    const insert = this.database.prepare(
-      "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-    );
-    const pending = migrations.filter((migration) => !applied.has(migration.version));
-    if (applied.size > 0 && pending.length > 0) {
-      this.backupBeforeMigration(pending[0]!.version);
+    const appliedVersions = appliedRows.map((row) => Number(row.version));
+    const newestVersion = appliedVersions.at(-1) ?? null;
+    if (newestVersion !== null && newestVersion > CURRENT_SCHEMA_VERSION) {
+      throw new AppError(
+        "DATABASE_ERROR",
+        `项目数据库版本 v${newestVersion} 高于当前程序支持的 v${CURRENT_SCHEMA_VERSION}。`,
+      );
+    }
+    if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) return;
+
+    const applicationObject = this.database
+      .prepare(
+        `SELECT name FROM sqlite_master
+         WHERE name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'
+         LIMIT 1`,
+      )
+      .get() as { name: string } | undefined;
+    if (newestVersion !== null || applicationObject !== undefined) {
+      throw new AppError(
+        "DATABASE_ERROR",
+        `项目数据库仍是已停止支持的开发期版本${
+          newestVersion === null ? "" : ` v${newestVersion}`
+        }；当前最低支持版本为 v${CURRENT_SCHEMA_VERSION}。请先使用旧版 CleoDoc 完成升级或重建项目数据库。`,
+      );
     }
 
-    for (const migration of pending) {
-      this.database.exec("BEGIN IMMEDIATE");
-      try {
-        if (migration.sql !== "") this.database.exec(migration.sql);
-        migration.apply?.(this.database);
-        insert.run(migration.version as SQLInputValue, new Date().toISOString());
-        this.database.exec("COMMIT");
-      } catch (error) {
-        this.database.exec("ROLLBACK");
-        throw error;
-      }
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.exec(CURRENT_SCHEMA_SQL);
+      this.database
+        .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(CURRENT_SCHEMA_VERSION, new Date().toISOString());
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
     }
-  }
-
-  private backupBeforeMigration(targetVersion: number): void {
-    this.database.exec("PRAGMA wal_checkpoint(FULL)");
-    const backupDirectory = path.join(path.dirname(this.filePath), "backups");
-    mkdirSync(backupDirectory, { recursive: true });
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const destination = path.join(
-      backupDirectory,
-      `pre-migration-v${targetVersion}-${timestamp}.sqlite`,
-    );
-    copyFileSync(this.filePath, destination, 0);
   }
 
   private assertOpen(): void {

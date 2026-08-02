@@ -68,7 +68,7 @@ apps/cli             v0.1 命令入口
 apps/desktop         v0.2 Electron 应用
 packages/contracts   公共类型、Schema、错误码
 packages/project     项目格式和安全文件读写
-packages/database    SQLite、迁移和 Repository
+packages/database    SQLite、当前 Schema 基线和 Repository
 packages/knowledge   资料与知识模型
 packages/rag         摄取、检索、融合和上下文组装
 packages/agent       LLM Tool Loop；v0.2 扩展持久化工作流
@@ -83,7 +83,7 @@ packages/diff        v0.2
 
 - 优先使用 Node.js 内置 `node:sqlite` 和 SQLite FTS5。
 - 写入采用单写入队列、短事务；模型调用、文档解析、Embedding 和 Diff 不得放在数据库写事务中。
-- 使用 WAL、`busy_timeout`、外键约束和显式 Schema migration；具体设置以技术架构文档为准。
+- 使用 WAL、`busy_timeout`、外键约束和显式 Schema 版本标记；当前开发期数据库以技术架构文档规定的基线版本为准。
 - 正文和资料先安全写入事实源，再更新 SQLite 投影。文件写入应采用临时文件、同步和原子替换等防损坏策略。
 - Chunk、Embedding 和抽取结果必须绑定内容校验值与模型/算法版本。
 - 修改文档时只更新发生变化的 Chunk。异步结果写回前必须再次校验来源版本，过期结果直接丢弃或重排队。
@@ -136,7 +136,7 @@ v0.1 检索路径为：
 - 保持 TypeScript 类型严格，领域对象使用明确 ID、时间、作用域和版本字段，避免无约束的 `any`。
 - 错误使用稳定的应用错误类型；面向用户的信息不得泄露密钥、任意绝对路径或底层堆栈。
 - 文件路径和行为必须兼容 Windows、macOS、Linux，不硬编码路径分隔符或平台专属目录。
-- 数据库 Schema 变化必须提供 migration；不得靠删除用户数据库解决升级问题。
+- 当前早期开发阶段允许压平尚未公开发布的历史 Schema，但必须保留明确的基线版本：全新数据库直接创建当前结构，完整基线数据库原样打开，更旧或更高版本必须拒绝且不得自动改写或删除。正式发布后的数据库 Schema 变化必须提供前向 migration。
 - 新增功能需要相应单元或集成测试。修复缺陷时，优先添加能复现问题的回归测试。
 - RAG 排序、去重、预算和隔离必须使用固定样例做确定性测试；远程模型调用在自动测试中应使用 fake Provider。
 - 不为了通过测试降低数据隔离、路径检查、Schema 校验或内容保存安全性。

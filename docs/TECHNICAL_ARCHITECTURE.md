@@ -151,7 +151,7 @@ Preload 仅通过 `contextBridge` 暴露白名单 API：
 负责所有持久化和后台业务：
 
 - 项目文件读写和文件监听。
-- SQLite 连接、迁移和写入队列。
+- SQLite 连接、Schema 基线和写入队列。
 - Git 版本、Diff 和恢复。
 - 文档解析、索引和混合检索。
 - Agent 工作流、模型请求和 ChangeSet。
@@ -186,7 +186,7 @@ packages/
 ├─ project/         # 项目格式、文件读写和迁移
 ├─ versioning/      # Git、版本时间线、恢复
 ├─ diff/            # 文档语义 Diff
-├─ database/        # SQLite 连接、迁移、Repository
+├─ database/        # SQLite 连接、当前 Schema 基线、Repository
 ├─ knowledge/       # 实体、事实、事件和关系
 ├─ rag/             # ingestion、retrievers、fusion、context
 ├─ agent/           # durable workflow 和 ChangeSet
@@ -291,7 +291,7 @@ erDiagram
 
 ## 7. SQLite 架构
 
-当前 migration v8 已落地的表、字段、索引、External Content FTS、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
+当前 Schema v8 基线已落地的表、字段、索引、External Content FTS、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
 
 ### 7.1 数据库拓扑
 
@@ -368,11 +368,10 @@ Agent
 └─ app_metadata
 ```
 
-### 7.4 迁移、备份和重建
+### 7.4 Schema 演进、备份和重建
 
-- 使用显式迁移文件和 `PRAGMA user_version`。
-- 迁移前通过 SQLite Backup API 创建临时备份。
-- 内容表和运行表执行向前迁移；索引表允许丢弃后重建。
+- 当前早期开发阶段以 v8 为最低基线：新库直接创建完整结构，完整 v8 数据库原样打开，较旧、不带版本但已有业务对象或更高版本的数据库均拒绝且不自动改写。
+- 正式发布后的内容表和运行表执行带备份的前向迁移；索引表允许丢弃后重建。
 - 项目打开时执行轻量 `quick_check`，异常时进入只读恢复模式。
 - 备份必须使用 Backup API 或 `VACUUM INTO`，不能只复制打开中的主数据库文件。
 - `rebuild-index` 从 Markdown、JSON 和附件解析文本重建 Chunk、FTS、Embedding 和关系投影。
@@ -632,9 +631,9 @@ interface DocumentDiff {
 
 ## 12. Agent 运行时
 
-Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。migration v7 将项目指令改为 SQLite 追加式 Revision 事实源，migration v8 删除 Session 文件快照字段和遗留文件导入路径，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
+Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。项目指令现在以 SQLite 追加式 Revision 为事实源，Session 不保存文件路径或文件快照，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
-v0.1 已通过 SQLite migration v5–v8 落地 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 按名称投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，文档正文、历史片段、项目指令内容与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。migration v5 会确定性转换旧结构化摘要，migration v6 会保留旧 Message 内容和 rowid 并重建历史 FTS，migration v8 删除 Session 文件快照字段；这些迁移均不调用 LLM。
+v0.1 的 Schema v8 基线包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 按名称投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，文档正文、历史片段、项目指令内容与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
 
 模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩比例/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，当前 Payload 触发点分别约为 391,732 Token 和 476,632 Token；压缩请求安全输入上限 `M` 约为 565,424 Token，最终累计摘要长度建议目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 

@@ -1,17 +1,17 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 migration v8 当前 Schema 基线
+> 状态：v0.1 Schema v8 当前基线
 > 更新日期：2026-08-02
-> Schema 来源：`packages/database/src/migrations.ts`
+> Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
 
 ## 1. 文档目的与边界
 
-本文记录 CleoDoc 当前已经实现并可在项目 `project.sqlite` 中观察到的数据库结构，用于后续数据库设计评审、migration 设计和实现验收。
+本文记录 CleoDoc 当前已经实现并可在项目 `project.sqlite` 中观察到的数据库结构，用于后续数据库设计评审、Schema 演进和实现验收。
 
 本文严格区分：
 
-- **当前实现**：migration v1–v8 已经创建的表、索引、Trigger、视图和 Repository 行为。
+- **当前实现**：Schema v8 基线直接创建的表、索引、Trigger、视图和 Repository 行为。
 - **尚未实现范围**：技术架构中规划但尚未落地的文档 Chunk、Embedding、RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
@@ -75,7 +75,7 @@ erDiagram
 - `messages.tool_call_id` 与 Assistant 消息 `tool_calls_json` 中的 Tool Call ID
 - Generation 与 Assistant Message 通过映射到同一个最终 ModelCall 间接关联；Generation 和 Message 的重复正文仍待后续单独处理
 
-## 4. 连接、事务与迁移
+## 4. 连接、事务与 Schema 基线
 
 每个作品使用独立的 `.cleo/project.sqlite`。当前 `ProjectDatabase` 使用 Node.js 内置 `node:sqlite` 的单个 `DatabaseSync` 连接。
 
@@ -92,36 +92,28 @@ PRAGMA busy_timeout = 5000;
 
 - 同一个 `ProjectDatabase` 实例内通过 Promise FIFO 队列串行写入。
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
-- 每个 migration 在独立的 `BEGIN IMMEDIATE` 事务中执行。
-- migration 版本保存在 `schema_migrations`，当前没有使用 `PRAGMA user_version`。
-- 已有项目存在待执行 migration 时，先执行 WAL 完整 checkpoint，并在 `.cleo/backups/` 创建 `pre-migration-v<版本>-<时间>.sqlite`；全新空数据库不创建无意义备份。
-- migration v5 除 SQL DDL 外还使用同一事务内的确定性 TypeScript 转换函数，将旧结构化摘要渲染为 Markdown；转换不调用 LLM。
-- migration v6 重建 `messages`，保留旧隐式 rowid 为稳定 `message_rowid`，增加 Reasoning/ModelCall 字段，并从 Message 完整重建 External Content FTS；迁移不调用 LLM。
-- migration v7 新增追加式 `project_instruction_revisions`，项目指令运行时以该表为唯一事实源。
-- migration v8 删除 `conversation_sessions` 中四个文件快照遗留字段，不迁移或读取作品项目中的 `AGENTS.md`。
+- 当前最低支持版本是 Schema v8，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
+- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v8 基线，不重放 v1–v8 历史 DDL，也不执行旧数据搬运。
+- 已经包含 v8 标记的数据库直接打开，保留原有 `schema_migrations` 历史行和业务数据，不重新执行基线。
+- 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动修改或删除它们。
+- 当前代码不再保存 v1–v8 的升级函数、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
 - `quickCheck()` 已实现，但项目打开时尚未自动调用。
 - `backup()` 当前执行完整 checkpoint 后复制主数据库文件，尚未使用 SQLite Backup API 或 `VACUUM INTO`。
 - FIFO 只约束当前进程和当前实例；多个进程同时打开同一项目时仍依赖 SQLite 文件锁和 `busy_timeout`。
 
-## 5. Schema 演进
+## 5. Schema 演进策略
 
-| Migration | 当前内容 |
-|---|---|
-| v1 | `conversations`、`messages`、`generations` 及基础索引 |
-| v2 | 为 `messages` 增加 `tool_calls_json` |
-| v3 | 增加资料元数据投影 `sources` |
-| v4 | 增加 Session、压缩摘要、压缩任务、`messages.session_id` 和会话历史 FTS5 |
-| v5 | 将 `session_summaries` 迁移为单一 Markdown `summary`，确定性转换旧摘要并增加查询索引 |
-| v6 | 增加 ModelCall 审计与业务映射；重建不可变 `messages`；增加 Reasoning；压缩配置改名；历史 FTS 改为 External Content |
-| v7 | 增加数据库原生项目指令 Revision 链并停用 Session 文件快照运行路径 |
-| v8 | 删除 Session 的项目指令文件路径、快照、哈希和加载时间字段；移除遗留文件导入与合并路径 |
+- v8 是当前早期开发阶段唯一受支持的数据库基线；历史 v1–v7 转换路径已经移除。
+- 新项目只在 `schema_migrations` 写入一条 v8 记录；已经完成旧迁移链的数据库可以保留 v1–v8 八条记录，判定依据是是否包含 v8。
+- 下一次结构变化必须使用更高且不复用的版本号。正式发布前可以再次压平开发期历史；正式发布后必须保留面向用户数据的前向升级路径。
+- 任何不受支持的数据库都只报告错误，不把完整基线覆盖到已有表上，也不自动删除数据库。
 
 ## 6. 表与字段字典
 
 ### 6.1 类型约定
 
-- 业务 ID 使用 `TEXT`，由应用层生成 UUID；legacy Session 可使用 `legacy-<conversation-id>`。`messages.message_rowid` 是仅供 SQLite/FTS 使用的稳定整数存储主键。
+- 业务 ID 使用 `TEXT`，由应用层生成 UUID；早期已升级到 v8 的数据库可能仍保留 `legacy-<conversation-id>` Session，新代码不再创建该类 ID。`messages.message_rowid` 是仅供 SQLite/FTS 使用的稳定整数存储主键。
 - 时间使用 ISO 8601 UTC 字符串并保存在 `TEXT`。
 - 布尔值使用 `INTEGER` 的 `0/1`。
 - 枚举使用 `TEXT + CHECK`。
@@ -130,12 +122,12 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.2 `schema_migrations`
 
-记录已经成功提交的 migration。
+记录数据库已经达到的 Schema 版本。新数据库只记录 v8；通过早期迁移链得到的完整 v8 数据库可能保留 v1–v8 历史行。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
-| `version` | INTEGER | 主键 | Migration 版本号 |
-| `applied_at` | TEXT | NOT NULL | Migration 成功提交时间 |
+| `version` | INTEGER | 主键 | Schema 版本号 |
+| `applied_at` | TEXT | NOT NULL | 该版本写入时间 |
 
 ### 6.3 `conversations`
 
@@ -179,7 +171,7 @@ PRAGMA busy_timeout = 5000;
 UNIQUE(conversation_id, sequence)
 ```
 
-`session_id` 在 Schema 中保持可空以兼容 migration；当前正常聊天流程应为消息指定 Session。Message 完成后一次性插入，Repository 不提供修改方法，数据库 `messages_immutable_update` Trigger 也会拒绝任何 UPDATE。纠正历史只能追加新 Message。
+`session_id` 当前仍保持可空，以兼容 Repository 的非 Session 系统消息入口；正常聊天流程会为消息指定 Session。Message 完成后一次性插入，Repository 不提供修改方法，数据库 `messages_immutable_update` Trigger 也会拒绝任何 UPDATE。纠正历史只能追加新 Message。
 
 ### 6.5 `generations`
 
@@ -200,7 +192,7 @@ UNIQUE(conversation_id, sequence)
 | `created_at` | TEXT | NOT NULL | Generation 开始时间 |
 | `completed_at` | TEXT | 可空 | 完成、失败或取消时间；运行中为空 |
 
-当前 `generations` 表示用户可感知的生成任务，`messages` 表示进入对话上下文的消息。完成的 Generation 正文通常还会写入 Assistant Message，正文重复问题仍存在；migration v6 已通过 `generation_model_call_mapping` 和 `messages.model_call_id` 建立可审计的间接来源关联。
+当前 `generations` 表示用户可感知的生成任务，`messages` 表示进入对话上下文的消息。完成的 Generation 正文通常还会写入 Assistant Message，正文重复问题仍存在；`generation_model_call_mapping` 和 `messages.model_call_id` 提供可审计的间接来源关联。
 
 ### 6.6 `sources`
 
@@ -403,7 +395,7 @@ UNIQUE(compaction_job_id, ordinal)
 
 ### 7.1 External Content 模式
 
-migration v6 后不再存在 `conversation_message_fts_content`。原始正文只保存在 `messages.content`；FTS 保留下面列出的倒排索引、文档长度和配置影子表。
+当前 External Content FTS 不创建 `conversation_message_fts_content`。原始正文只保存在 `messages.content`；FTS 保留下面列出的倒排索引、文档长度和配置影子表。
 
 ### 7.2 `conversation_message_fts_data`
 
@@ -446,7 +438,7 @@ migration v6 后不再存在 `conversation_message_fts_content`。原始正文�
 | `sources_project_content_hash` | `project_id, content_hash` | 按项目和内容哈希查询资料 |
 | `conversation_sessions_one_active` | `conversation_id`，部分唯一索引 | 保证每个 Conversation 最多一个 active/compacting Session |
 
-SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删除与 `UNIQUE(conversation_id, sequence)` 重复的 `messages_conversation_sequence` 普通索引。
+SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创建与 `UNIQUE(conversation_id, sequence)` 重复的 `messages_conversation_sequence` 普通索引。
 
 ## 9. FTS 同步 Trigger
 
@@ -503,15 +495,15 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删�
 
 ### 11.1 Generation 与 Message 正文仍重复
 
-完成的 Generation 正文通常也会写入 Assistant Message。migration v6 已通过 Generation→ModelCall 映射和 Message→ModelCall 外键建立可审计的间接来源，但两张业务表仍分别保存正文。在明确任务生命周期、失败恢复和历史兼容迁移方案前，不删除任一字段。
+完成的 Generation 正文通常也会写入 Assistant Message。当前 Schema 通过 Generation→ModelCall 映射和 Message→ModelCall 外键建立可审计的间接来源，但两张业务表仍分别保存正文。在明确任务生命周期、失败恢复和持久数据处理方案前，不删除任一字段。
 
 ### 11.2 数据库健康检查与备份能力仍有缺口
 
-已有项目执行 migration 前会进行 WAL checkpoint 并创建本地备份，但通用手动备份仍采用 checkpoint 后复制主数据库文件，尚未切换到 SQLite Backup API 或 `VACUUM INTO`。项目打开时也尚未自动执行 `quick_check`。聊天历史、项目指令和运行审计不能从作品文件重建，因此这些缺口不能按普通索引缓存处理。
+通用手动备份仍采用 checkpoint 后复制主数据库文件，尚未切换到 SQLite Backup API 或 `VACUUM INTO`。项目打开时也尚未自动执行 `quick_check`。聊天历史、项目指令和运行审计不能从作品文件重建，因此这些缺口不能按普通索引缓存处理。
 
 ### 11.3 部分逻辑引用没有外键
 
-摘要继承、压缩前序摘要、成功摘要以及首尾消息边界只保存文本 ID。应用事务维持当前一致性，但数据库不能独立阻止悬空引用。增加外键前必须设计删除语义和旧数据迁移，不能直接修改现有表。
+摘要继承、压缩前序摘要、成功摘要以及首尾消息边界只保存文本 ID。应用事务维持当前一致性，但数据库不能独立阻止悬空引用。增加外键前必须设计删除语义和现有持久数据的处理方式，不能直接修改现有表。
 
 ### 11.4 查询辅助索引仍需基准验证
 
@@ -519,7 +511,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删�
 
 ## 12. 尚未实现的数据库范围
 
-以下结构尚未进入 migration，当前文档不预先固定最终 Schema：
+以下结构尚未进入当前 Schema 基线，当前文档不预先固定最终结构：
 
 - 统一文档、稳定块和 Chunk。
 - 作品/资料 FTS、本地 Embedding、模型版本和索引代次。
@@ -529,7 +521,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。migration v6 已删�
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
 
-这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后，必须通过新的前向 migration 落地，不能要求用户删除项目数据库。
+这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后必须提升 Schema 版本；正式发布后通过新的前向 migration 落地，不能要求用户删除项目数据库。
 
 ## 13. 待确认的数据库语义
 
