@@ -331,25 +331,35 @@ CLI 命令：
 - Tool 不向 LLM 暴露 Revision；Repository 在内部检测并处理并发变化，不会覆盖用户较新的修改。
 - LLM 修改项目指令必须经过用户批准；读取无需批准。
 
-### 步骤 5.8：统一 Tool 契约与动态披露
+### 步骤 5.8：统一 Tool 契约、Catalog 与动态披露
 
-实施状态：已完成。详细契约见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。
+实施状态：基础 Tool 契约与动态披露已完成；Conversation 级 Runtime 和项目级 Catalog 重构待实施。详细契约见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。
 
 已完成内容：
 
 - Input/Output 以 Zod Schema 为事实源，通过 `z.infer` 生成类型；每个 Tool 使用独立 Class 实现公共接口。
 - Tool 使用递增整数版本；Runtime 在每次成功和失败结果中统一加入 `tool.name + tool.version`，ModelCall 记录本轮暴露的 Tool 版本。
-- 引入 Tool Registry 和 `full/summary/hidden` 三级披露；`list_tools` 分页列出全部已授权 Tool，`get_tool` 查询并加载完整定义。
-- 保留项目级 Service/Repository 构造绑定，不增加 `ToolContext` 或模型可填写的 `projectId`。
+- 已实现 `full/summary/hidden` 三级披露、Tool 全量发现和按 `name + version` 加载完整定义。
+- 项目级 Service/Repository 由 Tool 构造绑定；模型 Input 不包含 `projectId`、`conversationId` 或 `sessionId`。
 - 从 LLM 可见文档结果和压缩投影删除 `contentHash`、文档 ID、Session ID、FTS Rank 等无用途内部信息。
 - 历史查询改为 `search_conversation_history` 返回 Message ID 与 Excerpt，再由 `read_conversation_message` 按 Message ID 分段读取原文。
 - `ask` Tool 支持拒绝、仅允许本次和退出前持续允许；临时授权只保存在当前 `ChatService` 内存中。
 - 压缩投影由具体 Tool 的 `getCompactionMessage()` 生成；正文、项目指令全文、历史原文、Reasoning 和元 Tool 操作不进入摘要请求。
 
+待实施重构：
+
+- 创建应用/项目级 `ProjectToolCatalog`，一次性实例化业务 Tool 并缓存 JSON Schema 和公开定义。
+- `ProjectToolCatalog` 自身实现 `project_tool_catalog` 组合 Tool，以 `list/get` 两种操作替代 `ListToolsTool`、`GetToolTool`。
+- `ProjectToolRuntime` 改为 Conversation 级对象，同一 Conversation 跨多次发送和 Session 压缩复用，不持有 `sessionId`。
+- 增加只包含 `projectId + conversationId` 的 `ToolExecutionContext`；历史 Tool 不再在构造函数保存 `conversationId`。
+- `allow_until_exit` 按 Conversation 隔离；动态加载状态按精确 `name + version` 在 Conversation 内保持和恢复。
+- 压缩投影通过 Catalog 同时解析组合 Tool 与业务 Tool，Catalog 的 `list/get` 固定忽略。
+
 验收：
 
-- 默认模型请求只包含 `full` Tool；`list_tools` 始终返回全部已授权 Tool 的名称、版本和描述，摘要或隐藏 Tool 仍需通过 `get_tool` 加载后调用。成功加载的 `name + version` 从当前 Conversation 的历史结果恢复，版本变化后需要重新加载。
-- 未加载、未知或未授权 Tool 不能绕过 Registry 执行。
+- 默认模型请求只包含 `full` Tool；Catalog `list` 始终返回全部已授权 Tool 的名称、版本和描述，摘要或隐藏 Tool 仍需通过 Catalog `get` 加载后调用。
+- 未加载、未知或未授权 Tool 不能绕过 Runtime 和 Catalog 执行。
+- Conversation A 的临时审批和动态 Tool 状态不会泄露到 Conversation B；Session 压缩不会清空 Conversation A 的 Runtime 状态。
 - 每个 Tool Result 可定位名称、版本、成功数据或稳定错误及恢复建议。
 - 关键字搜索不会要求模型预先知道 Session ID，精读只能访问当前 Conversation 中已关闭的不可变消息。
 - Tool Result 和压缩投影不会泄露正文 Hash、内部 Row ID、历史 Reasoning 或无关大文本。

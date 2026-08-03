@@ -1,7 +1,7 @@
 # CleoDoc 数据库设计与当前实现
 
 > 状态：v0.1 Schema v8 当前基线
-> 更新日期：2026-08-02
+> 更新日期：2026-08-03
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
 
@@ -144,6 +144,25 @@ PRAGMA busy_timeout = 5000;
 | `updated_at` | TEXT | NOT NULL | 最近增加消息的时间，用于历史列表排序 |
 
 当前 Provider 和模型记录在 Conversation 级别，不允许静默切换。
+
+#### 6.3.1 目标变更：Tool Catalog 公告版本
+
+当前 Schema v8 尚未包含以下字段。实施 Tool Runtime 生命周期重构时，在新的当前基线中直接为 `conversations` 增加：
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `announced_tool_catalog_version` | INTEGER | 可空 | 最近一次已成功发送给模型的 Tool Catalog 入口协议版本；`NULL` 表示从未成功公告 |
+
+这个字段属于 Conversation，而不是 Session：上下文压缩只创建新 Session，不改变同一 Conversation 是否已经完成 Tool 入口公告的判断。它也不属于项目级配置，因为不同 Conversation 可能在不同时间恢复并看到不同的最后公告版本。
+
+不增加 `pending_tool_catalog_announcement` 字段或公告历史表。是否需要公告始终通过以下条件即时计算：
+
+```text
+announced_tool_catalog_version IS NULL
+OR announced_tool_catalog_version < current ProjectToolCatalog.version
+```
+
+Catalog 版本仅代表 `project_tool_catalog` 的名称、`list/get` Input 协议和必要入口说明。普通业务 Tool 的增删或各自版本变化不会修改这个字段所表示的协议版本。
 
 ### 6.4 `messages`
 
@@ -463,6 +482,14 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 - `UNIQUE(conversation_id, sequence)` 提供最终并发保护。
 - Tool Call 和 Tool Result 与普通消息共用同一消息序列。
 
+计划加入 Tool Catalog 入口公告后：
+
+- 恢复 Conversation 时比较 `announced_tool_catalog_version` 与当前 Catalog 版本，不立即发起额外 LLM 调用。
+- 需要公告时，在用户下一次真实请求的 System Context 中临时加入公告；它不是 User Message，也不写入 `messages`、FTS 或 Session 摘要。
+- 只有 Provider 已返回并成功解析第一条模型响应后，才在短事务中把 `announced_tool_catalog_version` 更新为当前版本。
+- 请求超时、取消、连接失败或响应解析失败时不更新，下一次真实请求继续携带公告。
+- Session 压缩和切换不修改该字段。
+
 ### 10.2 Generation
 
 - 请求开始时写入 `running` Generation。
@@ -520,6 +547,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 - AgentJob、ChangeSet、候选事实和审批。
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
+- `conversations.announced_tool_catalog_version` 及其恢复比较、成功响应后更新逻辑。
 
 这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后必须提升 Schema 版本；正式发布后通过新的前向 migration 落地，不能要求用户删除项目数据库。
 

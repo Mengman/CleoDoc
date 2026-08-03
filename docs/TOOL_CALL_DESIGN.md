@@ -1,6 +1,6 @@
 # CleoDoc Tool Call 技术设计
 
-状态：v0.1 Core 已实现
+状态：基础 Tool 契约已实现；ProjectToolCatalog 与 Conversation 级 Runtime 重构已确认、待实施
 适用范围：CleoDoc Core、CLI 和未来桌面端
 最后更新：2026-08-03
 
@@ -18,7 +18,7 @@ Tool 应表达主笔能够理解的创作动作，例如 `search_knowledge`、`r
 
 ### 1.3 只让模型决定必要参数
 
-模型只填写完成当前动作必须由它判断的参数。`projectId`、`conversationId`、`sessionId`、权限、当前用户和 Tool Call ID 等可信运行信息由 Runtime 掌握，不出现在模型可填写的 Schema 中。项目级 Repository 和 Service 在创建 Tool Runtime 时已经绑定到当前项目，Tool 不接收也不能切换 `projectId`。参数使用无歧义名称、明确类型、枚举和边界，使无效状态尽量无法表达。
+模型只填写完成当前动作必须由它判断的参数。`projectId`、`conversationId`、`sessionId`、权限、当前用户和 Tool Call ID 等可信运行信息不出现在模型可填写的 Schema 中。稳定的 Repository 和 Service 在创建 `ProjectToolCatalog` 时绑定；当前 `projectId` 和 `conversationId` 由 Conversation 级 Runtime 通过 `ToolExecutionContext` 注入，Tool 不能由模型切换执行范围。参数使用无歧义名称、明确类型、枚举和边界，使无效状态尽量无法表达。
 
 ### 1.4 输入与输出都使用单一事实源 Schema
 
@@ -34,7 +34,7 @@ Tool Result 使用稳定的结构化状态，返回 Agent 继续决策所需的�
 
 ### 1.7 审批规则必须直接明确
 
-每个 Tool 直接声明固定的 `approval`，不通过复杂的副作用分类推导是否审批。用户对某次请求可以拒绝、仅允许本次或允许到 CleoDoc 退出；临时授权由 Runtime 管理，不改变 Tool 自身的固定规则。并发、幂等、Revision、超时和取消先使用 Runtime 的统一规则，确有差异时再单独设计。
+每个 Tool 直接声明固定的 `approval`，不通过复杂的副作用分类推导是否审批。用户对某次请求可以拒绝、仅允许本次或允许当前 Conversation 在 CleoDoc 退出前持续执行；临时授权由 Conversation 级 Runtime 管理，不改变 Tool 自身的固定规则。并发、幂等、Revision、超时和取消先使用 Runtime 的统一规则，确有差异时再单独设计。
 
 ### 1.8 Tool Loop 必须有确定的停止条件
 
@@ -110,7 +110,7 @@ interface ToolIdentity {
 
 只修改内部实现、性能或不影响语义的描述文字，不必增加版本。版本使用简单递增整数，不引入语义版本规则。
 
-`full` 定义、`summary` 描述、`list_tools`、`get_tool` 和每次 Tool Result 都包含 `name + version`。这样模型和 Debug 日志可以判断历史调用是否使用了旧契约。
+`full` 定义、`summary` 描述、`project_tool_catalog` 的查询结果和每次 Tool Result 都包含 `name + version`。这样模型和 Debug 日志可以判断历史调用是否使用了旧契约。
 
 ### 3.4 Tool Outcome 与最终 Tool Result
 
@@ -187,6 +187,14 @@ interface ToolErrorDefinition {
   recovery?: string;
 }
 
+interface ToolExecutionContext {
+  /** 当前项目，由 Runtime 注入，LLM 不可填写。 */
+  readonly projectId: string;
+
+  /** 当前 Conversation，由 Runtime 注入，LLM 不可填写。 */
+  readonly conversationId: string;
+}
+
 interface Tool<Input, Output> {
   /** 稳定唯一名称。 */
   readonly name: string;
@@ -210,8 +218,8 @@ interface Tool<Input, Output> {
   readonly inputSchema: z.ZodType<Input>;
   readonly outputSchema: z.ZodType<Output>;
 
-  /** Input 已由 Runtime 校验。 */
-  execute(input: Input): Promise<ToolOutcome<Output>>;
+  /** Input 已由 Runtime 校验；可信环境状态由 Runtime 注入。 */
+  execute(input: Input, context: ToolExecutionContext): Promise<ToolOutcome<Output>>;
 
   /** 返回压缩模型需要的信息；null 表示不进入压缩上下文。 */
   getCompactionMessage(input: Input, outcome: ToolOutcome<Output>): string | null;
@@ -220,7 +228,9 @@ interface Tool<Input, Output> {
 
 `outputSchema` 只校验成功 Outcome 中的 `data`。失败结构由公共 `ToolOutcome` 校验。Provider 是否支持接收 Output Schema，由 Provider Adapter 决定；CleoDoc 本地始终校验。
 
-当前不定义 `ToolContext`。项目级 Service 和 Repository 在创建 Tool Runtime 时已绑定到当前项目，Tool 不接收也不能切换 `projectId`。现有本地 Tool 是短时、原子操作，也不在 `execute()` 中接收取消信号。
+Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、`ProjectInstructionRepository`、`SessionRepository` 和数据库连接；不能在实例字段中持有 `projectId`、`conversationId`、`sessionId`、当前 Tool Call、审批状态或动态加载状态。所有执行范围通过 `ToolExecutionContext` 注入，模型 Input Schema 不包含这些字段。
+
+`ToolExecutionContext` 当前只包含 `projectId` 和 `conversationId`。`ProjectToolRuntime` 采用 Conversation 级生命周期，Session 压缩不会改变 Tool 的权限或历史查询边界，因此不持有也不注入 `sessionId`。取消信号继续由 `ChatService`、Provider 和当次 Agent 回合管理，不进入公共 Tool Interface。
 
 ### 3.6 对外字段原则
 
@@ -232,7 +242,7 @@ interface Tool<Input, Output> {
 
 ## 4. Tool 清单与披露等级
 
-当前代码已经删除 `replace_project_instruction_text`，把 `read_conversation_history` 重构为 `read_conversation_message`，并实现两个元 Tool，共有 10 个 Tool：
+目标设计包含 8 个业务 Tool，以及作为组合 Tool 暴露的 `ProjectToolCatalog`：
 
 | 类名 | Tool name | Exposure | Approval | 状态 |
 |---|---|---|---|---|
@@ -244,16 +254,15 @@ interface Tool<Input, Output> {
 | `SetProjectInstructionsTool` | `set_project_instructions` | `hidden` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `summary` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `summary` | `auto` | 已实现 |
-| `ListToolsTool` | `list_tools` | `full` | `auto` | 已实现 |
-| `GetToolTool` | `get_tool` | `full` | `auto` | 已实现 |
+| `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 设计确认，待重构 |
 
 `write_draft`、RAG 检索和资料管理 CLI 命令尚未成为已实现的 LLM Tool，不计入本清单。
 
 三个披露等级含义：
 
 - `full`：发送名称、版本、描述、Input Schema，以及 Provider 支持的 Output Schema；模型可以立即调用。
-- `summary`：只发送名称、版本和描述，尚不可调用；模型需要时先调用 `get_tool`。
-- `hidden`：初始不发送具体信息，只告知模型还有更多 Tool；通过 `list_tools` 发现，再通过 `get_tool` 加载。
+- `summary`：只发送名称、版本和描述，尚不可调用；模型需要时调用 `project_tool_catalog` 的 `get` 操作。
+- `hidden`：初始不发送具体信息，只告知模型还有更多 Tool；通过 `project_tool_catalog` 的 `list` 操作发现，再通过 `get` 操作加载。
 
 Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provider 能力过滤 Tool。未授权 Tool 不得通过元 Tool 泄露或加载。
 
@@ -478,40 +487,117 @@ Output Schema：
 
 原 `read_conversation_history` 按 Session 分页读取的设计废弃。
 
-## 8. 元 Tool 与 Tool Registry
+## 8. ProjectToolCatalog 组合 Tool
 
-### 8.1 Tool Registry
+### 8.1 定位与生命周期
 
-Tool Registry 保存当前 Runtime 注册的 Tool，并负责：
+`ProjectToolCatalog` 是项目中全部业务 Tool 的唯一目录，同时自身实现公共 `Tool` 接口，以 `project_tool_catalog` 暴露给模型。它在应用启动并完成当前项目的 Service/Repository 初始化后创建一次，之后注入该项目的所有 `ProjectToolRuntime`；不能在每次消息发送时重复实例化全部 Tool 或重复生成 JSON Schema。
 
-- 按当前项目、任务、阶段和授权过滤可用 Tool。
-- 生成 `full` 与 `summary` Provider 定义。
-- 为 `list_tools` 提供稳定排序和分页。
-- 为 `get_tool` 返回公共定义，并将目标 Tool 的当前版本加入后续模型请求。
-- 阻止元 Tool 发现或加载未授权 Tool。
+Catalog 自身的 `version` 表示 **Tool 查询入口协议版本**，不是目录内业务 Tool 的集合版本。只有以下变化才提升 Catalog 版本：
 
-通过 `get_tool` 成功加载的 Tool 在当前 Conversation 中持续有效。每次用户输入创建新 Runtime 时，CleoDoc 从该 Conversation 已保存的成功 `get_tool` 结果恢复 `name + version` 加载状态；Session 压缩和应用重启不会让模型已经取得的 Tool 突然变为不可调用。加载状态不跨 Conversation。Tool 升级后旧版本记录不会自动加载新版本，模型必须根据 `list_tools` 返回的新版本再次调用 `get_tool`。
+- Catalog Tool 的名称发生变化。
+- `list/get` 的调用方式或 Input Schema 发生不兼容变化。
+- 模型发现和加载 Tool 所必需的入口说明发生不兼容变化。
 
-### 8.2 list_tools
+普通业务 Tool 的新增、删除或版本升级不提升 Catalog 版本；这些变化由 `list` 返回的 Tool 列表和各业务 Tool 自身的 `version` 表达。Catalog 版本必须单调递增。
 
-用途描述：
+Catalog 负责：
 
-> 分页列出当前 Agent 回合中已授权的全部 Tool。只返回名称、版本和功能描述；需要查看某个 Tool 的完整定义时，再使用 get_tool。
+- 持有所有已经实例化且不保存执行状态的业务 Tool。
+- 校验 Tool 名称唯一，按名称查找 Tool。
+- 缓存 Input/Output JSON Schema、Provider Definition、公开定义和稳定排序摘要。
+- 通过 `list` 操作分页返回当前项目全部已授权 Tool 的名称、版本和描述。
+- 通过 `get` 操作返回指定 Tool 的完整公开定义。
+- 作为组合 Tool 为自身提供名称、版本、Schema、结果包装与压缩策略。
 
-`list_tools` 不因 Tool 的 `exposure` 或当前是否已经加载而过滤结果。这样模型即使复用了旧上下文、没有再次收到 `full` Tool 定义，也能重新发现当前运行时中的完整 Tool 清单。`get_tool` 仍负责返回 Input/Output Schema、审批方式和错误定义，并让 `summary` 或 `hidden` Tool 从下一轮开始可调用。
+Catalog 内部的 Tool Map 不保存 Catalog 自身，因此不存在 `Catalog → Catalog` 的对象引用。需要列出或按名称解析自身时，由 `listTools()` 或 `getToolOrSelf()` 显式合并自身定义：
 
-Input Schema：
+```ts
+class ProjectToolCatalog
+  implements Tool<ProjectToolCatalogInput, ProjectToolCatalogOutput>
+{
+  readonly name = "project_tool_catalog";
+  readonly version = 1;
+  readonly exposure = "full";
+  readonly approval = "auto";
+
+  private readonly tools: Map<string, Tool<unknown, unknown>>;
+
+  listTools(page: number, pageSize: number): ListToolsOutput;
+  getTool(name: string): Tool<unknown, unknown> | null;
+  getToolOrSelf(name: string): Tool<unknown, unknown> | null;
+}
+```
+
+Catalog 的初始化按功能域组合，不在 Runtime 中逐个 `new` Tool：
+
+```ts
+const catalog = new ProjectToolCatalog([
+  ...createDocumentTools(documentService),
+  ...createProjectInstructionTools(projectInstructionRepository),
+  ...createConversationHistoryTools(sessionRepository),
+]);
+```
+
+以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
+
+### 8.2 Catalog Input
+
+原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 判别联合：
+
+```ts
+const projectToolCatalogInputSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("list"),
+      page: z.number().int().positive().default(1),
+      pageSize: z.number().int().min(1).max(20).default(10),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("get"),
+      name: z.string().trim().min(1),
+    })
+    .strict(),
+]);
+```
+
+`list` 操作字段：
 
 | 字段 | 类型 | 默认值/限制 |
 |---|---|---|
+| `action` | literal `list` | 必填 |
 | `page` | positive integer | 默认 1 |
 | `pageSize` | positive integer | 默认 10；最大 20 |
 
-Output Schema：
+`get` 操作字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `tools` | Array | 当前页 Tool 摘要 |
+| `action` | literal `get` | 必填 |
+| `name` | non-empty string | 要查询和加载的 Tool 名称 |
+
+`projectId`、`conversationId`、`sessionId`、披露等级和授权范围均不属于模型 Input。
+
+### 8.3 list 操作
+
+调用示例：
+
+```json
+{
+  "action": "list",
+  "page": 1,
+  "pageSize": 10
+}
+```
+
+返回字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `action` | literal `list` | 结果类型 |
+| `tools` | Array | 当前页 Tool 摘要，包含 Catalog 自身 |
 | `tools[].name` | string | Tool 名称 |
 | `tools[].version` | positive integer | 当前契约版本 |
 | `tools[].description` | string | 功能和适用时机 |
@@ -519,24 +605,24 @@ Output Schema：
 | `pageSize` | positive integer | 实际页大小 |
 | `totalPages` | nonnegative integer | 总页数；没有结果时为 0 |
 
-结果按 `name` 稳定排序。超出总页数时返回空 `tools`，不自动修改页码。调用本 Tool 不会自动加载列出的 Tool。`getCompactionMessage()` 返回 `null`。
+`list` 始终返回全部已授权 Tool，不因 `exposure` 或当前是否加载而过滤。结果按 `name` 稳定排序；超出总页数时返回空 `tools`，不自动修改页码。调用 `list` 不改变 Runtime 的动态加载状态。
 
-### 8.3 get_tool
+### 8.4 get 操作
 
-用途描述：
+调用示例：
 
-> 根据名称查询当前 Conversation 允许使用的 Tool 完整定义，并将该版本加入后续模型请求的可调用 Tool 列表。
+```json
+{
+  "action": "get",
+  "name": "search_conversation_history"
+}
+```
 
-Input Schema：
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `name` | string | 要查询和加载的 Tool 名称 |
-
-Output Schema：
+返回字段：
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
+| `action` | literal `get` | 结果类型 |
 | `tool.name` | string | Tool 名称 |
 | `tool.version` | positive integer | 当前契约版本 |
 | `tool.description` | string | 完整描述 |
@@ -544,9 +630,82 @@ Output Schema：
 | `tool.inputSchema` | JSON Schema Object | Provider 可用输入定义 |
 | `tool.outputSchema` | JSON Schema Object | 成功 Data 输出定义 |
 | `tool.errors` | Array | 稳定错误码、含义和恢复方式 |
-| `callableNextRound` | literal true | 已加入下一次模型请求 |
+| `callableNextRound` | literal true | 当前版本已加入后续模型请求 |
 
-可以重复查询已完整加载的 Tool，结果保持幂等。查询不存在或未授权的名称统一返回 `TOOL_NOT_FOUND`，避免泄露权限信息。`getCompactionMessage()` 返回 `null`。
+Catalog 只查找和返回 Tool 定义，不保存当前 Conversation 已加载哪些 Tool。`get` 成功后，`ProjectToolRuntime` 把返回的 `name + version` 加入自己的 `loadedToolVersions`；重复查询保持幂等。查询不存在或未授权的名称统一返回 `TOOL_NOT_FOUND`。
+
+Catalog Output 使用与 Input 相同的 `action` 判别：
+
+```ts
+type ProjectToolCatalogOutput =
+  | {
+      action: "list";
+      tools: ToolSummary[];
+      page: number;
+      pageSize: number;
+      totalPages: number;
+    }
+  | {
+      action: "get";
+      tool: ToolPublicDefinition;
+      callableNextRound: true;
+    };
+```
+
+Catalog 的执行逻辑只读取自己的不可变目录：
+
+```ts
+async execute(
+  input: ProjectToolCatalogInput,
+  _context: ToolExecutionContext,
+): Promise<ToolOutcome<ProjectToolCatalogOutput>> {
+  if (input.action === "list") {
+    return toolSuccess(this.listTools(input.page, input.pageSize));
+  }
+
+  const tool = this.getToolOrSelf(input.name);
+  if (tool === null) {
+    return toolFailure("TOOL_NOT_FOUND", "找不到指定 Tool。");
+  }
+
+  return toolSuccess({
+    action: "get",
+    tool: this.publicDefinition(tool),
+    callableNextRound: true,
+  });
+}
+```
+
+`loadedToolVersions` 的更新发生在 Runtime 收到成功 Outcome 之后，不允许 Catalog 修改 Conversation 状态。
+
+### 8.5 ChatService 调用链
+
+开始或恢复 Conversation 时：
+
+```text
+ChatService
+→ ProjectToolRuntime.toolInfo
+→ ProjectToolCatalog.listTools()
+```
+
+模型调用 Catalog 时：
+
+```text
+LLM 调用 project_tool_catalog
+→ ProjectToolRuntime 校验 Input 与审批规则
+→ ProjectToolCatalog.execute({ action: "list" | "get" }, context)
+→ Runtime 在 get 成功后更新 loadedToolVersions
+→ Runtime 包装版本化 ToolResult
+```
+
+模型调用业务 Tool 时：
+
+```text
+LLM 调用业务 Tool
+→ ProjectToolRuntime
+→ ProjectToolCatalog.getTool(name)
+→ Tool.execute(input, ToolExecutionContext)
+```
 
 ## 9. 审批与退出前临时授权
 
@@ -569,9 +728,9 @@ interface ApprovalRequest {
 type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 ```
 
-`allow_until_exit` 由 Runtime 在内存中保存，只免除后续相同 Tool 的重复审批，不把 `approval` 改成 `auto`，也不写入项目数据库。CleoDoc 退出后自动清空。
+`allow_until_exit` 由 Conversation 级 Runtime 的 `conversationApprovalsUntilExit` 在内存中保存，只免除当前 Conversation 后续相同版本 Tool 的重复审批，不把 `approval` 改成 `auto`，也不写入项目数据库。同一应用进程中的其他 Conversation 不继承该授权；CleoDoc 退出后所有临时授权自动清空。
 
-是否允许一个桌面进程同时打开多个 Project 尚未决定，因此当前 `ApprovalRequest` 不包含 `projectId`。若未来采用单进程多项目，再确定临时授权是否按 `projectId + toolName + toolVersion` 隔离。
+`ApprovalRequest` 不需要 `projectId` 或 `conversationId`。审批处理器由当前 Runtime 调用，作用域已经由 Runtime 隔离；CLI/GUI 只需要展示 Tool 身份和已校验 Input。
 
 ## 10. 压缩投影
 
@@ -614,10 +773,11 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 | `set_project_instructions` | 操作、更新时间、更新后字符数 |
 | `search_conversation_history` | 命中数量 |
 | `read_conversation_message` | 读取字符数、是否截断 |
-| `list_tools` | `null` |
-| `get_tool` | `null` |
+| `project_tool_catalog` 的 `list/get` | `null` |
 
 正文、项目指令全文、历史消息、搜索 Query、Excerpt、Message ID、Tool 参数中的大文本、Reasoning 和 `contentHash` 均不得进入压缩投影。
+
+`ProjectToolCatalog.getCompactionMessage()` 对 `list` 和 `get` 都固定返回 `null`。压缩投影器通过 `catalog.getToolOrSelf(toolName)` 统一解析 Catalog 自身和业务 Tool：Catalog 调用直接忽略，业务 Tool 委托其 `getCompactionMessage()`，未知或已删除的历史 Tool 才降级为通用状态事件。这样不需要保留 `ListToolsTool`、`GetToolTool` 类，也不会把“已知但应忽略”的 Catalog 调用误判为未知 Tool。
 
 ## 11. 错误与恢复
 
@@ -626,7 +786,7 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 | 错误码 | 适用范围 | 恢复方式 |
 |---|---|---|
 | `INVALID_TOOL_INPUT` | 所有 Tool | 根据 Input Schema 修正参数后重试 |
-| `TOOL_NOT_FOUND` | Runtime、`get_tool` | 调用 `list_tools` 查看当前可用 Tool |
+| `TOOL_NOT_FOUND` | Runtime、Catalog `get` | 调用 Catalog `list` 查看当前可用 Tool |
 | `DOCUMENT_NOT_FOUND` | 文档读取 | 调用 `list_project_documents` 重新选择路径 |
 | `DOCUMENT_ALREADY_EXISTS` | 文档写入 | 用户明确要求覆盖后设置 `overwrite=true` |
 | `PATH_OUTSIDE_PROJECT` | 文档 Tool | 使用 manuscript 下的项目相对路径 |
@@ -638,38 +798,140 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 
 项目指令数据库 Revision 冲突由 Runtime 和 Repository 内部处理，不作为要求 LLM 恢复的 Tool 错误。
 
-## 12. Runtime 执行、取消与结果包装
+## 12. ProjectToolRuntime
 
-执行顺序：
+### 12.1 定位与生命周期
+
+`ProjectToolRuntime` 是一个 Conversation 的 Tool 执行环境，不是单次 `send()` 的临时对象，也不是跨 Conversation 的应用全局对象。`ChatService` 为每个已打开的 Conversation 缓存一个 Runtime：
+
+```ts
+class ChatService {
+  private readonly toolRuntimes = new Map<string, ProjectToolRuntime>();
+}
+```
+
+生命周期规则：
+
+```text
+创建或首次恢复 Conversation
+→ 创建 ProjectToolRuntime
+
+同一 Conversation 内多次 send()
+→ 复用同一个 Runtime
+
+上下文压缩并创建新 Session
+→ 继续复用原 Runtime
+
+切换到另一个 Conversation
+→ 使用另一个 Runtime
+
+应用退出
+→ 销毁所有 Runtime
+```
+
+Runtime 不持有 `sessionId`。Session 是消息组装、上下文预算、摘要继承和压缩的边界，由 `ChatService`、`ContextBuilder`、`SessionRepository` 与 `CompactionService` 管理；当前所有 Tool 的业务范围只需要 Project 或 Conversation。未来只有在出现真实的 Session 级 Tool 后，才为那次调用单独设计可信 Session 参数。
+
+### 12.2 Runtime 状态
+
+每个 Runtime 持有：
+
+```ts
+class ProjectToolRuntime {
+  readonly context: ToolExecutionContext;
+
+  private readonly conversationApprovalsUntilExit = new Set<string>();
+  private readonly loadedToolVersions = new Set<string>();
+
+  constructor(
+    context: ToolExecutionContext,
+    private readonly catalog: ProjectToolCatalog,
+  ) {}
+}
+```
+
+- `context`：不可变的 `projectId + conversationId`，每次业务 Tool 调用时注入。
+- `conversationApprovalsUntilExit`：当前 Conversation 已获得的“应用退出前持续允许”，键为 `tool.name + tool.version`。
+- `loadedToolVersions`：当前 Conversation 通过 Catalog `get` 成功加载的 `name + version`。
+- `catalog`：项目级共享 Catalog，不由 Runtime 创建或销毁。
+
+Runtime 不持有数据库连接之外的 Tool 实例，不逐个注册业务 Tool，也不重复生成 JSON Schema。审批处理器属于当前 CLI/GUI 交互，由 `ChatService` 在执行调用时提供；Runtime 只保存用户已经批准的结果，不能保留上一次 `send()` 的回调。
+
+### 12.3 Conversation 隔离与恢复
+
+`conversationApprovalsUntilExit` 只存在于当前进程内，不能从 Conversation A 继承到 Conversation B，也不能在应用重启后恢复。用户回到同一 Conversation 且应用尚未退出时，继续复用原 Runtime，因此授权仍有效。
+
+`loadedToolVersions` 是模型已经获得的协议能力，必须按 Conversation 恢复。应用重启后创建 Runtime 时，从该 Conversation 已保存的成功 Catalog `get` 结果恢复精确的 `name + version`；旧版本记录不能加载新版本 Tool。Session 压缩不销毁 Runtime，也不改变这两组 Conversation 级状态。
+
+### 12.4 Tool 信息与模型请求
+
+`ProjectToolRuntime.toolInfo` 是 `ChatService` 获取当前模型 Tool 定义的唯一入口：
+
+```text
+ProjectToolRuntime.toolInfo
+→ ProjectToolCatalog.listTools()
+→ 合并 full Tool 与 loadedToolVersions 对应的完整定义
+→ 生成 summary/hidden 披露提示
+```
+
+`ChatService` 不直接遍历业务 Tool，也不缓存另一份 Catalog。Catalog 负责静态定义，Runtime 负责当前 Conversation 的动态披露状态。
+
+### 12.5 Tool Catalog 入口版本公告
+
+恢复旧 Conversation 时，模型可能只知道已经废弃的 Tool 查询入口。CleoDoc 必须比较当前 `ProjectToolCatalog.version` 与 Conversation 持久化的 `announced_tool_catalog_version`：
+
+```text
+announced_tool_catalog_version 为 NULL
+或 announced_tool_catalog_version < ProjectToolCatalog.version
+→ 当前 Conversation 需要一次 Tool 入口版本公告
+```
+
+“待公告”是上述比较得到的运行时状态，不增加数据库字段或独立任务表。恢复 Conversation 时也不能为了公告而立刻单独调用一次 LLM；Chat Completion 调用本身无服务器端会话状态，这种隐藏调用只会制造一条无用户意图的模型响应。
+
+公告在用户下一次真实提交所触发的模型请求中临时加入现有 System Context。它的角色是 `system`，不是 `user`，也不是一条独立的持久消息。公告不写入 `messages`，不参与 Conversation 历史、FTS 检索或 Session 压缩。上下文顺序固定为：
+
+```text
+基础 System Prompt
+→ 当前项目指令
+→ Tool Catalog 入口版本公告（仅需要时）
+→ 当前 Session 继承摘要
+→ 本轮正常对话消息
+```
+
+公告使用短小、稳定、可机器识别的内容，例如：
+
+```xml
+<tool_catalog_announcement version="2">
+Tool 入口已更新为 project_tool_catalog。
+列出工具：{"action":"list"}
+查询定义：{"action":"get","name":"tool_name"}
+</tool_catalog_announcement>
+```
+
+只有包含该公告的请求已经获得并成功解析第一条模型响应后，才把 Conversation 的 `announced_tool_catalog_version` 更新为当前 Catalog 版本。若请求超时、取消、连接失败或响应解析失败，则保持原值，使下一次真实请求继续携带公告。模型返回 Tool Call 也属于成功响应，因为模型已经接收并理解了本次请求上下文。
+
+这一规则只保证模型知道当前 Tool 查询入口，不替代 `list/get` 的动态发现和 `loadedToolVersions` 管理。Catalog 入口协议没有升级时，业务 Tool 集合发生变化也不重复发送公告。
+
+### 12.6 执行顺序
 
 ```text
 完整拼接流式 Tool 参数
 → 解析 JSON
-→ 根据 Registry 查找 Tool name + version
+→ 通过 ProjectToolCatalog.getToolOrSelf(name) 查找 Tool
+→ 检查 full 或 loadedToolVersions 可调用性
 → 校验 inputSchema
-→ 检查当前 Agent 回合是否取消
-→ 检查 approval 与退出前临时授权
-→ 必要时等待用户选择
-→ 再次检查是否取消
-→ execute() 返回 ToolOutcome
+→ 检查 approval 与 conversationApprovalsUntilExit
+→ 必要时通过当前交互的 ApprovalHandler 等待用户选择
+→ execute(input, ToolExecutionContext) 返回 ToolOutcome
+→ Catalog get 成功时更新 loadedToolVersions
 → 成功 Data 校验 outputSchema
 → Runtime 加入 tool.name + tool.version
 → 返回最终 ToolResult
-→ 生成独立的压缩投影与审计记录
+→ 单独生成压缩投影与审计记录
 ```
 
-Tool Call ID、审批状态、退出前授权、Provider 格式转换、调用记录、版本化结果信封和取消均由 Runtime 管理。
+Tool Call ID、审批状态、Conversation 内退出前授权、动态披露和版本化结果信封由 Runtime 管理。Provider 格式转换、ModelCall 记录和当前 Agent 回合取消仍由 `ChatService`/Provider 调用层管理。
 
-取消信号代表终止当前 Agent 回合，触发来源包括 CLI 的 `Ctrl+C`、未来 GUI 的“停止生成”、请求超时和应用退出。取消后：
-
-- 停止支持协作取消的 LLM 流或长时间任务。
-- 不启动新的 Tool，也不发起下一轮模型调用。
-- 结束正在等待的审批。
-- 保留此前已成功完成的结果。
-
-Runtime 不强行中断已开始提交的 SQLite 事务、原子文件替换或其他一致性边界内的短时写入。这些操作必须完成或回滚后再结束回合。
-
-未来新增 RAG 大规模索引、Embedding、长文档解析或网络检索等长时间 Tool 时，先让底层 Service 支持协作取消，再依据真实需求决定是否扩展公共 Tool Interface。
+取消信号代表终止当前 Agent 回合，但不进入 `ToolExecutionContext`。取消后不再启动新的 Tool 或模型调用；已经进入 SQLite 事务、原子文件替换或其他短时一致性边界的操作必须完成或回滚。未来出现长时间 Tool 时，先让底层 Service 支持协作取消，再按真实需求扩展接口。
 
 ## 13. UML 类图
 
@@ -681,102 +943,78 @@ classDiagram
         <<interface>>
         +string name
         +number version
-        +string description
         +ToolExposure exposure
         +ApprovalMode approval
-        +ToolErrorDefinition[] errors
         +ZodType inputSchema
         +ZodType outputSchema
-        +execute(input) ToolOutcome
+        +execute(input, context) ToolOutcome
         +getCompactionMessage(input, outcome) string
     }
 
-    class ToolOutcome {
-        <<union>>
-        +boolean ok
-        +Output data
-        +ToolError error
+    class ToolExecutionContext {
+        +string projectId
+        +string conversationId
     }
 
-    class ToolResult {
-        +ToolIdentity tool
-        +ToolOutcome outcome
+    class ProjectToolCatalog {
+        -Map~string, Tool~ tools
+        +listTools(page, pageSize)
+        +getTool(name) Tool
+        +getToolOrSelf(name) Tool
+        +execute(input, context) ToolOutcome
+        +getCompactionMessage() null
     }
 
     class ProjectToolRuntime {
-        -ToolRegistry registry
-        -ApprovalHandler approvalHandler
-        +execute(toolCall) ToolResult
-        +cancelCurrentTurn()
+        +ToolExecutionContext context
+        -Set conversationApprovalsUntilExit
+        -Set loadedToolVersions
+        +toolInfo
+        +execute(toolCall, approvalHandler) ToolResult
     }
 
-    class ToolRegistry {
-        -Tool[] tools
-        +listAvailableTools(page, pageSize)
-        +getTool(name)
-        +loadForNextRound(name)
+    class ChatService {
+        -Map~conversationId, ProjectToolRuntime~ toolRuntimes
     }
 
-    class DocumentService
-    class ProjectInstructionRepository
-    class SessionRepository
+    class ToolCompactionProjector {
+        +project(messages)
+    }
 
-    class ListProjectDocumentsTool
-    class ReadProjectDocumentTool
-    class WriteProjectDocumentTool
-    class ReadProjectInstructionsTool
-    class AppendProjectInstructionsTool
-    class SetProjectInstructionsTool
-    class SearchConversationHistoryTool
-    class ReadConversationMessageTool
-    class ListToolsTool
-    class GetToolTool
+    class DocumentToolGroup
+    class ProjectInstructionsToolGroup
+    class ConversationHistoryToolGroup
 
-    Tool --> ToolOutcome : returns
-    ProjectToolRuntime --> ToolResult : wraps
-    ToolRegistry o-- Tool : registers
-    ProjectToolRuntime --> ToolRegistry : resolves
+    ProjectToolCatalog ..|> Tool
+    ProjectToolCatalog o-- DocumentToolGroup
+    ProjectToolCatalog o-- ProjectInstructionsToolGroup
+    ProjectToolCatalog o-- ConversationHistoryToolGroup
+    ProjectToolRuntime --> ProjectToolCatalog : shared catalog
+    ProjectToolRuntime --> ToolExecutionContext : injects
     ProjectToolRuntime --> Tool : executes
-
-    ListProjectDocumentsTool ..|> Tool
-    ReadProjectDocumentTool ..|> Tool
-    WriteProjectDocumentTool ..|> Tool
-    ReadProjectInstructionsTool ..|> Tool
-    AppendProjectInstructionsTool ..|> Tool
-    SetProjectInstructionsTool ..|> Tool
-    SearchConversationHistoryTool ..|> Tool
-    ReadConversationMessageTool ..|> Tool
-    ListToolsTool ..|> Tool
-    GetToolTool ..|> Tool
-
-    ListProjectDocumentsTool --> DocumentService
-    ReadProjectDocumentTool --> DocumentService
-    WriteProjectDocumentTool --> DocumentService
-
-    ReadProjectInstructionsTool --> ProjectInstructionRepository
-    AppendProjectInstructionsTool --> ProjectInstructionRepository
-    SetProjectInstructionsTool --> ProjectInstructionRepository
-
-    SearchConversationHistoryTool --> SessionRepository
-    ReadConversationMessageTool --> SessionRepository
-
-    ListToolsTool --> ToolRegistry
-    GetToolTool --> ToolRegistry
+    ChatService o-- ProjectToolRuntime : one per conversation
+    ChatService --> ProjectToolCatalog : creates once
+    ToolCompactionProjector --> ProjectToolCatalog : resolves tool or self
 ```
 
-类图中的项目隔离通过构造 Runtime 时绑定的 Service 和 Repository 实现，不依赖 `ToolContext.projectId`。两个元 Tool 只能访问已经过 Runtime 过滤的 Registry。
+## 14. 实现状态与重构边界
 
-## 14. 实现状态
+本章描述的是已确认的目标设计，代码尚未完成这一轮生命周期重构。当前实现已经具备业务 Tool、版本化结果、三级披露、Conversation 历史回查、审批和压缩投影，但仍存在以下待改项：
 
-v0.1 Core 已完成本文件定义的公共 Tool 契约、10 个 Tool Class、Tool Registry、动态披露、元 Tool、版本化结果信封、退出前临时授权、两阶段历史查询和 Tool 自有压缩投影。
+- `ProjectToolRuntime` 仍在每次 `send()` 时创建并实例化/注册 Tool，应改为 Conversation 级复用。
+- 当前 `ToolRegistry` 应由项目级 `ProjectToolCatalog` 取代；Tool 实例和 JSON Schema 只初始化一次。
+- `ListToolsTool`、`GetToolTool` 应删除，并合并为 `ProjectToolCatalog` 的 `list/get` 操作。
+- `SearchConversationHistoryTool`、`ReadConversationMessageTool` 构造函数仍持有 `conversationId`，应改为从 `ToolExecutionContext` 读取。
+- 当前审批授权 Set 位于 `ChatService`，应按 Conversation 下沉到相应 Runtime；不能跨 Conversation 共享。
+- 压缩投影应通过 `ProjectToolCatalog.getToolOrSelf()` 统一解析 Catalog 和业务 Tool；Catalog 调用固定投影为 `null`。
+- Conversation 尚未记录最后成功发送的 Catalog 入口版本；恢复比较、System Context 组装和成功响应后的版本更新仍待实现。
 
-当前实现边界：
+重构必须保持以下已有行为：
 
-- Tool 动态加载状态按 `name + version` 在当前 Conversation 中恢复，不跨 Conversation；Tool 版本变化后必须重新调用 `get_tool`。
-- `allow_until_exit` 授权保存在 `ChatService` 内存中，关闭当前 CleoDoc 进程后清空。
-- OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，因此完整定义把版本加入描述；Tool Result、元 Tool 和 ModelCall 请求记录仍使用独立整数版本。
-- SQLite 中的文档 Hash 和项目指令 Revision 继续作为内部一致性与恢复数据，但不进入 LLM 可见 Tool Result。
-- `write_draft`、RAG 检索和资料管理 Tool 不在本轮实现范围，新增时必须实现相同接口。
+- `loadedToolVersions` 按精确 `name + version` 恢复，版本变化后必须重新通过 Catalog `get` 加载。
+- OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。
+- SQLite 中的文档 Hash 和项目指令 Revision 不进入 LLM 可见 Tool Result。
+- `write_draft`、RAG 检索和资料管理 Tool 仍不在本轮实现范围。
 
 ## 15. 设计依据
 

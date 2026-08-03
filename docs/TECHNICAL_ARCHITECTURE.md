@@ -639,7 +639,7 @@ v0.1 的 Schema v8 基线包含 `conversations`、`conversation_sessions`、单�
 
 ### 12.1 v0.1 前台 Tool Loop
 
-v0.1 在 CLI 前台执行单任务 Tool Loop。每个 Tool 是实现公共接口的独立 Class，Input/Output 由 Zod Schema 定义，并通过 Tool Registry 按 `full/summary/hidden` 三级披露。模型使用始终完整加载的 `list_tools` 和 `get_tool` 发现、查询低频 Tool；成功加载的 `name + version` 从当前 Conversation 已保存的 `get_tool` 结果恢复，跨用户输入、Session 压缩和应用重启保持可调用，但不跨 Conversation，版本变化后必须重新加载。未加载或未授权 Tool 不能执行。每次 Tool Result 由 Runtime 加入名称和整数版本，ModelCall 同时记录本轮实际暴露的 Tool 版本。
+v0.1 在 CLI 前台执行单任务 Tool Loop。目标架构在应用/项目初始化时创建一个 `ProjectToolCatalog`，一次性持有所有无执行状态的业务 Tool 并缓存 Schema；Catalog 自身以 `project_tool_catalog` 组合 Tool 暴露 `list/get` 操作。`ProjectToolRuntime` 按 Conversation 创建和缓存，同一 Conversation 的多次发送及 Session 压缩复用同一个 Runtime；Runtime 只持有不可变的 `projectId + conversationId`、当前 Conversation 的退出前临时审批和已加载 `name + version`，不持有 `sessionId`。业务 Tool 通过 `ToolExecutionContext` 获得可信执行范围，构造函数只保存稳定 Service/Repository。动态加载状态可从当前 Conversation 的成功 Catalog `get` 结果恢复且不跨 Conversation，版本变化后必须重新加载。当前代码已完成基础 Tool 契约与动态披露，但 Catalog、组合 Tool 和 Runtime 生命周期重构仍待实施，详细差异见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md#14-实现状态与重构边界)。
 
 模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
 
@@ -896,6 +896,7 @@ v0.2 在此基础上增加：
 截至 2026-08-02：
 
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
+- 设计确认、待重构：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 尚未实现：统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
