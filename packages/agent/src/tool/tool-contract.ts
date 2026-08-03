@@ -27,6 +27,11 @@ export type ToolResult<Output> = ToolOutcome<Output> & {
   tool: ToolIdentity;
 };
 
+export interface ToolExecutionContext {
+  readonly projectId: string;
+  readonly conversationId: string;
+}
+
 export interface Tool<Input, Output> {
   readonly name: string;
   readonly version: number;
@@ -37,8 +42,14 @@ export interface Tool<Input, Output> {
   readonly inputSchema: z.ZodType<Input>;
   readonly outputSchema: z.ZodType<Output>;
 
-  execute(input: Input): Promise<ToolOutcome<Output>>;
+  execute(input: Input, context: ToolExecutionContext): Promise<ToolOutcome<Output>>;
   getCompactionMessage(input: Input, outcome: ToolOutcome<Output>): string | null;
+}
+
+export type UnknownTool = Tool<unknown, unknown>;
+
+export function asUnknownTool<Input, Output>(tool: Tool<Input, Output>): UnknownTool {
+  return tool as unknown as UnknownTool;
 }
 
 export interface ToolApprovalRequest {

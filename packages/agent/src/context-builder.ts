@@ -13,6 +13,7 @@ export class ContextBuilder {
     summary: SessionSummaryRecord | null,
     sessionMessages: readonly StoredMessage[],
     toolDisclosure = "",
+    toolCatalogAnnouncement = "",
   ): ChatMessage[] {
     const systemParts = [
       `<cleo_core_instructions>\n${session.systemPromptSnapshot}\n</cleo_core_instructions>`,
@@ -21,6 +22,9 @@ export class ContextBuilder {
       systemParts.push(
         `<project_instructions revision=${JSON.stringify(projectInstructions.revision)} sha256=${JSON.stringify(projectInstructions.contentHash)}>\n${projectInstructions.content}\n</project_instructions>`,
       );
+    }
+    if (toolCatalogAnnouncement !== "") {
+      systemParts.push(toolCatalogAnnouncement);
     }
     if (toolDisclosure !== "") {
       systemParts.push(`<tool_disclosure>\n${toolDisclosure}\n</tool_disclosure>`);

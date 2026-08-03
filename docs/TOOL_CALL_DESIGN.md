@@ -1,6 +1,6 @@
 # CleoDoc Tool Call 技术设计
 
-状态：基础 Tool 契约已实现；ProjectToolCatalog 与 Conversation 级 Runtime 重构已确认、待实施
+状态：v0.1 Tool 契约、ProjectToolCatalog、Conversation 级 Runtime 与入口版本公告已实现
 适用范围：CleoDoc Core、CLI 和未来桌面端
 最后更新：2026-08-03
 
@@ -254,7 +254,7 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `SetProjectInstructionsTool` | `set_project_instructions` | `hidden` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `summary` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `summary` | `auto` | 已实现 |
-| `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 设计确认，待重构 |
+| `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
 `write_draft`、RAG 检索和资料管理 CLI 命令尚未成为已实现的 LLM Tool，不计入本清单。
 
@@ -999,17 +999,16 @@ classDiagram
 
 ## 14. 实现状态与重构边界
 
-本章描述的是已确认的目标设计，代码尚未完成这一轮生命周期重构。当前实现已经具备业务 Tool、版本化结果、三级披露、Conversation 历史回查、审批和压缩投影，但仍存在以下待改项：
+本文件定义的 v0.1 Tool Runtime 已完成：
 
-- `ProjectToolRuntime` 仍在每次 `send()` 时创建并实例化/注册 Tool，应改为 Conversation 级复用。
-- 当前 `ToolRegistry` 应由项目级 `ProjectToolCatalog` 取代；Tool 实例和 JSON Schema 只初始化一次。
-- `ListToolsTool`、`GetToolTool` 应删除，并合并为 `ProjectToolCatalog` 的 `list/get` 操作。
-- `SearchConversationHistoryTool`、`ReadConversationMessageTool` 构造函数仍持有 `conversationId`，应改为从 `ToolExecutionContext` 读取。
-- 当前审批授权 Set 位于 `ChatService`，应按 Conversation 下沉到相应 Runtime；不能跨 Conversation 共享。
-- 压缩投影应通过 `ProjectToolCatalog.getToolOrSelf()` 统一解析 Catalog 和业务 Tool；Catalog 调用固定投影为 `null`。
-- Conversation 尚未记录最后成功发送的 Catalog 入口版本；恢复比较、System Context 组装和成功响应后的版本更新仍待实现。
+- `ProjectToolCatalog` 在 `ChatService` 打开项目时创建一次，持有全部无执行状态的业务 Tool，并以 `project_tool_catalog` 暴露 `list/get`。
+- `ProjectToolRuntime` 按 Conversation 创建和缓存；多次 `send()` 与 Session 压缩复用同一实例，应用退出时销毁。
+- `ToolExecutionContext` 注入 `projectId + conversationId`；历史 Tool 不再从构造函数捕获 Conversation。
+- 退出前持续审批和动态加载状态按 Conversation 隔离；应用重启后从成功 Catalog `get` 的 Tool Result 恢复精确 `name + version`。
+- 压缩投影通过 Catalog 统一解析组合 Tool 与业务 Tool；Catalog 调用固定返回 `null`。
+- Schema v9 保存 Conversation 最后成功公告的 Catalog 入口版本；临时 System 公告只随下一次真实请求发送，失败时保持待重试状态。
 
-重构必须保持以下已有行为：
+当前实现继续保持以下边界：
 
 - `loadedToolVersions` 按精确 `name + version` 恢复，版本变化后必须重新通过 Catalog `get` 加载。
 - OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。

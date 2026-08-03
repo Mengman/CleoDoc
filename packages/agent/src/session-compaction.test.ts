@@ -17,14 +17,14 @@ import {
   ProjectInstructionRepository,
   SessionRepository,
 } from "../../database/src/index.js";
-import { ProjectService } from "../../project/src/index.js";
+import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import {
   projectMessagesForCompaction,
   segmentMessagesForCompaction,
 } from "./compaction-service.js";
 import type { LlmDebugEvent } from "./debug-events.js";
-import { ProjectToolRuntime } from "./tool/index.js";
+import { ProjectToolCatalog, ProjectToolRuntime } from "./tool/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -484,13 +484,15 @@ describe("session compaction", () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
     const database = await ProjectDatabase.open(project.root);
-    const runtime = new ProjectToolRuntime(project.root, {
-      history: {
-        repository: new SessionRepository(database),
-        conversationId: "conversation-1",
-      },
+    const catalog = ProjectToolCatalog.create({
+      documents: new DocumentService(project.root),
+      history: new SessionRepository(database),
       projectInstructions: new ProjectInstructionRepository(database),
     });
+    const runtime = new ProjectToolRuntime(
+      { projectId: project.manifest.id, conversationId: "conversation-1" },
+      catalog,
+    );
     const assistant = storedMessage({
       sequence: 1,
       role: "assistant",
@@ -753,8 +755,11 @@ class CompactionAwareProvider implements ModelProvider {
         type: "tool-call",
         call: {
           id: "load-history-search",
-          name: "get_tool",
-          argumentsJson: JSON.stringify({ name: "search_conversation_history" }),
+          name: "project_tool_catalog",
+          argumentsJson: JSON.stringify({
+            action: "get",
+            name: "search_conversation_history",
+          }),
         },
       };
     } else if (this.normalCalls === 3) {

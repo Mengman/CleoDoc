@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { StoredMessage } from "../../../contracts/src/index.js";
 import {
   ConversationRepository,
   ProjectDatabase,
@@ -11,7 +12,7 @@ import {
   SessionRepository,
 } from "../../../database/src/index.js";
 import { DocumentService, ProjectService } from "../../../project/src/index.js";
-import { ProjectToolRuntime } from "./index.js";
+import { ProjectToolCatalog, ProjectToolRuntime, type ToolApprovalHandler } from "./index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -28,7 +29,7 @@ describe("ProjectToolRuntime", () => {
     const project = await createProject();
     const documents = new DocumentService(project.root);
     await documents.save("manuscript/notes.md", "# 资料\n\n雨夜车站。\n");
-    const tools = new ProjectToolRuntime(project.root);
+    const tools = createRuntime(project);
 
     const listed = await executeTool(tools, "list_project_documents", {});
     expect(listed).toMatchObject({
@@ -70,27 +71,36 @@ describe("ProjectToolRuntime", () => {
     const project = await createProject();
     const documents = new DocumentService(project.root);
     let approvalCount = 0;
-    const tools = new ProjectToolRuntime(project.root, {
-      approve: async () => {
-        approvalCount += 1;
-        return "allow_until_exit";
-      },
-    });
+    const tools = createRuntime(project);
+    const approve: ToolApprovalHandler = async () => {
+      approvalCount += 1;
+      return "allow_until_exit";
+    };
 
-    const created = await executeTool(tools, "write_project_document", {
-      path: "manuscript/summary.md",
-      content: "初稿",
-    });
+    const created = await executeTool(
+      tools,
+      "write_project_document",
+      {
+        path: "manuscript/summary.md",
+        content: "初稿",
+      },
+      approve,
+    );
     expect(created).toMatchObject({
       ok: true,
       data: { document: { path: "manuscript/summary.md", created: true } },
     });
 
-    const overwritten = await executeTool(tools, "write_project_document", {
-      path: "manuscript/summary.md",
-      content: "改稿",
-      overwrite: true,
-    });
+    const overwritten = await executeTool(
+      tools,
+      "write_project_document",
+      {
+        path: "manuscript/summary.md",
+        content: "改稿",
+        overwrite: true,
+      },
+      approve,
+    );
     expect(overwritten).toMatchObject({
       ok: true,
       data: { document: { created: false } },
@@ -99,60 +109,64 @@ describe("ProjectToolRuntime", () => {
     expect((await documents.read("manuscript/summary.md")).content).toBe("改稿");
   });
 
-  it("does not expose or execute hidden tools until get_tool loads them", async () => {
+  it("does not expose or execute hidden tools until the catalog get action loads them", async () => {
     const project = await createProject();
     const database = await ProjectDatabase.open(project.root);
     const repository = new ProjectInstructionRepository(database);
-    const tools = new ProjectToolRuntime(project.root, {
-      projectInstructions: repository,
-      approve: async () => "allow_once",
-    });
+    const tools = createRuntime(project, { projectInstructions: repository });
     try {
-      expect(tools.definitions.map((tool) => tool.name)).toEqual(
+      expect(tools.toolInfo.definitions.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
           "list_project_documents",
           "read_project_document",
           "write_project_document",
-          "list_tools",
-          "get_tool",
+          "project_tool_catalog",
         ]),
       );
-      expect(tools.definitions.map((tool) => tool.name)).not.toContain("set_project_instructions");
-      expect(tools.disclosurePrompt).toContain("read_project_instructions v1");
-      expect(tools.disclosurePrompt).not.toContain("set_project_instructions");
+      expect(tools.toolInfo.definitions.map((tool) => tool.name)).not.toContain(
+        "set_project_instructions",
+      );
+      expect(tools.toolInfo.disclosurePrompt).toContain("read_project_instructions v1");
+      expect(tools.toolInfo.disclosurePrompt).not.toContain("set_project_instructions");
 
       const hiddenCall = await executeTool(tools, "set_project_instructions", {
         content: "不能直接执行",
       });
       expect(hiddenCall).toMatchObject({
         ok: false,
-        tool: { name: "set_project_instructions", version: 0 },
+        tool: { name: "set_project_instructions", version: 1 },
         error: { code: "TOOL_NOT_FOUND" },
       });
 
-      const listed = await executeTool(tools, "list_tools", { page: 1, pageSize: 20 });
+      const listed = await executeTool(tools, "project_tool_catalog", {
+        action: "list",
+        page: 1,
+        pageSize: 20,
+      });
       expect(listed).toMatchObject({
         ok: true,
         data: {
           page: 1,
           pageSize: 20,
           totalPages: 1,
+          action: "list",
           tools: expect.arrayContaining([
             expect.objectContaining({ name: "list_project_documents", version: 1 }),
             expect.objectContaining({ name: "read_project_instructions", version: 1 }),
             expect.objectContaining({ name: "set_project_instructions", version: 1 }),
-            expect.objectContaining({ name: "list_tools", version: 1 }),
-            expect.objectContaining({ name: "get_tool", version: 1 }),
+            expect.objectContaining({ name: "project_tool_catalog", version: 1 }),
           ]),
         },
       });
 
-      const loaded = await executeTool(tools, "get_tool", {
+      const loaded = await executeTool(tools, "project_tool_catalog", {
+        action: "get",
         name: "set_project_instructions",
       });
       expect(loaded).toMatchObject({
         ok: true,
         data: {
+          action: "get",
           tool: {
             name: "set_project_instructions",
             version: 1,
@@ -163,9 +177,12 @@ describe("ProjectToolRuntime", () => {
           callableNextRound: true,
         },
       });
-      expect(tools.definitions.map((tool) => tool.name)).toContain("set_project_instructions");
+      expect(tools.toolInfo.definitions.map((tool) => tool.name)).toContain(
+        "set_project_instructions",
+      );
 
-      const listedAfterLoad = await executeTool(tools, "list_tools", {
+      const listedAfterLoad = await executeTool(tools, "project_tool_catalog", {
+        action: "list",
         page: 1,
         pageSize: 20,
       });
@@ -178,9 +195,14 @@ describe("ProjectToolRuntime", () => {
         },
       });
 
-      const set = await executeTool(tools, "set_project_instructions", {
-        content: "保持第三人称限知",
-      });
+      const set = await executeTool(
+        tools,
+        "set_project_instructions",
+        {
+          content: "保持第三人称限知",
+        },
+        async () => "allow_once",
+      );
       expect(set).toMatchObject({
         ok: true,
         tool: { name: "set_project_instructions", version: 1 },
@@ -189,6 +211,37 @@ describe("ProjectToolRuntime", () => {
       expect(repository.getCurrent()?.content).toBe("保持第三人称限知");
       expect(JSON.stringify(set)).not.toContain("revision");
       expect(JSON.stringify(set)).not.toContain("contentHash");
+    } finally {
+      await database.close();
+    }
+  });
+
+  it("keeps dynamic catalog loads isolated between conversations sharing one catalog", async () => {
+    const project = await createProject();
+    const database = await ProjectDatabase.open(project.root);
+    const catalog = ProjectToolCatalog.create({
+      documents: new DocumentService(project.root),
+      projectInstructions: new ProjectInstructionRepository(database),
+    });
+    const first = new ProjectToolRuntime(
+      { projectId: project.manifest.id, conversationId: "conversation-a" },
+      catalog,
+    );
+    const second = new ProjectToolRuntime(
+      { projectId: project.manifest.id, conversationId: "conversation-b" },
+      catalog,
+    );
+    try {
+      await executeTool(first, "project_tool_catalog", {
+        action: "get",
+        name: "set_project_instructions",
+      });
+      expect(first.toolInfo.definitions.map((tool) => tool.name)).toContain(
+        "set_project_instructions",
+      );
+      expect(second.toolInfo.definitions.map((tool) => tool.name)).not.toContain(
+        "set_project_instructions",
+      );
     } finally {
       await database.close();
     }
@@ -213,15 +266,17 @@ describe("ProjectToolRuntime", () => {
       { role: "assistant", content: "主角是一名退休刑警。", reasoningContent: "不能被检索" },
       session.id,
     );
-    const firstRuntime = new ProjectToolRuntime(project.root, {
-      history: { repository: sessions, conversationId: conversation.id },
+    const firstRuntime = createRuntime(project, {
+      history: sessions,
+      conversationId: conversation.id,
     });
     const getToolCall = {
       id: "load-history-search",
-      name: "get_tool",
-      argumentsJson: JSON.stringify({ name: "search_conversation_history" }),
+      name: "project_tool_catalog",
+      argumentsJson: JSON.stringify({ action: "get", name: "search_conversation_history" }),
     };
     const loadedSearchTool = await executeTool(firstRuntime, getToolCall.name, {
+      action: "get",
       name: "search_conversation_history",
     });
     await conversations.addMessage(
@@ -233,7 +288,7 @@ describe("ProjectToolRuntime", () => {
       conversation.id,
       {
         role: "tool",
-        name: "get_tool",
+        name: "project_tool_catalog",
         toolCallId: getToolCall.id,
         content: JSON.stringify(loadedSearchTool),
       },
@@ -244,9 +299,10 @@ describe("ProjectToolRuntime", () => {
         .prepare("UPDATE conversation_sessions SET status = 'closed', closed_at = ? WHERE id = ?")
         .run(new Date().toISOString(), session.id),
     );
-    const tools = new ProjectToolRuntime(project.root, {
-      history: { repository: sessions, conversationId: conversation.id },
-      toolStateMessages: conversations.getToolMessages(conversation.id, "get_tool"),
+    const tools = createRuntime(project, {
+      history: sessions,
+      conversationId: conversation.id,
+      toolStateMessages: conversations.getToolMessages(conversation.id, "project_tool_catalog"),
     });
 
     try {
@@ -270,7 +326,10 @@ describe("ProjectToolRuntime", () => {
       expect(JSON.stringify(searched)).not.toContain("rank");
       expect(JSON.stringify(searched)).not.toContain("不能被检索");
 
-      await executeTool(tools, "get_tool", { name: "read_conversation_message" });
+      await executeTool(tools, "project_tool_catalog", {
+        action: "get",
+        name: "read_conversation_message",
+      });
       const read = await executeTool(tools, "read_conversation_message", {
         messageId: stored.id,
         maxCharacters: 6,
@@ -296,13 +355,16 @@ describe("ProjectToolRuntime", () => {
 
   it("rejects paths outside the project manuscript directory", async () => {
     const project = await createProject();
-    const tools = new ProjectToolRuntime(project.root, {
-      approve: async () => "allow_once",
-    });
-    const result = await executeTool(tools, "write_project_document", {
-      path: "../escape.md",
-      content: "unsafe",
-    });
+    const tools = createRuntime(project);
+    const result = await executeTool(
+      tools,
+      "write_project_document",
+      {
+        path: "../escape.md",
+        content: "unsafe",
+      },
+      async () => "allow_once",
+    );
 
     expect(result).toMatchObject({
       ok: false,
@@ -317,13 +379,17 @@ async function executeTool(
   runtime: ProjectToolRuntime,
   name: string,
   input: unknown,
+  approve?: ToolApprovalHandler,
 ): Promise<Record<string, unknown>> {
   return JSON.parse(
-    await runtime.execute({
-      id: "test-call",
-      name,
-      argumentsJson: JSON.stringify(input),
-    }),
+    await runtime.execute(
+      {
+        id: "test-call",
+        name,
+        argumentsJson: JSON.stringify(input),
+      },
+      approve,
+    ),
   ) as Record<string, unknown>;
 }
 
@@ -331,4 +397,30 @@ async function createProject() {
   const directory = await mkdtemp(path.join(tmpdir(), "cleodoc-tools-test-"));
   temporaryDirectories.push(directory);
   return await new ProjectService().create(path.join(directory, "novel.cleo"));
+}
+
+function createRuntime(
+  project: Awaited<ReturnType<typeof createProject>>,
+  options: {
+    conversationId?: string;
+    projectInstructions?: ProjectInstructionRepository;
+    history?: SessionRepository;
+    toolStateMessages?: readonly StoredMessage[];
+  } = {},
+): ProjectToolRuntime {
+  const catalog = ProjectToolCatalog.create({
+    documents: new DocumentService(project.root),
+    ...(options.projectInstructions === undefined
+      ? {}
+      : { projectInstructions: options.projectInstructions }),
+    ...(options.history === undefined ? {} : { history: options.history }),
+  });
+  return new ProjectToolRuntime(
+    {
+      projectId: project.manifest.id,
+      conversationId: options.conversationId ?? "conversation-1",
+    },
+    catalog,
+    options.toolStateMessages === undefined ? {} : { toolStateMessages: options.toolStateMessages },
+  );
 }

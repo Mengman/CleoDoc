@@ -1,10 +1,10 @@
-export const CURRENT_SCHEMA_VERSION = 8 as const;
+export const CURRENT_SCHEMA_VERSION = 9 as const;
 
 /**
  * Complete schema for a newly-created CleoDoc project database.
  *
  * This is intentionally a baseline, not a replay of historical migrations. Existing
- * databases that already record schema version 8 use their current schema unchanged.
+ * databases that already record the current schema version use their schema unchanged.
  */
 export const CURRENT_SCHEMA_SQL = `
   CREATE TABLE conversations (
@@ -13,6 +13,7 @@ export const CURRENT_SCHEMA_SQL = `
     provider_id TEXT NOT NULL,
     model TEXT NOT NULL,
     title TEXT,
+    announced_tool_catalog_version INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );

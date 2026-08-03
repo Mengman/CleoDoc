@@ -83,6 +83,81 @@ describe("ChatService", () => {
     }
   });
 
+  it("injects the catalog announcement as transient system context only once", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const chat = await ChatService.open(project.root);
+    const provider = new RecordingTextProvider("announcement", "收到公告");
+    try {
+      const first = await chat.send({
+        projectId: project.manifest.id,
+        provider,
+        model: "announcement-model",
+        prompt: "开始",
+        signal: new AbortController().signal,
+      });
+      expect(provider.requests[0]?.messages[0]).toMatchObject({ role: "system" });
+      expect(provider.requests[0]?.messages[0]?.content).toContain(
+        '<tool_catalog_announcement version="1">',
+      );
+      expect(
+        chat.getConversationHistory(first.conversationId).map((message) => message.content),
+      ).not.toContainEqual(expect.stringContaining("tool_catalog_announcement"));
+      expect(
+        chat.listConversations(project.manifest.id).find((item) => item.id === first.conversationId)
+          ?.announcedToolCatalogVersion,
+      ).toBe(1);
+
+      await chat.send({
+        conversationId: first.conversationId,
+        projectId: project.manifest.id,
+        provider,
+        model: "announcement-model",
+        prompt: "继续",
+        signal: new AbortController().signal,
+      });
+      expect(provider.requests[1]?.messages[0]?.content).not.toContain("tool_catalog_announcement");
+    } finally {
+      await chat.close();
+    }
+  });
+
+  it("retries the catalog announcement after a failed model request", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const chat = await ChatService.open(project.root);
+    try {
+      await expect(
+        chat.send({
+          projectId: project.manifest.id,
+          provider: new TimeoutModelProvider(),
+          model: "announcement-retry-model",
+          prompt: "第一次请求会失败",
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({ code: "PROVIDER_TIMEOUT" });
+      const conversation = chat.getLatestConversation(
+        project.manifest.id,
+        "fake",
+        "announcement-retry-model",
+      );
+      expect(conversation?.announcedToolCatalogVersion).toBeNull();
+
+      const provider = new RecordingTextProvider("fake", "重试成功");
+      await chat.send({
+        conversationId: conversation?.id,
+        projectId: project.manifest.id,
+        provider,
+        model: "announcement-retry-model",
+        prompt: "重试",
+        signal: new AbortController().signal,
+      });
+      expect(provider.requests[0]?.messages[0]?.content).toContain("tool_catalog_announcement");
+    } finally {
+      await chat.close();
+    }
+  });
+
   it("does not save cancelled or failed generations", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
@@ -251,10 +326,10 @@ describe("ChatService", () => {
     }
   });
 
-  it("restores a get_tool load on the next user message", async () => {
+  it("restores a catalog get load after reopening the project", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
+    let chat = await ChatService.open(project.root);
     const provider = new PersistentToolProvider();
     try {
       const first = await chat.send({
@@ -265,6 +340,9 @@ describe("ChatService", () => {
         signal: new AbortController().signal,
       });
       expect(first.content).toBe("历史搜索工具已经加载。");
+
+      await chat.close();
+      chat = await ChatService.open(project.root);
 
       const second = await chat.send({
         conversationId: first.conversationId,
@@ -342,8 +420,11 @@ class ProjectInstructionToolProvider implements ModelProvider {
         type: "tool-call",
         call: {
           id: "load-set-instructions",
-          name: "get_tool",
-          argumentsJson: JSON.stringify({ name: "set_project_instructions" }),
+          name: "project_tool_catalog",
+          argumentsJson: JSON.stringify({
+            action: "get",
+            name: "set_project_instructions",
+          }),
         },
       };
       yield { type: "done", finishReason: "tool_calls" };
@@ -384,8 +465,11 @@ class PersistentToolProvider implements ModelProvider {
         type: "tool-call",
         call: {
           id: "load-history-search",
-          name: "get_tool",
-          argumentsJson: JSON.stringify({ name: "search_conversation_history" }),
+          name: "project_tool_catalog",
+          argumentsJson: JSON.stringify({
+            action: "get",
+            name: "search_conversation_history",
+          }),
         },
       };
       yield { type: "done", finishReason: "tool_calls" };
@@ -429,6 +513,26 @@ class TimeoutModelProvider implements ModelProvider {
         };
       },
     };
+  }
+}
+
+class RecordingTextProvider implements ModelProvider {
+  readonly displayName = "Recording Text Provider";
+  readonly requests: ModelRequest[] = [];
+
+  constructor(
+    readonly id: string,
+    private readonly response: string,
+  ) {}
+
+  async validateConfiguration(): Promise<ProviderHealth> {
+    return { ok: true, message: "ready" };
+  }
+
+  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+    this.requests.push(request);
+    yield { type: "text-delta", text: this.response };
+    yield { type: "done", finishReason: "stop" };
   }
 }
 

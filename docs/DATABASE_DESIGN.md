@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 Schema v8 当前基线
+> 状态：v0.1 Schema v9 当前基线
 > 更新日期：2026-08-03
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -11,7 +11,7 @@
 
 本文严格区分：
 
-- **当前实现**：Schema v8 基线直接创建的表、索引、Trigger、视图和 Repository 行为。
+- **当前实现**：Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为。
 - **尚未实现范围**：技术架构中规划但尚未落地的文档 Chunk、Embedding、RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
@@ -92,9 +92,9 @@ PRAGMA busy_timeout = 5000;
 
 - 同一个 `ProjectDatabase` 实例内通过 Promise FIFO 队列串行写入。
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
-- 当前最低支持版本是 Schema v8，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
-- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v8 基线，不重放 v1–v8 历史 DDL，也不执行旧数据搬运。
-- 已经包含 v8 标记的数据库直接打开，保留原有 `schema_migrations` 历史行和业务数据，不重新执行基线。
+- 当前最低支持版本是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
+- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放 v1–v8 历史 DDL，也不执行旧数据搬运。
+- 已经包含 v9 标记的数据库直接打开，保留原有 `schema_migrations` 历史行和业务数据，不重新执行基线。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动修改或删除它们。
 - 当前代码不再保存 v1–v8 的升级函数、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
@@ -104,8 +104,8 @@ PRAGMA busy_timeout = 5000;
 
 ## 5. Schema 演进策略
 
-- v8 是当前早期开发阶段唯一受支持的数据库基线；历史 v1–v7 转换路径已经移除。
-- 新项目只在 `schema_migrations` 写入一条 v8 记录；已经完成旧迁移链的数据库可以保留 v1–v8 八条记录，判定依据是是否包含 v8。
+- v9 是当前早期开发阶段唯一受支持的数据库基线；历史 v1–v8 转换路径已经移除。
+- 新项目只在 `schema_migrations` 写入一条 v9 记录；已经在外部完成升级的数据库可以保留 v1–v9 历史行，判定依据是是否包含 v9。
 - 下一次结构变化必须使用更高且不复用的版本号。正式发布前可以再次压平开发期历史；正式发布后必须保留面向用户数据的前向升级路径。
 - 任何不受支持的数据库都只报告错误，不把完整基线覆盖到已有表上，也不自动删除数据库。
 
@@ -113,7 +113,7 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.1 类型约定
 
-- 业务 ID 使用 `TEXT`，由应用层生成 UUID；早期已升级到 v8 的数据库可能仍保留 `legacy-<conversation-id>` Session，新代码不再创建该类 ID。`messages.message_rowid` 是仅供 SQLite/FTS 使用的稳定整数存储主键。
+- 业务 ID 使用 `TEXT`，由应用层生成 UUID；早期已升级到 v9 的数据库可能仍保留 `legacy-<conversation-id>` Session，新代码不再创建该类 ID。`messages.message_rowid` 是仅供 SQLite/FTS 使用的稳定整数存储主键。
 - 时间使用 ISO 8601 UTC 字符串并保存在 `TEXT`。
 - 布尔值使用 `INTEGER` 的 `0/1`。
 - 枚举使用 `TEXT + CHECK`。
@@ -122,7 +122,7 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.2 `schema_migrations`
 
-记录数据库已经达到的 Schema 版本。新数据库只记录 v8；通过早期迁移链得到的完整 v8 数据库可能保留 v1–v8 历史行。
+记录数据库已经达到的 Schema 版本。新数据库只记录 v9；在外部完成升级的完整 v9 数据库可能保留 v1–v9 历史行。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -140,18 +140,11 @@ PRAGMA busy_timeout = 5000;
 | `provider_id` | TEXT | NOT NULL | 创建 Conversation 时选择的 Provider |
 | `model` | TEXT | NOT NULL | 创建 Conversation 时选择的模型 ID |
 | `title` | TEXT | 可空 | 用户可见的对话标题 |
+| `announced_tool_catalog_version` | INTEGER | 可空 | 最近一次已成功发送给模型的 Tool Catalog 入口协议版本；`NULL` 表示从未成功公告 |
 | `created_at` | TEXT | NOT NULL | Conversation 创建时间 |
 | `updated_at` | TEXT | NOT NULL | 最近增加消息的时间，用于历史列表排序 |
 
 当前 Provider 和模型记录在 Conversation 级别，不允许静默切换。
-
-#### 6.3.1 目标变更：Tool Catalog 公告版本
-
-当前 Schema v8 尚未包含以下字段。实施 Tool Runtime 生命周期重构时，在新的当前基线中直接为 `conversations` 增加：
-
-| 字段 | 类型 | 约束 | 说明 |
-|---|---|---|---|
-| `announced_tool_catalog_version` | INTEGER | 可空 | 最近一次已成功发送给模型的 Tool Catalog 入口协议版本；`NULL` 表示从未成功公告 |
 
 这个字段属于 Conversation，而不是 Session：上下文压缩只创建新 Session，不改变同一 Conversation 是否已经完成 Tool 入口公告的判断。它也不属于项目级配置，因为不同 Conversation 可能在不同时间恢复并看到不同的最后公告版本。
 
@@ -482,7 +475,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 - `UNIQUE(conversation_id, sequence)` 提供最终并发保护。
 - Tool Call 和 Tool Result 与普通消息共用同一消息序列。
 
-计划加入 Tool Catalog 入口公告后：
+Tool Catalog 入口公告遵循以下 Repository 行为：
 
 - 恢复 Conversation 时比较 `announced_tool_catalog_version` 与当前 Catalog 版本，不立即发起额外 LLM 调用。
 - 需要公告时，在用户下一次真实请求的 System Context 中临时加入公告；它不是 User Message，也不写入 `messages`、FTS 或 Session 摘要。
@@ -547,7 +540,6 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 - AgentJob、ChangeSet、候选事实和审批。
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
-- `conversations.announced_tool_catalog_version` 及其恢复比较、成功响应后更新逻辑。
 
 这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后必须提升 Schema 版本；正式发布后通过新的前向 migration 落地，不能要求用户删除项目数据库。
 

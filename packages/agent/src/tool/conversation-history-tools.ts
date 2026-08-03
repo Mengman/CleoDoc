@@ -1,7 +1,13 @@
 import { z } from "zod";
 
 import type { SessionRepository } from "../../../database/src/index.js";
-import { compactionEvent, toolSuccess, type Tool, type ToolOutcome } from "./tool-contract.js";
+import {
+  compactionEvent,
+  toolSuccess,
+  type Tool,
+  type ToolExecutionContext,
+  type ToolOutcome,
+} from "./tool-contract.js";
 import { HISTORY_ERRORS } from "./tool-errors.js";
 
 const updatedAtSchema = z.iso.datetime();
@@ -71,17 +77,15 @@ export class SearchConversationHistoryTool implements Tool<
   readonly inputSchema = searchConversationHistoryInputSchema;
   readonly outputSchema = searchConversationHistoryOutputSchema;
 
-  constructor(
-    private readonly repository: SessionRepository,
-    private readonly conversationId: string,
-  ) {}
+  constructor(private readonly repository: SessionRepository) {}
 
   async execute(
     input: SearchConversationHistoryInput,
+    context: ToolExecutionContext,
   ): Promise<ToolOutcome<SearchConversationHistoryOutput>> {
     return toolSuccess({
       results: this.repository.searchClosedHistory({
-        conversationId: this.conversationId,
+        conversationId: context.conversationId,
         query: input.query,
         limit: input.limit,
       }),
@@ -112,16 +116,14 @@ export class ReadConversationMessageTool implements Tool<
   readonly inputSchema = readConversationMessageInputSchema;
   readonly outputSchema = readConversationMessageOutputSchema;
 
-  constructor(
-    private readonly repository: SessionRepository,
-    private readonly conversationId: string,
-  ) {}
+  constructor(private readonly repository: SessionRepository) {}
 
   async execute(
     input: ReadConversationMessageInput,
+    context: ToolExecutionContext,
   ): Promise<ToolOutcome<ReadConversationMessageOutput>> {
     const message = this.repository.readClosedMessage({
-      conversationId: this.conversationId,
+      conversationId: context.conversationId,
       messageId: input.messageId,
     });
     const content = message.content.slice(input.offset, input.offset + input.maxCharacters);
