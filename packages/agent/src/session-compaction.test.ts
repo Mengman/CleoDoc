@@ -121,7 +121,9 @@ describe("session compaction", () => {
       );
       expect(postCompaction?.messages[0]?.content).toContain("数据库项目规则");
       expect(postCompaction?.messages[0]?.content).not.toContain("第二版文件规则");
-      expect(postCompaction?.messages[0]?.content).toContain("<session_handoff");
+      expect(postCompaction?.messages[0]?.content).not.toContain("sha256=");
+      expect(postCompaction?.messages[0]?.content).toContain("<session_summary");
+      expect(postCompaction?.messages[0]?.content).not.toContain("<session_handoff");
       expect(postCompaction?.messages[0]?.content).toContain(provider.summary);
       expect(
         postCompaction?.messages.some((message) => message.content === "主角是一名退休刑警。"),
@@ -275,7 +277,7 @@ describe("session compaction", () => {
         systemContext.indexOf("<project_instructions"),
       );
       expect(systemContext.indexOf("<project_instructions")).toBeLessThan(
-        systemContext.indexOf("<session_handoff"),
+        systemContext.indexOf("<session_summary"),
       );
     } finally {
       await chat.close();

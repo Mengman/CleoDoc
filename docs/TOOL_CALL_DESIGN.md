@@ -234,7 +234,7 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 
 ### 3.6 对外字段原则
 
-- `contentHash` 可继续用于增量索引、缓存失效、数据校验和内部版本比较，但不进入 Tool 定义、Tool Result 或压缩投影。
+- `contentHash` 可继续用于增量索引、缓存失效、数据校验和内部版本比较，但不进入模型上下文、Tool 定义、Tool Result 或压缩投影。
 - 文档使用可理解且唯一的项目相对路径作为引用，不向模型返回文档数据库 ID。
 - `message_rowid`、Session 内部 Sequence、FTS Rank 等数据库实现字段不向模型返回。
 - 只有后续 Tool 必须使用的稳定引用才可以返回。目前唯一保留的是不可变历史消息的 `messageId`。

@@ -597,7 +597,7 @@ interface SessionSummary {
 固定 System Prompt
 </cleo_core_instructions>
 
-<project_instructions revision="..." sha256="...">
+<project_instructions revision="...">
 数据库中的当前项目指令
 </project_instructions>
 
@@ -616,6 +616,7 @@ interface SessionSummary {
 
 - 项目指令以 SQLite `project_instruction_revisions` 为事实源，不再运行时读取项目 `AGENTS.md` 或 `agents.md`。
 - 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取最新 Revision。
+- 发送给模型的项目指令只包含 Revision 和正文，不包含内部 `contentHash`。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
 - 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
