@@ -317,9 +317,8 @@ describe("ChatService", () => {
         revision: 1,
         content: "始终使用第三人称限知视角。",
       });
-      expect(provider.requests[2]?.messages[0]?.content).toContain(
-        "<project_instructions revision=1",
-      );
+      expect(provider.requests[2]?.messages[0]?.content).toContain("<project_instructions>");
+      expect(provider.requests[2]?.messages[0]?.content).not.toContain("revision=");
       expect(provider.requests[2]?.messages[0]?.content).toContain("始终使用第三人称限知视角。");
     } finally {
       await chat.close();

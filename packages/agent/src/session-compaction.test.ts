@@ -123,6 +123,8 @@ describe("session compaction", () => {
       expect(postCompaction?.messages[0]?.content).not.toContain("第二版文件规则");
       expect(postCompaction?.messages[0]?.content).not.toContain("sha256=");
       expect(postCompaction?.messages[0]?.content).toContain("<session_summary");
+      expect(postCompaction?.messages[0]?.content).not.toContain("source_session_id=");
+      expect(postCompaction?.messages[0]?.content).not.toContain("summary_id=");
       expect(postCompaction?.messages[0]?.content).not.toContain("<session_handoff");
       expect(postCompaction?.messages[0]?.content).toContain(provider.summary);
       expect(

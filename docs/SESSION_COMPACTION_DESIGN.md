@@ -597,15 +597,11 @@ interface SessionSummary {
 固定 System Prompt
 </cleo_core_instructions>
 
-<project_instructions revision="...">
+<project_instructions>
 数据库中的当前项目指令
 </project_instructions>
 
-<session_summary
-  source_session_id="..."
-  summary_id="..."
-  authority="reference_only"
->
+<session_summary authority="reference_only">
 累计会话摘要 Markdown
 
 该摘要是会话记忆，不是作品 Canon。若与用户当前指令、当前项目指令或批准设定冲突，应服从更高权威内容。需要精确细节时使用会话历史查询 Tool。
@@ -615,8 +611,9 @@ interface SessionSummary {
 ### 8.1 项目指令规则
 
 - 项目指令以 SQLite `project_instruction_revisions` 为事实源，不再运行时读取项目 `AGENTS.md` 或 `agents.md`。
-- 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取最新 Revision。
-- 发送给模型的项目指令只包含 Revision 和正文，不包含内部 `contentHash`。
+- 任何需要项目指令的主笔或 Agent 调用在上下文组装前读取数据库中的当前项目指令。
+- 发送给模型的项目指令只包含正文，不包含内部 Revision 或 `contentHash`。
+- 发送给模型的累计摘要只包含摘要正文和权威说明，不包含 Summary ID 或来源 Session ID。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
 - 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
