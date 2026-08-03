@@ -109,7 +109,7 @@ describe("ProjectToolRuntime", () => {
     expect((await documents.read("manuscript/summary.md")).content).toBe("改稿");
   });
 
-  it("does not expose or execute hidden tools until the catalog get action loads them", async () => {
+  it("does not expose or execute catalog tools until the catalog get action loads them", async () => {
     const project = await createProject();
     const database = await ProjectDatabase.open(project.root);
     const repository = new ProjectInstructionRepository(database);
@@ -126,13 +126,14 @@ describe("ProjectToolRuntime", () => {
       expect(tools.toolInfo.definitions.map((tool) => tool.name)).not.toContain(
         "set_project_instructions",
       );
-      expect(tools.toolInfo.disclosurePrompt).toContain("read_project_instructions v1");
-      expect(tools.toolInfo.disclosurePrompt).not.toContain("set_project_instructions");
-
-      const hiddenCall = await executeTool(tools, "set_project_instructions", {
+      expect(
+        tools.toolInfo.definitions.find((tool) => tool.name === "project_tool_catalog")
+          ?.inputSchema,
+      ).toMatchObject({ type: "object" });
+      const unloadedCall = await executeTool(tools, "set_project_instructions", {
         content: "不能直接执行",
       });
-      expect(hiddenCall).toMatchObject({
+      expect(unloadedCall).toMatchObject({
         ok: false,
         tool: { name: "set_project_instructions", version: 1 },
         error: { code: "TOOL_NOT_FOUND" },
@@ -140,14 +141,12 @@ describe("ProjectToolRuntime", () => {
 
       const listed = await executeTool(tools, "project_tool_catalog", {
         action: "list",
-        page: 1,
-        pageSize: 20,
       });
       expect(listed).toMatchObject({
         ok: true,
         data: {
           page: 1,
-          pageSize: 20,
+          pageSize: 10,
           totalPages: 1,
           action: "list",
           tools: expect.arrayContaining([

@@ -33,16 +33,23 @@ import {
   type UnknownTool,
 } from "./tool-contract.js";
 
-const catalogInputSchema = z.discriminatedUnion("action", [
-  z
-    .object({
-      action: z.literal("list"),
-      page: z.number().int().positive().default(1),
-      pageSize: z.number().int().min(1).max(20).default(10),
-    })
-    .strict(),
-  z.object({ action: z.literal("get"), name: z.string().trim().min(1) }).strict(),
-]);
+const catalogInputSchema = z
+  .object({
+    action: z.enum(["list", "get"]),
+    page: z.number().int().positive().optional(),
+    pageSize: z.number().int().min(1).max(20).optional(),
+    name: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.action === "get" && input.name === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["name"],
+        message: "get 操作必须提供 Tool 名称。",
+      });
+    }
+  });
 type ProjectToolCatalogInput = z.infer<typeof catalogInputSchema>;
 
 const toolSummarySchema = z
@@ -97,7 +104,6 @@ export interface ProjectToolCatalogDependencies {
 
 export interface ProjectToolInfo {
   definitions: ModelToolDefinition[];
-  disclosurePrompt: string;
 }
 
 export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, ProjectToolCatalogOutput> {
@@ -159,39 +165,12 @@ export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, Project
   }
 
   getToolInfo(loadedToolVersions: ReadonlySet<string>): ProjectToolInfo {
-    const allTools = this.listAll();
-    const callable = allTools.filter(
+    const callable = this.listAll().filter(
       (tool) => tool.exposure === "full" || loadedToolVersions.has(toolKey(tool)),
     );
-    const summaries = allTools
-      .filter((tool) => tool.exposure === "summary" && !loadedToolVersions.has(toolKey(tool)))
-      .map((tool) => `- ${tool.name} v${tool.version}: ${tool.description}`);
-    const hiddenCount = allTools.filter(
-      (tool) => tool.exposure === "hidden" && !loadedToolVersions.has(toolKey(tool)),
-    ).length;
     return {
       definitions: callable.map((tool) => this.providerDefinition(tool)),
-      disclosurePrompt:
-        summaries.length === 0 && hiddenCount === 0
-          ? ""
-          : [
-              "以下 Tool 当前只有摘要，调用前先使用 project_tool_catalog 的 get 操作加载完整定义：",
-              ...(summaries.length === 0 ? ["- 无"] : summaries),
-              ...(hiddenCount === 0
-                ? []
-                : [
-                    `另有 ${hiddenCount} 个未展示 Tool，可使用 project_tool_catalog 的 list 操作分页查看。`,
-                  ]),
-            ].join("\n"),
     };
-  }
-
-  getEntryAnnouncement(): string {
-    return `<tool_catalog_announcement version="${this.version}">
-Tool 入口已更新为 ${this.name}。
-列出工具：{"action":"list"}
-查询定义：{"action":"get","name":"tool_name"}
-</tool_catalog_announcement>`;
   }
 
   async execute(
@@ -201,17 +180,22 @@ Tool 入口已更新为 ${this.name}。
     void _context;
     if (input.action === "list") {
       const tools = this.listAll();
-      const totalPages = tools.length === 0 ? 0 : Math.ceil(tools.length / input.pageSize);
-      const start = (input.page - 1) * input.pageSize;
+      const page = input.page ?? 1;
+      const pageSize = input.pageSize ?? 10;
+      const totalPages = tools.length === 0 ? 0 : Math.ceil(tools.length / pageSize);
+      const start = (page - 1) * pageSize;
       return toolSuccess({
         action: "list",
-        tools: tools.slice(start, start + input.pageSize).map(toSummary),
-        page: input.page,
-        pageSize: input.pageSize,
+        tools: tools.slice(start, start + pageSize).map(toSummary),
+        page,
+        pageSize,
         totalPages,
       });
     }
 
+    if (input.name === undefined) {
+      return toolFailure("INVALID_TOOL_INPUT", "get 操作缺少 Tool 名称。");
+    }
     const tool = this.getToolOrSelf(input.name);
     if (tool === undefined) {
       return toolFailure(

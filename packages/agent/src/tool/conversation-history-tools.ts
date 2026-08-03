@@ -71,7 +71,7 @@ export class SearchConversationHistoryTool implements Tool<
   readonly version = 1;
   readonly description =
     "仅在累计摘要缺少完成任务所需的精确细节时，按关键字搜索当前 Conversation 中已关闭的用户和主笔历史消息；返回简短命中摘要。";
-  readonly exposure = "summary";
+  readonly exposure = "catalog";
   readonly approval = "auto";
   readonly errors = HISTORY_ERRORS;
   readonly inputSchema = searchConversationHistoryInputSchema;
@@ -110,7 +110,7 @@ export class ReadConversationMessageTool implements Tool<
   readonly version = 1;
   readonly description =
     "根据 search_conversation_history 返回的 messageId，分段读取一条不可变历史消息。不得读取其他 Conversation、当前活动 Session 或 Reasoning。";
-  readonly exposure = "summary";
+  readonly exposure = "catalog";
   readonly approval = "auto";
   readonly errors = HISTORY_ERRORS;
   readonly inputSchema = readConversationMessageInputSchema;

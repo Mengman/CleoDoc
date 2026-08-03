@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type ToolExposure = "full" | "summary" | "hidden";
+export type ToolExposure = "full" | "catalog";
 export type ApprovalMode = "auto" | "ask" | "deny";
 export type ApprovalChoice = "reject" | "allow_once" | "allow_until_exit";
 

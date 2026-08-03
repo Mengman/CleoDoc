@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 9 as const;
+export const CURRENT_SCHEMA_VERSION = 8 as const;
 
 /**
  * Complete schema for a newly-created CleoDoc project database.
@@ -13,7 +13,6 @@ export const CURRENT_SCHEMA_SQL = `
     provider_id TEXT NOT NULL,
     model TEXT NOT NULL,
     title TEXT,
-    announced_tool_catalog_version INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );

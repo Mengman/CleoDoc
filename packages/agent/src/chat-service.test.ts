@@ -83,81 +83,6 @@ describe("ChatService", () => {
     }
   });
 
-  it("injects the catalog announcement as transient system context only once", async () => {
-    const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
-    const provider = new RecordingTextProvider("announcement", "收到公告");
-    try {
-      const first = await chat.send({
-        projectId: project.manifest.id,
-        provider,
-        model: "announcement-model",
-        prompt: "开始",
-        signal: new AbortController().signal,
-      });
-      expect(provider.requests[0]?.messages[0]).toMatchObject({ role: "system" });
-      expect(provider.requests[0]?.messages[0]?.content).toContain(
-        '<tool_catalog_announcement version="1">',
-      );
-      expect(
-        chat.getConversationHistory(first.conversationId).map((message) => message.content),
-      ).not.toContainEqual(expect.stringContaining("tool_catalog_announcement"));
-      expect(
-        chat.listConversations(project.manifest.id).find((item) => item.id === first.conversationId)
-          ?.announcedToolCatalogVersion,
-      ).toBe(1);
-
-      await chat.send({
-        conversationId: first.conversationId,
-        projectId: project.manifest.id,
-        provider,
-        model: "announcement-model",
-        prompt: "继续",
-        signal: new AbortController().signal,
-      });
-      expect(provider.requests[1]?.messages[0]?.content).not.toContain("tool_catalog_announcement");
-    } finally {
-      await chat.close();
-    }
-  });
-
-  it("retries the catalog announcement after a failed model request", async () => {
-    const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
-    try {
-      await expect(
-        chat.send({
-          projectId: project.manifest.id,
-          provider: new TimeoutModelProvider(),
-          model: "announcement-retry-model",
-          prompt: "第一次请求会失败",
-          signal: new AbortController().signal,
-        }),
-      ).rejects.toMatchObject({ code: "PROVIDER_TIMEOUT" });
-      const conversation = chat.getLatestConversation(
-        project.manifest.id,
-        "fake",
-        "announcement-retry-model",
-      );
-      expect(conversation?.announcedToolCatalogVersion).toBeNull();
-
-      const provider = new RecordingTextProvider("fake", "重试成功");
-      await chat.send({
-        conversationId: conversation?.id,
-        projectId: project.manifest.id,
-        provider,
-        model: "announcement-retry-model",
-        prompt: "重试",
-        signal: new AbortController().signal,
-      });
-      expect(provider.requests[0]?.messages[0]?.content).toContain("tool_catalog_announcement");
-    } finally {
-      await chat.close();
-    }
-  });
-
   it("does not save cancelled or failed generations", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
@@ -248,6 +173,19 @@ describe("ChatService", () => {
         "# 会谈总结\n\n确定采用雨夜车站作为开场。\n",
       );
       expect(provider.requests).toHaveLength(2);
+      for (const request of provider.requests) {
+        expect(request.tools).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              name: "project_tool_catalog",
+              inputSchema: expect.objectContaining({ type: "object" }),
+            }),
+          ]),
+        );
+        expect(
+          request.messages.find((message) => message.role === "system")?.content,
+        ).not.toContain("<tool_disclosure>");
+      }
       expect(provider.requests[1]?.messages).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -512,26 +450,6 @@ class TimeoutModelProvider implements ModelProvider {
         };
       },
     };
-  }
-}
-
-class RecordingTextProvider implements ModelProvider {
-  readonly displayName = "Recording Text Provider";
-  readonly requests: ModelRequest[] = [];
-
-  constructor(
-    readonly id: string,
-    private readonly response: string,
-  ) {}
-
-  async validateConfiguration(): Promise<ProviderHealth> {
-    return { ok: true, message: "ready" };
-  }
-
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
-    this.requests.push(request);
-    yield { type: "text-delta", text: this.response };
-    yield { type: "done", finishReason: "stop" };
   }
 }
 

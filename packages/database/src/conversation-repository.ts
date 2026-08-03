@@ -19,7 +19,6 @@ interface ConversationRow {
   provider_id: string;
   model: string;
   title: string | null;
-  announced_tool_catalog_version: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,7 +86,6 @@ export class ConversationRepository {
       providerId: input.providerId,
       model: input.model,
       title: input.title ?? null,
-      announcedToolCatalogVersion: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -140,14 +138,6 @@ export class ConversationRepository {
           .all(projectId) as unknown as ConversationSummaryRow[],
     );
     return rows.map(mapConversationSummary);
-  }
-
-  async markToolCatalogAnnounced(conversationId: string, version: number): Promise<void> {
-    await this.projectDatabase.write((database) => {
-      database
-        .prepare("UPDATE conversations SET announced_tool_catalog_version = ? WHERE id = ?")
-        .run(version, conversationId);
-    });
   }
 
   getMessages(conversationId: string): StoredMessage[] {
@@ -408,7 +398,6 @@ function mapConversation(row: ConversationRow): ConversationRecord {
     providerId: row.provider_id,
     model: row.model,
     title: row.title,
-    announcedToolCatalogVersion: row.announced_tool_catalog_version,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

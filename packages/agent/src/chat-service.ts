@@ -122,9 +122,6 @@ export class ChatService {
     let streamedContent = "";
     let usage: ModelUsage | undefined;
     const tools = this.getToolRuntime(conversation);
-    let announceToolCatalog =
-      conversation.announcedToolCatalogVersion === null ||
-      conversation.announcedToolCatalogVersion < this.toolCatalog.version;
 
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
@@ -134,8 +131,6 @@ export class ChatService {
           this.projectInstructions.getCurrent(),
           this.sessions.getInheritedSummary(session),
           this.sessions.getSessionMessages(session.id),
-          toolInfo.disclosurePrompt,
-          announceToolCatalog ? this.toolCatalog.getEntryAnnouncement() : "",
         );
         let roundContent = "";
         let roundReasoning = "";
@@ -247,11 +242,6 @@ export class ChatService {
           });
           throw emptyResponseError;
         }
-        if (announceToolCatalog) {
-          await this.repository.markToolCatalogAnnounced(conversation.id, this.toolCatalog.version);
-          announceToolCatalog = false;
-        }
-
         if (toolCalls.length > 0) {
           await this.repository.addMessage(
             conversation.id,
@@ -310,7 +300,6 @@ export class ChatService {
           input.contextWindowTokens,
           tools.toolInfo.definitions,
           "",
-          tools.toolInfo.disclosurePrompt,
         );
         await this.sessions.updateBudget(
           session.id,
@@ -408,25 +397,17 @@ export class ChatService {
     contextWindowTokens?: number,
     toolDefinitions?: readonly ModelToolDefinition[],
     draft = "",
-    toolDisclosure?: string,
   ): ContextBudgetStatus {
     const conversation = this.assertConversation(conversationId);
     const session = this.sessions.getCurrentSession(conversationId);
     if (session === null) throw new AppError("VALIDATION_ERROR", "当前对话没有可用 Session。");
     const defaultTools =
-      toolDefinitions === undefined || toolDisclosure === undefined
-        ? this.getToolRuntime(conversation).toolInfo
-        : undefined;
+      toolDefinitions === undefined ? this.getToolRuntime(conversation).toolInfo : undefined;
     const messages = this.contextBuilder.build(
       session,
       this.projectInstructions.getCurrent(),
       this.sessions.getInheritedSummary(session),
       this.sessions.getSessionMessages(session.id),
-      toolDisclosure ?? defaultTools?.disclosurePrompt ?? "",
-      conversation.announcedToolCatalogVersion === null ||
-        conversation.announcedToolCatalogVersion < this.toolCatalog.version
-        ? this.toolCatalog.getEntryAnnouncement()
-        : "",
     );
     return this.budgetService.estimate(
       messages,

@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v9 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v8 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root);
     try {
@@ -67,7 +67,6 @@ describe("current database schema baseline", () => {
         expect.arrayContaining(["message_rowid", "reasoning_content", "model_call_id"]),
       );
       expect(getColumnNames(database, "conversation_message_fts")).toEqual(["content"]);
-      expect(getColumnNames(database, "conversations")).toContain("announced_tool_catalog_version");
       expect(
         database.read(
           (sqlite) =>
@@ -161,8 +160,8 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("opens an existing fully-upgraded v9 database without rewriting its data or history", async () => {
-    const root = await createTemporaryProject("cleodoc-existing-v9-test-");
+  it("opens an existing fully-upgraded v8 database without rewriting its data or history", async () => {
+    const root = await createTemporaryProject("cleodoc-existing-v8-test-");
     const database = await ProjectDatabase.open(root);
     const conversations = new ConversationRepository(database);
     const conversation = await conversations.createConversation({

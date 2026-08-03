@@ -110,7 +110,7 @@ interface ToolIdentity {
 
 只修改内部实现、性能或不影响语义的描述文字，不必增加版本。版本使用简单递增整数，不引入语义版本规则。
 
-`full` 定义、`summary` 描述、`project_tool_catalog` 的查询结果和每次 Tool Result 都包含 `name + version`。这样模型和 Debug 日志可以判断历史调用是否使用了旧契约。
+`full` 定义、`project_tool_catalog` 的查询结果和每次 Tool Result 都包含 `name + version`。这样模型和 Debug 日志可以判断历史调用是否使用了旧契约。
 
 ### 3.4 Tool Outcome 与最终 Tool Result
 
@@ -177,7 +177,7 @@ type ToolResult<Output> = ToolOutcome<Output> & {
 ### 3.5 Tool Interface
 
 ```ts
-type ToolExposure = "full" | "summary" | "hidden";
+type ToolExposure = "full" | "catalog";
 type ApprovalMode = "auto" | "ask" | "deny";
 type ApprovalChoice = "reject" | "allow_once" | "allow_until_exit";
 
@@ -249,20 +249,19 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `ListProjectDocumentsTool` | `list_project_documents` | `full` | `auto` | 已实现 |
 | `ReadProjectDocumentTool` | `read_project_document` | `full` | `auto` | 已实现 |
 | `WriteProjectDocumentTool` | `write_project_document` | `full` | `ask` | 已实现 |
-| `ReadProjectInstructionsTool` | `read_project_instructions` | `summary` | `auto` | 已实现 |
-| `AppendProjectInstructionsTool` | `append_project_instructions` | `hidden` | `ask` | 已实现 |
-| `SetProjectInstructionsTool` | `set_project_instructions` | `hidden` | `ask` | 已实现 |
-| `SearchConversationHistoryTool` | `search_conversation_history` | `summary` | `auto` | 已实现 |
-| `ReadConversationMessageTool` | `read_conversation_message` | `summary` | `auto` | 已实现 |
+| `ReadProjectInstructionsTool` | `read_project_instructions` | `catalog` | `auto` | 已实现 |
+| `AppendProjectInstructionsTool` | `append_project_instructions` | `catalog` | `ask` | 已实现 |
+| `SetProjectInstructionsTool` | `set_project_instructions` | `catalog` | `ask` | 已实现 |
+| `SearchConversationHistoryTool` | `search_conversation_history` | `catalog` | `auto` | 已实现 |
+| `ReadConversationMessageTool` | `read_conversation_message` | `catalog` | `auto` | 已实现 |
 | `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
 `write_draft`、RAG 检索和资料管理 CLI 命令尚未成为已实现的 LLM Tool，不计入本清单。
 
-三个披露等级含义：
+两个披露等级含义：
 
 - `full`：发送名称、版本、描述、Input Schema，以及 Provider 支持的 Output Schema；模型可以立即调用。
-- `summary`：只发送名称、版本和描述，尚不可调用；模型需要时调用 `project_tool_catalog` 的 `get` 操作。
-- `hidden`：初始不发送具体信息，只告知模型还有更多 Tool；通过 `project_tool_catalog` 的 `list` 操作发现，再通过 `get` 操作加载。
+- `catalog`：不进入请求顶层 `tools`，也不通过 System Context 发送名称或描述；模型通过始终可用的 `project_tool_catalog` 执行 `list` 发现，再通过 `get` 加载完整定义。
 
 Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provider 能力过滤 Tool。未授权 Tool 不得通过元 Tool 泄露或加载。
 
@@ -543,25 +542,25 @@ const catalog = new ProjectToolCatalog([
 
 ### 8.2 Catalog Input
 
-原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 判别联合：
+原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 区分操作。Provider Function Tool 要求参数 Schema 顶层必须是 `type: "object"`，因此不直接把 Zod 判别联合生成的顶层 `oneOf` 作为公开 Schema：
 
 ```ts
-const projectToolCatalogInputSchema = z.discriminatedUnion("action", [
-  z
-    .object({
-      action: z.literal("list"),
-      page: z.number().int().positive().default(1),
-      pageSize: z.number().int().min(1).max(20).default(10),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal("get"),
-      name: z.string().trim().min(1),
-    })
-    .strict(),
-]);
+const projectToolCatalogInputSchema = z
+  .object({
+    action: z.enum(["list", "get"]),
+    page: z.number().int().positive().optional(),
+    pageSize: z.number().int().min(1).max(20).optional(),
+    name: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.action === "get" && input.name === undefined) {
+      context.addIssue({ code: "custom", path: ["name"], message: "get 操作必须提供 Tool 名称。" });
+    }
+  });
 ```
+
+`page` 和 `pageSize` 的默认值由 Catalog 执行时补全，避免 JSON Schema 把带 Zod Default 的字段误标为必填。`get` 的 `name` 条件必填规则由同一 Zod Schema 校验。
 
 `list` 操作字段：
 
@@ -870,48 +869,13 @@ Runtime 不持有数据库连接之外的 Tool 实例，不逐个注册业务 To
 ProjectToolRuntime.toolInfo
 → ProjectToolCatalog.listTools()
 → 合并 full Tool 与 loadedToolVersions 对应的完整定义
-→ 生成 summary/hidden 披露提示
 ```
 
-`ChatService` 不直接遍历业务 Tool，也不缓存另一份 Catalog。Catalog 负责静态定义，Runtime 负责当前 Conversation 的动态披露状态。
+`ChatService` 不直接遍历业务 Tool，也不缓存另一份 Catalog。Catalog 负责静态定义，Runtime 负责当前 Conversation 的按需加载状态。
 
-### 12.5 Tool Catalog 入口版本公告
+每次真实模型请求都通过 `ProjectToolRuntime.toolInfo` 从当前 Catalog 重新取得公开定义，并写入请求顶层 `tools` 字段。`project_tool_catalog` 的 `exposure = "full"`，所以应用重启或 Tool 版本更新后，模型会随下一次正常请求直接收到当前入口定义；这里不需要额外的对话消息、System 公告或数据库版本状态。
 
-恢复旧 Conversation 时，模型可能只知道已经废弃的 Tool 查询入口。CleoDoc 必须比较当前 `ProjectToolCatalog.version` 与 Conversation 持久化的 `announced_tool_catalog_version`：
-
-```text
-announced_tool_catalog_version 为 NULL
-或 announced_tool_catalog_version < ProjectToolCatalog.version
-→ 当前 Conversation 需要一次 Tool 入口版本公告
-```
-
-“待公告”是上述比较得到的运行时状态，不增加数据库字段或独立任务表。恢复 Conversation 时也不能为了公告而立刻单独调用一次 LLM；Chat Completion 调用本身无服务器端会话状态，这种隐藏调用只会制造一条无用户意图的模型响应。
-
-公告在用户下一次真实提交所触发的模型请求中临时加入现有 System Context。它的角色是 `system`，不是 `user`，也不是一条独立的持久消息。公告不写入 `messages`，不参与 Conversation 历史、FTS 检索或 Session 压缩。上下文顺序固定为：
-
-```text
-基础 System Prompt
-→ 当前项目指令
-→ Tool Catalog 入口版本公告（仅需要时）
-→ 当前 Session 继承摘要
-→ 本轮正常对话消息
-```
-
-公告使用短小、稳定、可机器识别的内容，例如：
-
-```xml
-<tool_catalog_announcement version="2">
-Tool 入口已更新为 project_tool_catalog。
-列出工具：{"action":"list"}
-查询定义：{"action":"get","name":"tool_name"}
-</tool_catalog_announcement>
-```
-
-只有包含该公告的请求已经获得并成功解析第一条模型响应后，才把 Conversation 的 `announced_tool_catalog_version` 更新为当前 Catalog 版本。若请求超时、取消、连接失败或响应解析失败，则保持原值，使下一次真实请求继续携带公告。模型返回 Tool Call 也属于成功响应，因为模型已经接收并理解了本次请求上下文。
-
-这一规则只保证模型知道当前 Tool 查询入口，不替代 `list/get` 的动态发现和 `loadedToolVersions` 管理。Catalog 入口协议没有升级时，业务 Tool 集合发生变化也不重复发送公告。
-
-### 12.6 执行顺序
+### 12.5 执行顺序
 
 ```text
 完整拼接流式 Tool 参数
@@ -929,7 +893,7 @@ Tool 入口已更新为 project_tool_catalog。
 → 单独生成压缩投影与审计记录
 ```
 
-Tool Call ID、审批状态、Conversation 内退出前授权、动态披露和版本化结果信封由 Runtime 管理。Provider 格式转换、ModelCall 记录和当前 Agent 回合取消仍由 `ChatService`/Provider 调用层管理。
+Tool Call ID、审批状态、Conversation 内退出前授权、Catalog 动态加载和版本化结果信封由 Runtime 管理。Provider 格式转换、ModelCall 记录和当前 Agent 回合取消仍由 `ChatService`/Provider 调用层管理。
 
 取消信号代表终止当前 Agent 回合，但不进入 `ToolExecutionContext`。取消后不再启动新的 Tool 或模型调用；已经进入 SQLite 事务、原子文件替换或其他短时一致性边界的操作必须完成或回滚。未来出现长时间 Tool 时，先让底层 Service 支持协作取消，再按真实需求扩展接口。
 
@@ -1006,7 +970,6 @@ classDiagram
 - `ToolExecutionContext` 注入 `projectId + conversationId`；历史 Tool 不再从构造函数捕获 Conversation。
 - 退出前持续审批和动态加载状态按 Conversation 隔离；应用重启后从成功 Catalog `get` 的 Tool Result 恢复精确 `name + version`。
 - 压缩投影通过 Catalog 统一解析组合 Tool 与业务 Tool；Catalog 调用固定返回 `null`。
-- Schema v9 保存 Conversation 最后成功公告的 Catalog 入口版本；临时 System 公告只随下一次真实请求发送，失败时保持待重试状态。
 
 当前实现继续保持以下边界：
 

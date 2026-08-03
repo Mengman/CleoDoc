@@ -149,7 +149,7 @@ export class ProjectDatabase {
         "DATABASE_ERROR",
         `项目数据库仍是已停止支持的开发期版本${
           newestVersion === null ? "" : ` v${newestVersion}`
-        }；当前最低支持版本为 v${CURRENT_SCHEMA_VERSION}。请先使用旧版 CleoDoc 完成升级或重建项目数据库。`,
+        }；当前只支持完整 v${CURRENT_SCHEMA_VERSION} 数据库。请重建项目数据库。`,
       );
     }
 

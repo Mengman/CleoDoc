@@ -6,7 +6,6 @@ export interface ConversationRecord {
   providerId: string;
   model: string;
   title: string | null;
-  announcedToolCatalogVersion: number | null;
   createdAt: string;
   updatedAt: string;
 }

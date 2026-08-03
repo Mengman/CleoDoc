@@ -31,14 +31,14 @@ v0.1 的核心闭环是：
 | 步骤 | 状态 | 已交付 |
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
-| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v9 基线、版本校验、写入队列和健康检查 |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v8 基线、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
 | 5.5 会话上下文管理 | 已完成 | Session 压缩、数据库项目指令注入、历史回查 Tool、分层压缩和可编辑草稿提交门 |
 | 5.6 Reasoning 流式体验与调用审计 | 已完成 | Reasoning 实时展示与持久化、DeepSeek Tool Loop 回传、逐次 ModelCall 审计、Session 必填的不可变 Message 和 External Content 历史 FTS |
 | 5.7 数据库原生项目指令 | 已完成 | 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及无文件快照的 Session Schema |
-| 5.8 统一 Tool 契约 | 已完成 | 独立 Tool Class、Schema 推导类型、整数版本、动态披露、两个元 Tool、退出前授权、两阶段历史精读和自有压缩投影 |
+| 5.8 统一 Tool 契约 | 已完成 | 独立 Tool Class、Schema 推导类型、整数版本、Catalog 按需加载、退出前授权、两阶段历史精读和自有压缩投影 |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、版本化 Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
@@ -229,7 +229,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。Schema v9 基线直接使用单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。Schema v8 基线直接使用单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
 
 工作内容：
 
@@ -257,7 +257,7 @@ cleo material remove <material-id>
 
 数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#15-已确认的下一版设计reasoning-与模型调用审计)
 
-实施状态：已完成。Schema v9 基线包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
+实施状态：已完成。Schema v8 基线包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
 工作内容：
 
@@ -301,7 +301,7 @@ CLI 交互示意：
 
 数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)
 
-实施状态：已完成。Schema v9 基线、Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复均已落地。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
+实施状态：已完成。Schema v8 基线、Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复均已落地。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 
 工作内容：
 
@@ -331,15 +331,15 @@ CLI 命令：
 - Tool 不向 LLM 暴露 Revision；Repository 在内部检测并处理并发变化，不会覆盖用户较新的修改。
 - LLM 修改项目指令必须经过用户批准；读取无需批准。
 
-### 步骤 5.8：统一 Tool 契约、Catalog 与动态披露
+### 步骤 5.8：统一 Tool 契约、Catalog 与按需加载
 
-实施状态：已完成。基础 Tool 契约、项目级 Catalog、Conversation 级 Runtime、动态披露和 Tool 入口版本公告均已落地。详细契约见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。
+实施状态：已完成。基础 Tool 契约、项目级 Catalog、Conversation 级 Runtime 和按需加载均已落地。详细契约见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。
 
 已完成内容：
 
 - Input/Output 以 Zod Schema 为事实源，通过 `z.infer` 生成类型；每个 Tool 使用独立 Class 实现公共接口。
 - Tool 使用递增整数版本；Runtime 在每次成功和失败结果中统一加入 `tool.name + tool.version`，ModelCall 记录本轮暴露的 Tool 版本。
-- 已实现 `full/summary/hidden` 三级披露、Tool 全量发现和按 `name + version` 加载完整定义。
+- 已实现 `full/catalog` 两级披露、Tool 全量发现和按 `name + version` 加载完整定义；不再向 System Context 注入独立 Tool 摘要。
 - 项目级 Service/Repository 由 Tool 构造绑定；模型 Input 不包含 `projectId`、`conversationId` 或 `sessionId`。
 - 从 LLM 可见文档结果和压缩投影删除 `contentHash`、文档 ID、Session ID、FTS Rank 等无用途内部信息。
 - 历史查询改为 `search_conversation_history` 返回 Message ID 与 Excerpt，再由 `read_conversation_message` 按 Message ID 分段读取原文。
@@ -351,11 +351,11 @@ CLI 命令：
 - 增加只包含 `projectId + conversationId` 的 `ToolExecutionContext`；历史 Tool 不再在构造函数保存 `conversationId`。
 - `allow_until_exit` 按 Conversation 隔离；动态加载状态按精确 `name + version` 在 Conversation 内保持和恢复。
 - 压缩投影通过 Catalog 同时解析组合 Tool 与业务 Tool，Catalog 的 `list/get` 固定忽略。
-- Schema v9 在 Conversation 记录最后成功公告的 Catalog 入口版本；新入口通过临时 System Context 在下一次真实模型请求中发送，失败时保留待重试状态。
+- ChatService 在每次真实模型请求前重新读取当前 Catalog 定义，并通过请求顶层 `tools` 字段发送所有 `exposure = "full"` 的 Tool；Catalog 入口因此不需要独立版本公告或持久化状态。
 
 验收：
 
-- 默认模型请求只包含 `full` Tool；Catalog `list` 始终返回全部已授权 Tool 的名称、版本和描述，摘要或隐藏 Tool 仍需通过 Catalog `get` 加载后调用。
+- 默认模型请求只包含 `full` Tool；Catalog `list` 始终返回全部已授权 Tool 的名称、版本和描述，`catalog` Tool 需通过 Catalog `get` 加载后调用。
 - 未加载、未知或未授权 Tool 不能绕过 Runtime 和 Catalog 执行。
 - Conversation A 的临时审批和动态 Tool 状态不会泄露到 Conversation B；Session 压缩不会清空 Conversation A 的 Runtime 状态。
 - 每个 Tool Result 可定位名称、版本、成功数据或稳定错误及恢复建议。
@@ -364,7 +364,7 @@ CLI 命令：
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
 - 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。
-- 已经完整达到 Schema v9 的项目重新打开时，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
+- 已经完整达到 Schema v8 的项目重新打开时，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
 - 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 并发规则。
 
 ### 步骤 6：统一知识模型与 FTS5
