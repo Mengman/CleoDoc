@@ -1,6 +1,6 @@
 # CleoDoc Tool Call 技术设计
 
-状态：v0.1 Tool 契约、ProjectToolCatalog、Conversation 级 Runtime 与入口版本公告已实现
+状态：v0.1 Tool 契约、ProjectToolCatalog 与 Conversation 级 Runtime 已实现
 适用范围：CleoDoc Core、CLI 和未来桌面端
 最后更新：2026-08-03
 
@@ -26,7 +26,7 @@ Tool 应表达主笔能够理解的创作动作，例如 `search_knowledge`、`r
 
 ### 1.5 返回高信号、低 Token、可行动的结果
 
-Tool Result 使用稳定的结构化状态，返回 Agent 继续决策所需的数据，而不是数据库行、日志、堆栈或整份无关内容。大结果必须支持过滤、范围读取、分页和明确截断；空结果也要明确表示成功但没有内容。正文已经存在于 Tool 参数或文档事实源时，结果只返回 ID、Revision、统计和下一步所需元数据，不再次复制正文。
+Tool Result 使用稳定的结构化状态，返回 Agent 继续决策所需的数据，而不是数据库行、日志、堆栈或整份无关内容。大结果必须支持过滤、范围读取、分页和明确截断；空结果也要明确表示成功但没有内容。正文已经存在于 Tool 参数或文档事实源时，结果只返回后续决策必需的稳定业务引用、更新时间、统计和状态，不返回数据库内部标识，也不再次复制正文。
 
 ### 1.6 错误也是可恢复的 Tool Result
 

@@ -2,7 +2,7 @@
 
 状态：设计已确认，尚未实现  
 适用范围：v0.2 作品工作室；Core 能力必须独立于 Electron/React 实现  
-最后更新：2026-08-02
+最后更新：2026-08-03
 
 本设计中的专用 Tool 必须遵循 [CleoDoc Tool Call 技术设计](./TOOL_CALL_DESIGN.md) 的通用原则。
 
@@ -229,7 +229,7 @@ interface TextStatistics {
 - 不把 Draft 正文复制为普通 Assistant Message Content。
 - 不把 Tool 参数中的正文索引为普通对话正文，否则历史搜索会得到重复内容。
 - UI 状态卡片只引用 Tool Call、文档和 Revision，不保存第二份正文。
-- 活跃上下文增长后，可以将较早的 `write_draft` 参数投影为文档 ID、Revision、哈希和写入范围；模型需要原文时通过受控文档读取 Tool 获取。
+- 活跃上下文增长后，可以将较早的 `write_draft` 参数投影为文档 ID、Revision 和写入范围，不在压缩投影中包含内部 Hash；模型需要原文时通过受控文档读取 Tool 获取。
 - 压缩、历史查询和 Debug 日志的投影规则必须明确区分 Tool 元数据与文稿正文。
 
 具体数据库字段和 Draft Revision 表结构在实现前随文档版本模型一并设计，本设计不提前固定 Schema。

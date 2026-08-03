@@ -2,7 +2,7 @@
 
 > 实现状态：Schema v8 基线、`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地；当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
 > 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
-> 日期：2026-08-02
+> 日期：2026-08-03
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
 
 ## 1. 目标与范围
@@ -728,15 +728,15 @@ FTS 使用 `messages.content` 作为 External Content，只索引允许历史 To
 
 ## 11. Application Service 设计
 
-新增：
+当前实现：
 
 ```text
-SessionManager
+SessionRepository
 ├─ 创建和恢复 active Session
-├─ 关闭 Session
+├─ 在压缩事务中关闭旧 Session 并创建继承摘要的新 Session
 └─ 保证单 active 约束
 
-ProjectInstructionService
+ProjectInstructionRepository
 └─ 读取数据库中的当前项目指令 Revision
 
 ContextBudgetService
@@ -752,9 +752,12 @@ CompactionService
 ├─ 最低文本校验
 └─ 事务提交摘要与新 Session
 
-ConversationHistoryToolRuntime
-├─ 搜索已关闭 Session
-└─ 分页读取精确消息
+SearchConversationHistoryTool / ReadConversationMessageTool
+├─ 在 Runtime 注入的当前 Conversation 中搜索已关闭 Session
+└─ 按稳定 Message ID 分段读取精确消息
+
+ProjectToolRuntime
+└─ 注入当前 Project/Conversation 作用域并执行历史 Tool
 
 ContextBuilder
 └─ Core → Project Instructions → inherited_summary_id 对应的 Summary → Active Messages

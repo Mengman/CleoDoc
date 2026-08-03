@@ -1,7 +1,7 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.7 已完成，本地文档 Tool Loop 已提前交付
-> 日期：2026-08-02
+> 状态：实施中；v0.1 步骤 1–5.8 已完成，本地文档 Tool Loop 已提前交付
+> 日期：2026-08-03
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
 
@@ -238,7 +238,7 @@ cleo material remove <material-id>
 - 新 Session 按 Core System Prompt、数据库最新项目指令、累计摘要、当前消息的顺序组装上下文。
 - 压缩期间允许用户编辑草稿，但 Enter 和发送按钮不能提交；草稿不清空、不排队、不自动发送。
 - 建立压缩前历史消息的搜索和精确读取 Tool。
-- 将 Tool Result 投影为状态、目标、哈希、Revision 和读取范围等白名单元数据，不把文档正文、历史片段、项目指令内容或未知 Tool 原文发送给压缩模型。
+- 将 Tool Result 投影为名称、版本、状态、更新时间、数量和读取范围等白名单元数据，不把文档正文、历史片段、项目指令内容、内部 Hash/Revision 或未知 Tool 原文发送给压缩模型。
 - 超大 Session 按完整用户回合分段，以最终 Segment Payload 执行 80% 软装箱和安全输入硬校验；单个超长回合只在安全消息/正文边界降级拆分，Tool Call 与对应结果始终保持原子性。
 - 保存摘要引用、模型参数、用量和可恢复 CompactionJob；项目指令独立按 Revision 保存。
 
@@ -247,7 +247,7 @@ cleo material remove <material-id>
 - 达到阈值后不再向主笔发送已关闭 Session 的全部原文。
 - 正常压缩只使用一次独立 LLM 调用，并输出通过最低完整性校验的 Markdown 累计摘要。
 - 压缩期间用户草稿保持可编辑，完成后必须再次主动提交。
-- 新 Session 的 AGENTS 和摘要顺序稳定且可审计。
+- 新 Session 的上下文顺序稳定为 Core System Prompt、数据库最新项目指令、累计摘要和当前消息，并且可以审计。
 - Agent 能按需找回压缩前的具体消息，且不能跨 Conversation 或项目查询。
 - Tool Result 原文不会进入压缩 Payload，已知 Tool 只发送完成交接所需的结构化元数据。
 - 超大 Session 的每个 Segment 在发送前均通过最终 Payload 硬预算检查；完整用户回合优先保持不拆分，超长正文切分不丢字符，超限 Tool 原子单元不发送。
@@ -255,7 +255,7 @@ cleo material remove <material-id>
 
 ### 步骤 5.6：Reasoning 流式体验与模型调用审计
 
-数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#15-已确认的下一版设计reasoning-与模型调用审计)
+数据库设计：[Message](./DATABASE_DESIGN.md#64-messages)、[ModelCall](./DATABASE_DESIGN.md#612-model_calls)、[Generation 映射](./DATABASE_DESIGN.md#613-generation_model_call_mapping)及[CompactionJob 映射](./DATABASE_DESIGN.md#614-compaction_job_model_call_mapping)
 
 实施状态：已完成。Schema v8 基线包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
@@ -299,7 +299,7 @@ CLI 交互示意：
 
 ### 步骤 5.7：数据库原生项目指令
 
-数据库设计：[DATABASE_DESIGN.md](./DATABASE_DESIGN.md#16-已实现设计数据库原生项目指令)
+数据库设计：[project_instruction_revisions](./DATABASE_DESIGN.md#611-project_instruction_revisions)
 
 实施状态：已完成。Schema v8 基线、Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复均已落地。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 

@@ -459,7 +459,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ### 10.1 Conversation 与 Message
 
-- 创建 Conversation 后按需创建初始 System Message。
+- 创建 Conversation 后创建初始 active Session；Core System Prompt 保存于该 Session 的 `system_prompt_snapshot`，不创建初始 System Message。
 - 增加消息时，在 `BEGIN IMMEDIATE` 事务内计算 `MAX(sequence) + 1`。
 - `UNIQUE(conversation_id, sequence)` 提供最终并发保护。
 - Tool Call 和 Tool Result 与普通消息共用同一消息序列。
