@@ -146,7 +146,7 @@ Conversation 的原始消息、Session 摘要和临时讨论结论默认相互�
 
 主笔收到统计后可以继续调用 `write_draft`，也可以停止 Tool Call 并给出交付说明或询问用户。产品不引入 `finish_draft`；停止写入就是本轮完成。`write_draft` 只写可恢复的工作 Draft，不直接覆盖用户已经批准的正式正文；Draft 进入正式作品仍遵循 ChangeSet、评审和版本规则。
 
-完整协议、统计算法、失败处理和开放决策见 [Draft 写入与文本统计技术设计](./DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)。
+完整协议、统计算法、失败处理和开放决策见[文档处理设计中的 Draft 写入与文本统计](./文档处理设计.md#18-draft-写入与文本统计)。
 
 ## 4. 本地知识与 RAG 系统
 

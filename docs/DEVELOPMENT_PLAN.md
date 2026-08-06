@@ -449,7 +449,7 @@ cleo search <query> --hybrid --explain
 
 ### 步骤 9：LLM 本地 RAG Tool
 
-其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
+其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。带行号的统一文档投影、按行替换/删除/插入和未来批注元数据的后续设计见[文档处理设计](./文档处理设计.md)，这些扩展尚未实现。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
 
 工作内容：
 
@@ -565,7 +565,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 - 相同 Tool Call 重试不会重复追加，Revision 冲突和无效流式参数不会修改 Draft。
 - 不调用 `finish_draft` 也能正常结束 Agent 回合。
 
-详细设计见 [Draft 写入与文本统计技术设计](./DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)。
+详细设计见[文档处理设计中的 Draft 写入与文本统计](./文档处理设计.md#18-draft-写入与文本统计)。
 
 ### 步骤 4：Git 版本和语义 Diff
 

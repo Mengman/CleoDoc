@@ -641,7 +641,7 @@ v0.1 的 Schema v8 基线包含 `conversations`、`conversation_sessions`、单�
 
 v0.1 在 CLI 前台执行单任务 Tool Loop。应用/项目初始化时创建一个 `ProjectToolCatalog`，一次性持有所有无执行状态的业务 Tool 并缓存 Schema；Catalog 自身以 `project_tool_catalog` 组合 Tool 暴露 `list/get` 操作。`ProjectToolRuntime` 按 Conversation 创建和缓存，同一 Conversation 的多次发送及 Session 压缩复用同一个 Runtime；Runtime 只持有不可变的 `projectId + conversationId`、当前 Conversation 的退出前临时审批和已加载 `name + version`，不持有 `sessionId`。业务 Tool 通过 `ToolExecutionContext` 获得可信执行范围，构造函数只保存稳定 Service/Repository。动态加载状态可从当前 Conversation 的成功 Catalog `get` 结果恢复且不跨 Conversation，版本变化后必须重新加载。每次普通模型请求都从当前 Catalog 重新组装顶层 `tools`；`full` Tool 直接发送，`catalog` Tool 只通过 Catalog `list/get` 发现和加载，不向 System Context 注入独立 Tool 摘要。因此 Catalog 入口不需要独立公告或数据库版本追踪。详细实现见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md#14-实现状态与重构边界)。
 
-模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
+模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；带行号的统一文档投影、按行替换/删除/插入及未来批注与引用元数据的设计见[文档处理设计](./文档处理设计.md)，尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
 
 Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
@@ -659,7 +659,7 @@ CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文�
 
 文本统计由 Core 的确定性服务完成，不依赖模型估算。字符数按原始 `content` 的 Unicode Code Point 计数；字数和标点符号数先按声明的格式解析出可见文本，再分别统计汉字/英文单词与 Unicode Punctuation。结果携带算法版本；普通聊天不调用统计器。首版返回本次写入统计，整章或整篇总统计作为可扩展字段，不是首版阻塞项。
 
-Tool Loop 不包含 `finish_draft`。写入成功后模型可以再次调用 Tool 继续创作；不再调用 Tool 并输出简洁交付说明，即表示本轮完成。详细输入输出、消息投影、统计规则、协议违规处理和测试矩阵见 [Draft 写入与文本统计技术设计](./DRAFT_WRITING_AND_TEXT_STATISTICS_DESIGN.md)。
+Tool Loop 不包含 `finish_draft`。写入成功后模型可以再次调用 Tool 继续创作；不再调用 Tool 并输出简洁交付说明，即表示本轮完成。详细输入输出、消息投影、统计规则、协议违规处理和测试矩阵见[文档处理设计中的 Draft 写入与文本统计](./文档处理设计.md#18-draft-写入与文本统计)。
 
 ### 12.3 v0.2 可持久化工作流
 
