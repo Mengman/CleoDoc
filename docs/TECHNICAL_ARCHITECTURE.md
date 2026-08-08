@@ -45,11 +45,11 @@ Git 被映射为“修改记录、命名版本、比较、撤销和恢复”。�
 
 ### 2.5 自研 RAG 薄层
 
-RAG 核心不依赖 LangChain.js 或 LlamaIndex.TS。CleoDoc 自己维护带项目版本、权威等级、关系路径和证据位置的检索类型与流程。
+RAG 核心不依赖 LangChain.js、LlamaIndex.TS、CDM 或 CleoDoc 业务对象。RAG 项目维护 Source、Chunk、索引、检索和证据定位协议；CleoDoc 在其上叠加项目权限、知识权威、关系图、ContextManifest、CDM Reference 和用户审批。
 
 ### 2.6 所有异步结果绑定版本
 
-Embedding、事实抽取、Agent 生成和一致性检查都必须携带 `sourceRevision` 或 `baseRevision`。过期任务的结果不得覆盖新内容。
+Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 Hash、输入 Hash、`sourceRevision` 或 `baseRevision` 中与任务相符的版本标识。过期任务的结果不得覆盖新内容。
 
 ## 3. 技术选型
 
@@ -68,8 +68,8 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带 `source
 | 全文检索 | SQLite FTS5 trigram | 中文原文和资料检索 |
 | 本地 Embedding | `@huggingface/transformers` | 在 Worker 中运行 ONNX Embedding 模型 |
 | Git 引擎 | isomorphic-git | 无系统 Git 依赖的版本管理 |
-| 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | AI、用户、解析器、展示、编辑和 RAG 共用的统一文档协议 |
-| 文档解析 | CleoDoc 自有解析管线和 CDM Schema | 统一结构、阅读顺序、来源定位、质量报告和 Chunk 输入 |
+| 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | 独立基础协议；AI、用户和解析器直接使用，RAG Core 不直接依赖 |
+| 文档解析 | 独立 Document Ingestion 模块 + CDM Schema | TXT/Markdown、临时 CDM、来源定位和纯文本 ChunkDraft |
 | 格式底层 | unified / remark、ZIP/XML/PDF 等低层解码能力 | 读取格式基础结构，不让第三方对象成为 CleoDoc 数据模型 |
 | 测试 | Vitest；v0.2 增加 React Testing Library、Playwright | v0.1 单元与 CLI 端到端；v0.2 组件与 Electron 端到端测试 |
 
@@ -183,34 +183,41 @@ apps/
 
 packages/
 ├─ contracts/       # 公共类型、Zod Schema、错误码和 IPC contract
+├─ cdm/             # CDM Schema、XML 解析/序列化、校验、Node ID 和遍历
+├─ document-ingestion/ # TXT/Markdown、临时 CDM、结构切片和 ChunkDraft
 ├─ project/         # 项目格式、文件读写和迁移
 ├─ versioning/      # Git、版本时间线、恢复
 ├─ diff/            # 文档语义 Diff
 ├─ database/        # SQLite 连接、当前 Schema 基线、Repository
-├─ knowledge/       # 实体、事实、事件和关系
-├─ rag/             # ingestion、retrievers、fusion、context
+├─ knowledge/       # CleoDoc 的资料编排、实体、事实、事件和关系
+├─ rag/             # Contracts、Chunk/Source Store、FTS、Embedding、检索和融合
 ├─ agent/           # durable workflow 和 ChangeSet
 ├─ model-providers/ # OpenAI-compatible、Anthropic、Gemini、Ollama
 └─ testing/         # fixtures、benchmark 和 test helpers
 ```
 
-依赖方向固定为：
+面向未来拆分 RAG 的关键依赖方向固定为：
 
-```text
-contracts
-   ↑
-project / database / model-providers
-   ↑
-versioning / diff / knowledge / rag
-   ↑
-agent
-   ↑
-desktop utility
-   ↑
-preload / renderer
+```mermaid
+flowchart LR
+    CDM["cdm"] --> INGESTION["document-ingestion"]
+    CONTRACTS["rag/contracts"] --> INGESTION
+    CONTRACTS --> RAG["rag/core + rag/sqlite"]
+    CDM --> CLEODOC["CleoDoc knowledge/application"]
+    INGESTION --> CLEODOC
+    RAG --> CLEODOC
 ```
 
-底层包不得反向依赖 Electron UI。
+具体规则：
+
+- `cdm` 是叶子协议包，不依赖 Project、Database、RAG、Agent、Electron 或 TipTap。
+- `rag/contracts` 只定义 Source、ChunkDraft、SearchHit 和公共错误，不依赖 CDM 或 CleoDoc 业务类型。
+- `document-ingestion` 依赖 CDM 和 RAG Contracts，输出纯文本 `ChunkDraft`；不访问 SQLite。
+- `rag/core` 和 `rag/sqlite` 依赖 RAG Contracts，不解析 CDM，也不读取 CleoDoc 的 Conversation、Message、Tool 或 UI 类型。
+- CleoDoc 的 `knowledge` / Application Service 负责组合 Project 文件、Document Ingestion 和 RAG Service。
+- 底层包不得反向依赖 Electron UI；包之间只能通过公开 exports 导入，不能跨包引用内部源文件。
+
+当前不为了未来拆分而立即创建多个 Git 仓库。先在 npm workspace 中稳定这些包边界，等公共 API 和数据语义经过 MVP 验证后，再物理移动代码。
 
 ## 6. 项目文件与数据所有权
 
@@ -385,13 +392,84 @@ Agent
 
 SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialService` 打开时读取并校验元数据、项目归属、路径、UTF-8 内容、字节数和哈希，然后同步 SQLite。添加、重命名和删除采用原子文件写入并在数据库失败时回滚当前操作；进程在文件与数据库更新之间中断时，下次打开以文件事实源校准投影。
 
+### 7.6 RAG 表所有权与数据库注入
+
+原始资料文件及 `sources/metadata/*.json` 仍是 CleoDoc Project/MaterialService 管理的项目事实源；SQLite `sources` 只是它面向索引的投影。该投影以及 `knowledge_chunks`、`knowledge_chunk_fts`、Embedding 模型与向量表由 RAG 子系统拥有。当前这些表可以继续位于项目的同一个 `project.sqlite`，但模块边界不能依赖“同库”这一部署细节：
+
+- CleoDoc 业务代码只通过 `RagService` 使用 Chunk、FTS、Embedding 和引用解析，不直接执行 RAG 表 SQL。
+- RAG Repository 只访问自己拥有的表，不查询 Conversation、Session、Message、Generation、项目指令或其他 CleoDoc 运行表。
+- SQLite 连接和写入队列可以由 CleoDoc 注入，RAG 模块拥有自己的建表 SQL、Repository 和可重建索引逻辑。
+- CDM `<reference>` 只保存公开 `source`、`chunk_id`，不保存或外泄 `chunk_rowid`。
+- Project 路径解析、原始资料安全读写和用户审批仍由 CleoDoc 负责；RAG 只接收经过项目边界校验的 Source 描述和内容流。
+
+未来抽取独立项目时，可以把这些表移动到独立 `rag.sqlite`，也可以继续让 RAG 使用宿主注入的 SQLite。两种部署都必须保持相同的 `RagService` API，CleoDoc 不应因为物理数据库变化而修改业务流程。
+
 ## 8. 自研 RAG 架构
 
 > 实现状态：本节为 v0.1 后续架构，统一知识 Chunk、作品/资料 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。当前已有的 `conversation_message_fts` 仅服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
-### 8.1 边界
+### 8.1 独立项目目标与模块边界
 
-`@cleodoc/rag` 负责编排摄取、召回、融合、上下文装箱和评估，不拥有文件或数据库生命周期。
+长期目标是把本地 RAG 抽取为可独立使用的项目，CleoDoc 作为宿主依赖它。独立 RAG 项目可以同时提供 Source 管理、摄取、SQLite 存储、FTS、Embedding 和检索，但内部必须继续区分：
+
+- **RAG Contracts**：不依赖 CDM 的 Source、ChunkDraft、SearchHit、引用解析和错误协议。
+- **Document Ingestion**：TXT/Markdown 解析、临时 CDM、纯样式丢弃、结构切片和原文字节范围。它属于未来 RAG 项目的摄取生态，但不是 RAG Core。
+- **RAG Core**：接收纯文本 ChunkDraft，分配并持久化公开 Chunk ID，维护索引并执行检索；不解析 CDM。
+- **RAG SQLite Adapter**：拥有 RAG 表、FTS、Embedding BLOB 和 Repository，可以接受宿主注入的数据库连接。
+- **CleoDoc Integration**：连接项目文件、Document Ingestion、RAG Service、CDM `<reference>`、Tool、用户审批和未来 GUI。
+
+Document Ingestion 随未来 RAG 项目一起抽取，但保持独立包或独立内部模块，使已经拥有结构化内容的调用方可以绕过解析器，直接提交 ChunkDraft。
+
+CDM 不归属于 RAG Core，也不能放在 CleoDoc Application Service 内部。它是一个可独立版本化的基础协议包：
+
+- 包含 CDM 标签、属性、Schema 版本、XML 解析/序列化、校验、Node ID、遍历和可见文本基础能力。
+- 不包含文件系统、项目路径、TXT/Markdown 解析、Chunk、SQLite、Embedding、Tool、TipTap 或 Electron。
+- `<reference>` 的 XML 结构属于 CDM；Source/Chunk 是否存在、引用是否有效以及“引用修复”属于 CleoDoc 与 RAG 的集成逻辑。
+- 当前先作为 `packages/cdm` 维护；只有当 RAG 公共 API 稳定并需要独立发布时，再决定是否拆成第三个 Git 仓库或单独发布包。
+
+### 8.2 RAG Core 公共边界
+
+RAG Core 不接收 CDM XML，只接收已经去除格式的 Source 与 ChunkDraft：
+
+```ts
+interface SourceDescriptor {
+  sourceId: string;
+  title: string;
+  format: "text" | "markdown";
+  contentHash: string;
+  size: number;
+}
+
+interface ChunkDraft {
+  ordinal: number;
+  content: string;
+  startOffset: number;
+  endOffset: number;
+  chunkerVersion: string;
+}
+
+interface RagService {
+  ingest(
+    source: SourceDescriptor,
+    chunks: readonly ChunkDraft[]
+  ): Promise<IngestResult>;
+
+  search(request: SearchRequest): Promise<SearchHit[]>;
+
+  resolveReference(
+    sourceId: string,
+    chunkId: string
+  ): Promise<ResolvedChunkReference>;
+
+  deleteSource(sourceId: string): Promise<void>;
+}
+```
+
+Document Ingestion 输出 `ChunkDraft`，最终公开 `chunk_id` 由 RAG Core 分配并持久化。这样资料更新、重新切片、Chunk 失效和 ID 迁移的长期规则由 RAG 项目统一负责，不泄漏到解析器或 CleoDoc UI。
+
+`RagService` 不接受 Project、Conversation、Session、CDM Node、ToolContext 或 Electron 对象。CleoDoc 在调用前完成项目隔离、路径校验和授权，再传入普通数据。
+
+### 8.3 检索接口
 
 ```ts
 interface Retriever {
@@ -414,24 +492,28 @@ interface ContextAssembler {
 }
 ```
 
-### 8.2 摄取流水线
+### 8.4 摄取流水线
 
 统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、纯文本切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；FTS5、Embedding 和向量后端见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
 ```mermaid
 flowchart LR
-    SOURCE["TXT / Markdown"] --> PARSE["CleoDoc 解析器"]
+    SOURCE["CleoDoc 已校验的 TXT / Markdown"] --> PARSE["Document Ingestion Parser"]
     PARSE --> CDM["临时 CDM"]
-    CDM --> CHUNK["结构切片与纯文本提取"]
-    CHUNK --> SQLITE["纯文本 Chunks"]
+    CDM --> CHUNKER["Document Ingestion Chunker"]
+    CHUNKER --> DRAFT["纯文本 ChunkDraft"]
+    DRAFT --> RAG["RAG Core ingest"]
+    RAG --> SQLITE["RAG SQLite Store"]
     SQLITE --> FTS["FTS5"]
     SQLITE --> EMBED["本地 Embedding"]
-    SQLITE --> EXTRACT["实体与事实抽取"]
+    SQLITE --> EXTRACT["CleoDoc 可选事实抽取"]
     EMBED --> VECTOR["向量表"]
     EXTRACT --> CANDIDATE["候选知识"]
     CANDIDATE --> APPROVE["用户批准"]
     APPROVE --> GRAPH["事实与关系图"]
 ```
+
+临时 CDM 的生命周期在 Document Ingestion 内结束。RAG Core 从 `ChunkDraft` 开始工作，不导入 CDM 包，也不把 CDM 标签、Node ID 或 Markdown 写入 Chunk。实体与事实抽取属于 CleoDoc 的知识能力，可以消费 RAG Chunk，但不能反向成为 RAG Core 的必要依赖。
 
 切块规则优先级：
 
@@ -443,7 +525,7 @@ flowchart LR
 
 正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、原始文件字节范围和 Chunker 版本；Source 表保存原始文件 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。
 
-### 8.3 Embedding
+### 8.5 Embedding
 
 ```ts
 interface EmbeddingProvider {
@@ -460,7 +542,7 @@ interface EmbeddingProvider {
 - 不同模型生成的向量不得混合查询。
 - 更换模型时创建新的索引代次，旧 FTS 检索保持可用，完成后原子切换。
 
-### 8.4 向量查询
+### 8.6 向量查询
 
 v0.1 使用 SQLite BLOB 保存 `Float32Array`，在 Worker 中对过滤后的候选执行精确余弦检索：
 
@@ -469,7 +551,7 @@ v0.1 使用 SQLite BLOB 保存 `Float32Array`，在 Worker 中对过滤后的候
 - 超过阈值时提示用户优化资料库，并记录 ANN 后端迁移指标。
 - `VectorIndex` 隔离存储实现；若真实基准证明需要 SQLite 向量扩展，优先评估 sqlite-vec，SQLite vec1 保持观察，两者都不能成为不可替换的领域存储格式。
 
-### 8.5 混合召回
+### 8.7 混合召回
 
 ```mermaid
 flowchart LR
@@ -509,7 +591,7 @@ score = Σ weight(source) / (60 + rank)
 - 冲突证据同时保留并显式标记。
 - 单个来源不得耗尽整个上下文预算。
 
-### 8.6 ContextManifest
+### 8.8 ContextManifest
 
 所有模型调用必须保存：
 
@@ -530,6 +612,16 @@ interface ContextManifest {
 ```
 
 Manifest 记录纳入和排除依据，使 Agent 生成结果能够审计和复现。
+
+### 8.9 物理拆分路线
+
+模块拆分分三步推进：
+
+1. **Monorepo 边界**：在当前仓库建立 `cdm`、`document-ingestion`、`rag` 的公开 exports 和依赖约束，CleoDoc 通过 `RagService` 使用 RAG，不直接访问内部 Repository。
+2. **独立运行验证**：为 RAG 提供不依赖 CleoDoc Project、Conversation、Tool 或 Electron 的集成测试入口，使用内存 Source/Chunk 样本和独立 SQLite 临时库验证摄取、检索、删除与重建。
+3. **移动仓库**：公共 API 稳定后，将 `document-ingestion` 和 `rag` 移入独立 RAG 仓库；CDM 继续作为版本化依赖，是否单独拆仓库由发布和复用需求决定。
+
+终态中，CleoDoc 只依赖 RAG 的公共包或客户端接口。RAG 的物理数据库从 `project.sqlite` 移到 `rag.sqlite`、独立进程甚至其他宿主时，不要求修改 CleoDoc 的创作、Reference、Tool 或 GUI 领域逻辑。
 
 ## 9. v0.2 知识图与权威模型
 
@@ -917,7 +1009,10 @@ v0.2 在此基础上增加：
 - CDM、领域 JSON 和原始附件作为目标事实源，SQLite 作为知识与运行中心；当前 Markdown/TXT 等待明确过渡方案。
 - 每项目独立 SQLite，个人资料库独立 SQLite。
 - Git 对用户隐藏，使用 isomorphic-git。
-- 自研 TypeScript RAG 薄层。
+- 自研 TypeScript RAG，并按未来独立项目建立模块边界。
+- CDM 是无上层业务依赖的基础协议包；Document Ingestion 依赖 CDM 并输出纯文本 ChunkDraft，RAG Core 不直接依赖 CDM。
+- Document Ingestion 属于未来 RAG 项目的摄取能力，但与 RAG Core 保持独立；CleoDoc 只通过 `RagService` 使用 RAG。
+- RAG 子系统拥有 Source、Chunk、FTS 和 Embedding 表；当前可以复用 `project.sqlite`，未来允许迁移到独立数据库而不改变 CleoDoc 领域逻辑。
 - Transformers.js 本地 Embedding。
 - FTS5、向量、精确字段和关系图四路混合召回。
 - v0.1 使用精确向量检索，保留 VectorIndex 替换接口。
