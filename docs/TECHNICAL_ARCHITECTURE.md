@@ -406,7 +406,7 @@ SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialSer
 
 ## 8. 自研 RAG 架构
 
-> 实现状态：本节为 v0.1 后续架构，统一知识 Chunk、作品/资料 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。当前已有的 `conversation_message_fts` 仅服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
+> 实现状态：上游 TXT/Markdown Document Ingestion 已实现；结构切片、统一知识 Chunk、作品/资料 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。当前已有的 `conversation_message_fts` 仅服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
 ### 8.1 独立项目目标与模块边界
 
@@ -996,7 +996,8 @@ v0.2 在此基础上增加：
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
-- 尚未实现：TXT/Markdown Document Ingestion、统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 已实现：独立 `packages/document-ingestion`，将 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；不访问项目文件或 SQLite。
+- 尚未实现：结构切片、统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

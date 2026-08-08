@@ -431,7 +431,6 @@ flowchart TD
 - 发送局部 CDM 给 LLM 时的片段外壳和定位信息。
 - CDM 文件扩展名、MIME 类型和确定性序列化规则。
 - CDM 与当前 Markdown 项目文档的过渡方式。
-- 导入资料的临时 CDM 使用随机 Node ID 时，“相同输入产生相同规范化 CDM”的比较是否排除 ID；Document Ingestion 实现前必须明确，不能让临时 ID 影响 Chunk 的确定性。
 
 ### 11.3 当前实现边界
 
@@ -446,3 +445,5 @@ flowchart TD
 当前内置 Schema 名为 `draft-1`，只用于支持已经确认的结构和后续 TXT/Markdown 解析开发，不能被称为正式 CDM v1。它暂时采用示例中的 `<document version="1">` 外壳，并纳入当前已确认的书籍、文章、标题、段落、列表、引用、代码、表格和基础 Mark；正式根元素、完整标签表和嵌套规则确认后允许不兼容调整。
 
 `draft-1` 暂不接受 `style`。这是因为安全样式属性和值的白名单仍未确认，并不表示 CDM 放弃样式能力。`<comment>` 和 `<reference>` 当前只实现已经确认的最小属性约束；其最终锚点和嵌套语义仍属于待讨论范围。
+
+当前 `draft-1` 将 `<strong>`、`<em>`、`<mark>` 和 `<i>` 作为无需 ID 的样式 Mark；`<a>` 与 `<code>` 具有独立语义，作为需要 ID 的 Node。导入解析固定展平纯样式 Mark，但保留链接和代码 Node。临时 CDM 仍使用随机 Node ID；“相同输入产生相同规范化解析结果”明确忽略这些临时 ID，只比较结构、文字、警告、顺序和原文字节范围，Chunk 不能依赖临时 ID。

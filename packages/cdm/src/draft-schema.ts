@@ -3,7 +3,7 @@ import type { CdmSchemaProfile, CdmTagDefinition } from "./types.js";
 const inlineContainer: CdmTagDefinition = {
   kind: "node",
   allowedAttributes: ["id"],
-  allowedChildKinds: ["mark"],
+  allowedChildTags: ["strong", "em", "mark", "i", "a", "code"],
   allowsText: true,
   allowsChildren: true,
 };
@@ -73,7 +73,11 @@ export const cdmDraftSchema: CdmSchemaProfile = {
     h6: inlineContainer,
     p: inlineContainer,
     ul: { ...structuralContainer, allowedChildTags: ["li"] },
-    ol: { ...structuralContainer, allowedChildTags: ["li"] },
+    ol: {
+      ...structuralContainer,
+      allowedAttributes: ["id", "start"],
+      allowedChildTags: ["li"],
+    },
     li: { ...richContainer, allowedParents: ["ul", "ol"] },
     blockquote: richContainer,
     pre: { ...inlineContainer, allowedChildTags: ["code"] },
@@ -95,10 +99,16 @@ export const cdmDraftSchema: CdmSchemaProfile = {
     em: mark,
     mark,
     i: mark,
-    code: mark,
+    code: {
+      kind: "node",
+      allowedAttributes: ["id"],
+      allowsText: true,
+      allowsChildren: false,
+    },
     a: {
-      ...mark,
-      allowedAttributes: ["href", "title"],
+      ...inlineContainer,
+      allowedAttributes: ["id", "href", "title"],
+      allowedChildTags: ["strong", "em", "mark", "i", "code"],
     },
   },
 };

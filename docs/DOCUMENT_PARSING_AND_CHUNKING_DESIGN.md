@@ -1,6 +1,6 @@
 # CleoDoc 资料解析与切片设计
 
-状态：已确认的技术设计，尚未实现
+状态：TXT/Markdown 解析已实现；结构切片、Chunk 入库和索引尚未实现
 
 更新日期：2026-08-08
 
@@ -26,6 +26,8 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 → Chunk 写入 SQLite
 → 可选保留临时 CDM 用于开发期 Debug
 ```
+
+当前 `packages/document-ingestion` 已完成从原始 UTF-8 TXT/Markdown 到临时 CDM、解析警告和 Node 原文字节范围的部分。它只返回内存结果，不读取项目目录、不访问 SQLite，也不自动写入 Debug 文件；Chunker 和 CleoDoc Application Service 后续消费该结果。
 
 ## 2. 数据职责
 
@@ -102,6 +104,23 @@ Chunk 是 SQLite 中的纯文本检索投影，不是 CDM 文档，也不是新�
 
 解析器可以使用底层文本和 Markdown 词法库，但第三方 AST 不能成为 CleoDoc 的持久化格式或 Chunker 的公共协议。
 
+当前公共结果为：
+
+```ts
+interface ParsedDocument {
+  format: "text" | "markdown";
+  parserVersion: string;
+  status: "ok" | "partial";
+  sourceByteLength: number;
+  cdm: CdmDocument;
+  cdmXml: string;
+  nodeRanges: CdmNodeSourceRange[];
+  warnings: ParseWarning[];
+}
+```
+
+`nodeRanges` 是本次解析任务的内存 Sidecar，通过临时 Node ID 连接 CDM Node 与原始文件字节范围。它不是 CDM 属性，也不进入长期 Chunk 或引用协议。临时 Node ID 仍按 CDM 规则随机生成；解析确定性比较忽略这些随机 ID，只比较结构、文字、警告、Node 顺序和字节范围。Chunk 内容与边界不得依赖随机 ID。
+
 ## 5. 样式处理
 
 导入资料解析不提供样式保留模式，也不定义 `InlineStyleMode`。纯展示样式始终被丢弃，只保留内部文字。
@@ -144,11 +163,11 @@ TXT 采用简单、确定的首版规则：
 - 无法解释的文字原样保留，不能静默丢失。
 - 相同输入、解析器版本和配置产生相同的文本结构。
 
-段落内部普通换行的规范化规则仍需在实现前用固定样本确认。
+段落内部的单个 `CRLF`、`LF` 或 `CR` 统一为 CDM 文本中的 `LF`，不会合并成空格，也不会拆成多个 `<p>`；原始字节范围仍覆盖未规范化的原文。UTF-8 BOM 不进入 CDM 文字，但原文位置会计入 BOM 的 3 个字节。
 
 ## 7. Markdown 解析
 
-首版建议以 CommonMark 为基础，按实际样本选择少量 GFM 扩展。结构映射包括：
+当前实现以 CommonMark 为基础，只增加 GFM 表格扩展，不默认启用整套 GFM。结构映射包括：
 
 | Markdown | 临时 CDM |
 |---|---|
@@ -164,6 +183,8 @@ TXT 采用简单、确定的首版规则：
 | 表格 | `<table>`、`<tr>`、`<th>`、`<td>` |
 
 Markdown 内嵌 HTML 只能接受 CDM 白名单允许的文本语义。脚本、事件处理属性和不安全标签不能进入临时 CDM；被拒绝的内容必须转义为文字或产生明确解析警告，不能静默执行或丢失。
+
+当前实现不解释任何 Markdown 内嵌 HTML，而是将其转义为普通文字并返回 `RAW_HTML_PRESERVED_AS_TEXT` 警告。Markdown 图片不进入 CDM 资源模型，只保留替代文字并返回警告。加粗和斜体等纯样式节点直接展平；链接保留为带 `href`/`title` 的 `<a>`，行内代码和代码块保留为 `<code>` 与 `<pre><code>`。代码语言和 Meta 暂未进入 CDM，存在时返回警告但不丢失代码正文。
 
 ## 8. 切片规则
 
@@ -248,10 +269,10 @@ end_offset
 - Source Hash 不一致时，旧位置被识别为过期，不能继续宣称精确定位有效。
 - 解析和切片失败不损坏原件，也不替换旧的可用索引。
 
+其中 TXT/Markdown 到临时 CDM 的解析验收已经由固定单元样本覆盖，包括 UTF-8 BOM、中文与 Emoji 字节范围、CRLF、标题、段落、引用、列表、链接、代码、GFM 表格、样式展平、原始 HTML 转义、图片降级和非法 UTF-8。Chunk、数据库切换及完整索引验收仍未完成。
+
 ## 13. 暂缓问题
 
-- TXT 段落内部普通换行的最终规则。
-- CommonMark 之外具体支持哪些 GFM 扩展。
 - 链接目标进入纯文本的规范。
 - Chunk 长度、句子边界和重叠的最终参数。
 - 资料更新后的新旧 Chunk 对齐。

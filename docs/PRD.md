@@ -422,9 +422,10 @@ MyNovel.cleo/
 
 开发任务、依赖、顺序和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，PRD 不再保存重复的实施计划。
 
-截至 2026-08-02：
+截至 2026-08-08：
 
 - v0.1 已完成 CLI 与项目基础、LLM Provider、多轮对话与内容保存、资料管理、Session 压缩与历史回查、Reasoning/ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool。
+- v0.1 已完成 CDM 最小 Core 和独立 TXT/Markdown 资料解析，能够输出临时 CDM、解析警告及 Node 原文字节范围。
 - v0.1 尚未实现统一知识索引、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool 和 CLI 发布验收。
 - v0.2 Electron、React、TipTap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和阶段 Agent 工作流尚未开始；Draft 写入协议已经完成设计。
 
