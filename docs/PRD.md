@@ -160,6 +160,8 @@ Conversation 的原始消息、Session 摘要和临时讨论结论默认相互�
 
 ### 4.2 资料摄取与增量索引
 
+统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；原始资料、CDM、Chunk、FTS5、Embedding 和可替换向量后端的技术边界见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+
 支持粘贴内容以及 TXT、Markdown、DOCX、PDF 和网页快照导入。
 
 处理流水线：
@@ -172,7 +174,7 @@ Conversation 的原始消息、Session 摘要和临时讨论结论默认相互�
 6. 抽取实体、事件、关系、时间、规则和事实声明。
 7. 将抽取结果作为候选知识提交给用户批量确认。
 
-Markdown、JSON 和原始资料是事实源；索引可以安全重建。
+CDM、领域 JSON 和导入的原始资料是目标事实源；索引可以安全重建。当前 CLI 已有 Markdown/TXT 文档等待明确的 CDM 过渡方案，不进行静默转换。
 
 ### 4.3 混合检索
 
@@ -320,33 +322,14 @@ Git 负责提供两个版本的文件树和 Blob，CleoDoc 在其上计算文档
 
 1. 项目层：文件新增、删除、修改和重命名。
 2. 章节层：章节新增、删除、移动和重命名。
-3. 段落层：通过稳定块 ID 或内容相似度匹配段落。
+3. 节点层：优先通过稳定 CDM Node ID 匹配，必要时使用内容相似度恢复对应关系。
 4. 句词层：在修改段落内部执行适合中文的句子、词语和 Unicode 字符对比。
 
 不得直接向用户展示 Git 的逐行 Diff。
 
-### 6.4 稳定块 ID
+### 6.4 稳定 CDM Node ID
 
-每个正文块拥有稳定 ID：
-
-```ts
-interface DocumentBlock {
-  id: string;
-  type: 'heading' | 'paragraph' | 'blockquote' | 'scene-break';
-  content: string;
-}
-```
-
-Markdown 仍是正文事实源，块 ID 保存在随正文一起进入版本管理的 sidecar 文件中：
-
-```text
-manuscript/
-├─ chapter-012.md
-└─ .meta/
-   └─ chapter-012.blocks.json
-```
-
-外部编辑导致块 ID 不一致时，系统通过内容哈希、位置和相似度重新匹配。
+正文使用 CDM 作为目标事实格式。除 Schema 明确声明为样式 Mark 的标签外，其他 Node 都通过 `id` 属性保存稳定标识；`<p>`、`<h1>`、`<li>` 等都可以作为基本文档单位。Node ID 由 CleoDoc 生成，随 CDM 一起进入版本管理，内容修改和移动不改变 ID。LLM 通过 Node ID 插入、替换内容、删除和移动节点，不使用视觉行号。完整规则见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)和[文档处理设计](./文档处理设计.md)；当前 CLI Markdown 文档的过渡方式尚未确定。
 
 ### 6.5 Diff 操作
 

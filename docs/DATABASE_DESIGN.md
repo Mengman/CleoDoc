@@ -514,13 +514,15 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 以下结构尚未进入当前 Schema 基线，当前文档不预先固定最终结构：
 
-- 统一文档、稳定块和 Chunk。
+- 统一文档、稳定 CDM Node 和 Chunk。
 - 作品/资料 FTS、本地 Embedding、模型版本和索引代次。
 - RetrievalRun、ContextManifest 及证据项。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
 - AgentJob、ChangeSet、候选事实和审批。
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
+
+其中，CDM、`knowledge_chunks`、External Content FTS、`chunk_embeddings` 和可替换向量后端的已确认语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)与 [本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。这些表仍未进入当前 Schema；实际落地前需要连同项目归属、来源关系和删除语义完成最终字段评审。
 
 这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后必须提升 Schema 版本；正式发布后通过新的前向 migration 落地，不能要求用户删除项目数据库。
 

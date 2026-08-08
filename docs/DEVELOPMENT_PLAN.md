@@ -47,7 +47,7 @@ v0.1 的核心闭环是：
 
 - Core 使用纯 Node.js 和 TypeScript，不依赖 Electron、React、DOM 或浏览器存储。
 - CLI 和未来 Electron 共用相同的 Application Service，不为 GUI 重写核心逻辑。
-- Markdown、JSON 和原始资料是项目事实源；SQLite 是知识、检索和运行状态中心。
+- CDM、领域 JSON 和导入的原始资料是目标项目事实源；当前 CLI 已有 Markdown/TXT 在过渡方案实施前保持不变。SQLite 是知识、检索和运行状态中心。
 - v0.1 只实现验证闭环必需的格式、Provider 和检索能力。
 - 每个阶段必须满足验收门，不能用未完成的 UI 掩盖核心能力问题。
 - 开发与 CI 使用不高于 Electron 内置 Node 的最低兼容基线。
@@ -369,9 +369,11 @@ CLI 命令：
 
 ### 步骤 6：统一知识模型与 FTS5
 
+统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；文档解析、结构优先切块、Chunk 存储和 External Content FTS 的统一设计见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+
 工作内容：
 
-- 将正文和资料统一映射为 `KnowledgeDocument`。
+- 将当前正文和资料解析为通过 Schema 校验的 CDM，再从 CDM 生成 Chunk。
 - 实现章节、段落和句子感知的增量切块。
 - 建立内容哈希和 `sourceRevision`。
 - 使用 FTS5 trigram 建立中文全文索引。
@@ -396,6 +398,8 @@ cleo search <query> --scope material
 - 搜索结果包含文件、结构路径、revision 和原文片段。
 
 ### 步骤 7：本地 Embedding 与向量检索
+
+本步骤使用 SQLite 普通表保存 Float32 BLOB，并在 Worker 中执行精确余弦检索；不把 sqlite-vec 或 SQLite vec1 作为 v0.1 必需依赖。后端选型和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
 工作内容：
 
@@ -449,7 +453,7 @@ cleo search <query> --hybrid --explain
 
 ### 步骤 9：LLM 本地 RAG Tool
 
-其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。带行号的统一文档投影、按行替换/删除/插入和未来批注元数据的后续设计见[文档处理设计](./文档处理设计.md)，这些扩展尚未实现。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
+其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。基于 CDM Node ID 的读取、插入、内容替换、删除、移动以及未来批注元数据的后续设计见[文档处理设计](./文档处理设计.md)，这些扩展尚未实现。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
 
 工作内容：
 
@@ -538,7 +542,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 ### 步骤 3：TipTap 编辑器
 
 - 正文编辑、批注和字符级撤销。
-- 稳定块 ID 和 Markdown sidecar。
+- 将 CDM Node/Mark 映射到 TipTap Node/Mark，并保留稳定 Node ID。
 - 自动保存和外部文件修改检测。
 
 ### 步骤 3a：Draft 写入与文本统计（设计已确认）
@@ -548,7 +552,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 工作内容：
 
 1. 实现带算法版本的文本统计器：原始 Unicode 字符数、去格式后的汉字/英文单词数和 Unicode 标点数。
-2. 为 `markdown-v1` 实现基于解析器的可见文本提取；在规则确定后再支持 `cleodoc-richtext-v1`。
+2. 为当前 Markdown 文档实现基于解析器的可见文本提取；CDM Schema 确认后实现 CDM 可见文本提取器。
 3. 定义 `write_draft` Schema、工作 Draft Revision、`baseRevision` 冲突和幂等执行语义；首个实现可以只支持 `append`。
 4. 改造 Tool Loop 输出协议：普通沟通使用 Assistant Content，文稿使用空 Content + `write_draft`，禁止同轮重复正文。
 5. 完整拼接流式 Tool 参数后再校验和提交，失败时不产生部分 Draft 或虚假统计。

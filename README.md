@@ -45,7 +45,7 @@ my-novel.cleo/
    └─ models/
 ```
 
-Markdown/JSON 是作品事实源，`.cleo/project.sqlite` 保存对话和可重建运行状态。
+当前 CLI 以 Markdown/JSON 保存作品事实；目标统一文档格式为 CDM，过渡方案尚未实施。`.cleo/project.sqlite` 保存对话和可重建运行状态。
 
 ## 使用 OpenAI-compatible Provider
 
@@ -186,4 +186,6 @@ npm run cleo -- material remove <material-id>
 - [会话上下文压缩设计](./docs/SESSION_COMPACTION_DESIGN.md)
 - [Tool Call 技术设计](./docs/TOOL_CALL_DESIGN.md)
 - [文档处理设计](./docs/文档处理设计.md)
+- [本地 RAG 文档摄取与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
+- [CleoDoc Document Model（CDM）设计](./docs/CDM_DOCUMENT_FORMAT_DESIGN.md)
 - [编码 Agent 指南](./AGENTS.md)

@@ -6,6 +6,8 @@
 - [技术架构](./docs/TECHNICAL_ARCHITECTURE.md)
 - [数据库设计与当前实现](./docs/DATABASE_DESIGN.md)
 - [开发计划](./docs/DEVELOPMENT_PLAN.md)
+- [CleoDoc Document Model（CDM）设计](./docs/CDM_DOCUMENT_FORMAT_DESIGN.md)
+- [本地 RAG 文档摄取与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
 
 修改架构、版本范围或数据语义时，必须同步更新相关文档，不能只修改代码或本文件。发现文档冲突时，不要自行扩大范围；先遵循已经明确的版本边界，并向用户说明冲突。
 
@@ -52,7 +54,7 @@ GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中�
 
 - 使用 TypeScript 和 Node.js 构建模块化单体；Core 不依赖 Electron、React、DOM 或浏览器存储。
 - CLI 和未来桌面端调用相同的 Application Service。
-- Markdown、JSON 和导入的原始资料是可移植事实源。
+- CDM、领域 JSON 和导入的原始资料是目标可移植事实源。当前 CLI 已有的 Markdown/TXT 文档在 CDM 过渡方案实施前仍按现状保存，不能静默改写。
 - SQLite 保存全文索引、向量、知识投影、任务状态和可重建缓存，但不是作品的唯一事实源。
 - 索引损坏、Embedding 失败或应用中断不得损坏原始作品；缓存必须可以重建。
 - 项目知识库完全隔离。禁止跨项目检索；个人资料必须经过显式链接才能被项目使用。
@@ -127,7 +129,7 @@ v0.1 检索路径为：
 - Preload 只暴露经过 Schema 校验的白名单 Typed IPC。
 - Git 使用 isomorphic-git，对用户隐藏 Git 概念；用户只看到修改历史、命名版本、比较和恢复。
 - 恢复历史通过创建新的恢复记录完成，不改写既有历史。
-- 文档 Diff 以稳定块 ID、Markdown 结构和中文句子/字符级差异为基础，不只展示原始行 Diff。
+- 文档 Diff 以稳定 CDM Node ID、CDM 结构和中文句子/字符级差异为基础，不依赖视觉行号。
 - 用户直接修改的正文具有较高权威，Agent 不得静默改回。
 
 ## 8. 编码与测试要求

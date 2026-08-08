@@ -28,7 +28,7 @@ v0.1 不拆分本地微服务，也不依赖 Electron。核心能力以纯 Node.
 
 ### 2.2 文件是创作事实源
 
-需要进行版本管理、人工阅读或项目迁移的内容，以 Markdown、JSON 或原始附件保存。SQLite 可以保存它们的规范化副本，但不是这些内容的唯一事实源。
+需要进行版本管理、人工阅读或项目迁移的原生文档以 CDM 保存，结构化设定使用领域 JSON，导入资料保留原始附件。当前 CLI 已有的 Markdown/TXT 文档在 CDM 过渡方案实施前仍按现状保存，不能静默转换。SQLite 可以保存这些内容的规范化副本，但不是它们的唯一事实源。
 
 ### 2.3 SQLite 是知识与运行中心
 
@@ -58,7 +58,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带 `source
 | CLI | TypeScript CLI、轻量参数解析 | v0.1 命令交互、脚本化验收和核心能力验证 |
 | 桌面运行时 | Electron，初始基线 43.x | v0.2 跨平台窗口、文件、凭据和 Utility Process |
 | UI | React、TypeScript | v0.2 作品工作室、知识中心、版本历史 |
-| 编辑器 | TipTap / ProseMirror | v0.2 正文、批注、稳定块 ID 和编辑历史 |
+| 编辑器 | TipTap / ProseMirror | v0.2 正文、批注、稳定 CDM Node ID 和编辑历史 |
 | UI 状态 | Zustand | v0.2 窗口、面板、选择和临时交互状态 |
 | 工作流投影 | XState | v0.2 Renderer 中展示阶段和任务状态，不作为持久化事实源 |
 | 数据校验 | Zod | IPC、文件格式、模型结构化输出校验 |
@@ -68,9 +68,9 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带 `source
 | 全文检索 | SQLite FTS5 trigram | 中文原文和资料检索 |
 | 本地 Embedding | `@huggingface/transformers` | 在 Worker 中运行 ONNX Embedding 模型 |
 | Git 引擎 | isomorphic-git | 无系统 Git 依赖的版本管理 |
-| Markdown | unified / remark | Markdown AST 解析与生成 |
-| DOCX | Mammoth | 文本、标题和基础结构导入 |
-| PDF | PDF.js | 带文本层 PDF 的本地解析 |
+| 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | AI、用户、解析器、展示、编辑和 RAG 共用的统一文档协议 |
+| 文档解析 | CleoDoc 自有解析管线和 CDM Schema | 统一结构、阅读顺序、来源定位、质量报告和 Chunk 输入 |
+| 格式底层 | unified / remark、ZIP/XML/PDF 等低层解码能力 | 读取格式基础结构，不让第三方对象成为 CleoDoc 数据模型 |
 | 测试 | Vitest；v0.2 增加 React Testing Library、Playwright | v0.1 单元与 CLI 端到端；v0.2 组件与 Electron 端到端测试 |
 
 不采用：
@@ -97,7 +97,7 @@ flowchart LR
     CORE --> KNOWLEDGE["KnowledgeService"]
     CORE --> AGENT["AgentRuntime"]
     KNOWLEDGE --> WORKER["Embedding Worker"]
-    PROJECT --> FILES["Markdown / JSON / Attachments"]
+    PROJECT --> FILES["CDM / JSON / Original Attachments"]
     VERSION --> GIT[".cleo/git"]
     KNOWLEDGE --> SQLITE["project.sqlite"]
     AGENT --> MODELS["Model Providers / Ollama"]
@@ -248,9 +248,10 @@ MyNovel.cleo/
 
 | 分类 | 数据 | 持久化 | Git |
 |---|---|---|---|
-| 创作事实 | 正文、大纲、委托书、研究笔记 | Markdown | 是 |
+| 创作事实 | 正文、大纲、委托书、研究笔记 | CDM；当前 Markdown 文档待制定过渡方案 | 是 |
 | 权威设定 | 人物、规则、事件、伏笔 | JSON | 是 |
 | 原始附件 | PDF、DOCX、网页快照 | `.cleo/blobs/<sha256>` | 否，Git 只记录元数据 |
+| 解析派生物 | 导入资料的 CDM | `.cleo/derived/documents/` | 否，可重建 |
 | 知识投影 | Chunk、实体、事实、关系 | SQLite | 否，可重建 |
 | 检索索引 | FTS、Embedding | SQLite | 否，可重建 |
 | 运行状态 | AgentJob、ChangeSet、索引任务 | SQLite | 否，不可随意删除 |
@@ -326,7 +327,7 @@ PRAGMA synchronous = FULL;
 ```text
 内容镜像
 ├─ documents
-├─ document_blocks
+├─ document_nodes
 ├─ sources
 └─ chunks
 
@@ -374,7 +375,7 @@ Agent
 - 正式发布后的内容表和运行表执行带备份的前向迁移；索引表允许丢弃后重建。
 - 项目打开时执行轻量 `quick_check`，异常时进入只读恢复模式。
 - 备份必须使用 Backup API 或 `VACUUM INTO`，不能只复制打开中的主数据库文件。
-- `rebuild-index` 从 Markdown、JSON 和附件解析文本重建 Chunk、FTS、Embedding 和关系投影。
+- `rebuild-index` 从 CDM、领域 JSON 和原始附件重建 Chunk、FTS、Embedding 和关系投影；过渡期同时读取当前 Markdown/TXT 事实文件。
 
 ### 7.5 v0.1 资料事实源与投影
 
@@ -413,10 +414,13 @@ interface ContextAssembler {
 
 ### 8.2 摄取流水线
 
+统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；文档格式解析、CDM、Chunk、FTS5、Embedding 和向量后端的完整边界见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。CleoDoc 自己拥有解析管线与稳定内部格式；第三方低层格式库不得成为领域模型或持久化格式。
+
 ```mermaid
 flowchart LR
-    SOURCE["文件或粘贴内容"] --> PARSE["解析"]
-    PARSE --> CHUNK["结构化切块"]
+    SOURCE["文件或粘贴内容"] --> PARSE["CleoDoc 解析器"]
+    PARSE --> CDM["CDM XML"]
+    CDM --> CHUNK["结构化切块"]
     CHUNK --> SQLITE["Chunks"]
     SQLITE --> FTS["FTS5"]
     SQLITE --> EMBED["本地 Embedding"]
@@ -461,7 +465,7 @@ v0.1 使用 SQLite BLOB 保存 `Float32Array`，在 Worker 中对过滤后的候
 - 先由 SQLite 根据项目、类型、权威、人物和时间过滤。
 - 项目级软上限为 5 万个 Chunk。
 - 超过阈值时提示用户优化资料库，并记录 ANN 后端迁移指标。
-- `VectorIndex` 隔离存储实现，未来可替换为 sqlite-vec 或 HNSW。
+- `VectorIndex` 隔离存储实现；若真实基准证明需要 SQLite 向量扩展，优先评估 sqlite-vec，SQLite vec1 保持观察，两者都不能成为不可替换的领域存储格式。
 
 ### 8.5 混合召回
 
@@ -611,7 +615,7 @@ Git 只提供文件树和 Blob，`DiffService` 负责文档语义对比：
 
 1. 项目级：新增、删除、修改和重命名。
 2. 章节级：新增、删除、移动和重命名。
-3. 块级：稳定块 ID 或相似度匹配。
+3. 节点级：稳定 CDM Node ID 或相似度匹配。
 4. 行内级：中文句子、词语和 Unicode 字符变化。
 
 ```ts
@@ -641,7 +645,7 @@ v0.1 的 Schema v8 基线包含 `conversations`、`conversation_sessions`、单�
 
 v0.1 在 CLI 前台执行单任务 Tool Loop。应用/项目初始化时创建一个 `ProjectToolCatalog`，一次性持有所有无执行状态的业务 Tool 并缓存 Schema；Catalog 自身以 `project_tool_catalog` 组合 Tool 暴露 `list/get` 操作。`ProjectToolRuntime` 按 Conversation 创建和缓存，同一 Conversation 的多次发送及 Session 压缩复用同一个 Runtime；Runtime 只持有不可变的 `projectId + conversationId`、当前 Conversation 的退出前临时审批和已加载 `name + version`，不持有 `sessionId`。业务 Tool 通过 `ToolExecutionContext` 获得可信执行范围，构造函数只保存稳定 Service/Repository。动态加载状态可从当前 Conversation 的成功 Catalog `get` 结果恢复且不跨 Conversation，版本变化后必须重新加载。每次普通模型请求都从当前 Catalog 重新组装顶层 `tools`；`full` Tool 直接发送，`catalog` Tool 只通过 Catalog `list/get` 发现和加载，不向 System Context 注入独立 Tool 摘要。因此 Catalog 入口不需要独立公告或数据库版本追踪。详细实现见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md#14-实现状态与重构边界)。
 
-模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；带行号的统一文档投影、按行替换/删除/插入及未来批注与引用元数据的设计见[文档处理设计](./文档处理设计.md)，尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
+模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；目标协议改为直接读取 CDM，并通过 Node ID 插入、替换内容、删除和移动节点，视觉行号不再属于文档协议，详见[文档处理设计](./文档处理设计.md)。该能力尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理项目指令的内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
 
 Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
@@ -843,7 +847,7 @@ interface DocumentIndexState {
 ### 18.1 单元测试
 
 - 项目路径和文件格式迁移。
-- 中文切块、稳定块 ID 和外部编辑匹配。
+- 中文切块、稳定 CDM Node ID 和外部编辑匹配。
 - 权威排序、RRF、上下文预算和去重。
 - 关系图遍历、时间有效性和循环限制。
 - Git 修改、命名版本、恢复和反向修改。
@@ -908,7 +912,7 @@ v0.2 在此基础上增加：
 - v0.2 使用 Electron + React + TypeScript 构建桌面产品。
 - electron-vite 构建，electron-builder 打包。
 - TipTap / ProseMirror 编辑器。
-- Markdown/JSON 事实源，SQLite 知识与运行中心。
+- CDM、领域 JSON 和原始附件作为目标事实源，SQLite 作为知识与运行中心；当前 Markdown/TXT 等待明确过渡方案。
 - 每项目独立 SQLite，个人资料库独立 SQLite。
 - Git 对用户隐藏，使用 isomorphic-git。
 - 自研 TypeScript RAG 薄层。
@@ -931,7 +935,7 @@ v0.2 在此基础上增加：
 - 按句子接受或恢复 Diff。
 - 自动重写 Git 历史的永久清除。
 - 同一 Project 内跨 Conversation 历史查询的 Tool、触发条件、检索范围、权限、Schema 和权威规则。
-- 数字及汉字/英文以外文字的字数规则、整篇统计展示范围和 `cleodoc-richtext-v1` 最终格式。
+- 数字及汉字/英文以外文字的字数规则、整篇统计展示范围和 CDM 可见文本提取规则。
 
 ## 21. 外部参考
 
