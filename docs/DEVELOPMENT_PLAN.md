@@ -1,7 +1,7 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.8 已完成，本地文档 Tool Loop 已提前交付
-> 日期：2026-08-03
+> 状态：实施中；v0.1 步骤 1–5.8 已完成，步骤 6 的 CDM 最小 Core 已交付
+> 日期：2026-08-08
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
 
@@ -40,8 +40,9 @@ v0.1 的核心闭环是：
 | 5.7 数据库原生项目指令 | 已完成 | 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及无文件快照的 Session Schema |
 | 5.8 统一 Tool 契约 | 已完成 | 独立 Tool Class、Schema 推导类型、整数版本、Catalog 按需加载、退出前授权、两阶段历史精读和自有压缩投影 |
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、版本化 Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
+| 6a. CDM 最小 Core | 已完成 | 严格 XML、`draft-1` Schema、Node/Mark 校验、10 位 Node ID、基础序列化和树遍历 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 6–8、9b–10 | 未开始 | FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
+| 6b–8、9b–10 | 未开始 | TXT/Markdown 解析、切片、FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -370,6 +371,8 @@ CLI 命令：
 ### 步骤 6：统一知识模型与 FTS5
 
 统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、结构切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、External Content FTS 和检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+
+实施状态：CDM 最小 Core 已完成，使用明确标识为非正式 v1 的 `draft-1` 配置提供严格 XML 解析、Schema 校验、Node ID、基础序列化和树遍历。TXT/Markdown Document Ingestion、Chunk、FTS 与索引状态尚未实现。
 
 工作内容：
 

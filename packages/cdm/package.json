@@ -1,0 +1,9 @@
+{
+  "name": "@cleodoc/cdm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "saxes": "^6.0.0"
+  }
+}

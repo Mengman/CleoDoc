@@ -70,10 +70,12 @@ GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中�
 apps/cli             v0.1 命令入口
 apps/desktop         v0.2 Electron 应用
 packages/contracts   公共类型、Schema、错误码
+packages/cdm         CDM 协议、严格 XML、Schema、Node ID 和遍历
+packages/document-ingestion TXT/Markdown、临时 CDM、结构切片和 ChunkDraft
 packages/project     项目格式和安全文件读写
 packages/database    SQLite、当前 Schema 基线和 Repository
 packages/knowledge   资料与知识模型
-packages/rag         摄取、检索、融合和上下文组装
+packages/rag         Chunk/Source、FTS、Embedding、检索、融合和上下文组装
 packages/agent       LLM Tool Loop；v0.2 扩展持久化工作流
 packages/model-providers
 packages/versioning  v0.2
@@ -96,6 +98,10 @@ packages/diff        v0.2
 ## 5. RAG 实现规则
 
 采用自研的薄 RAG 编排层，不让 LangChain.js 或 LlamaIndex.TS 的内部对象成为领域模型或存储格式。
+
+- `packages/cdm` 是不依赖 Project、Database、RAG、Agent、Electron、DOM 或 TipTap 的叶子协议包。
+- Document Ingestion 依赖 CDM 和 RAG Contracts，输出纯文本 `ChunkDraft`，但不访问 SQLite。
+- RAG Core 从 `ChunkDraft` 开始工作，不解析或持久化 CDM；CleoDoc 业务代码通过 `RagService` 使用 RAG，不直接访问其内部 Repository。
 
 v0.1 检索路径为：
 

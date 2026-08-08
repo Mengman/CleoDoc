@@ -1,6 +1,6 @@
 # CleoDoc Document Model（CDM）设计
 
-状态：基础方向已确认，详细 Schema 待继续讨论
+状态：基础方向已确认；最小 CDM Core 已实现，正式 v1 Schema 待继续讨论
 
 更新日期：2026-08-08
 
@@ -431,3 +431,18 @@ flowchart TD
 - 发送局部 CDM 给 LLM 时的片段外壳和定位信息。
 - CDM 文件扩展名、MIME 类型和确定性序列化规则。
 - CDM 与当前 Markdown 项目文档的过渡方式。
+- 导入资料的临时 CDM 使用随机 Node ID 时，“相同输入产生相同规范化 CDM”的比较是否排除 ID；Document Ingestion 实现前必须明确，不能让临时 ID 影响 Chunk 的确定性。
+
+### 11.3 当前实现边界
+
+`packages/cdm` 已实现不依赖 Project、Database、RAG、Agent、Electron、DOM 或 TipTap 的最小 CDM Core：
+
+- 使用严格 XML 解析器读取单根 XML，拒绝结构错误、DOCTYPE、自定义实体入口、XML 注释和处理指令；文档批注只能使用 CDM `<comment>`。
+- 提供 CDM 树类型、解析、确定性基础序列化、树遍历、按 Node ID 查找和等同于 XML `textContent` 的文字提取。
+- 提供 10 位小写 Crockford Base32 Node ID 的格式校验、加密随机生成、当前文档内碰撞重试和缺失 ID 批量补齐。
+- 提供显式标签/属性白名单、Node/Mark、父子关系、必需属性、ID 格式和文档内唯一性校验。
+- 校验与 ID 补齐只返回新的内存文档树，不负责文件路径、Revision、原子写入、Tool 审批或数据库操作。
+
+当前内置 Schema 名为 `draft-1`，只用于支持已经确认的结构和后续 TXT/Markdown 解析开发，不能被称为正式 CDM v1。它暂时采用示例中的 `<document version="1">` 外壳，并纳入当前已确认的书籍、文章、标题、段落、列表、引用、代码、表格和基础 Mark；正式根元素、完整标签表和嵌套规则确认后允许不兼容调整。
+
+`draft-1` 暂不接受 `style`。这是因为安全样式属性和值的白名单仍未确认，并不表示 CDM 放弃样式能力。`<comment>` 和 `<reference>` 当前只实现已经确认的最小属性约束；其最终锚点和嵌套语义仍属于待讨论范围。
