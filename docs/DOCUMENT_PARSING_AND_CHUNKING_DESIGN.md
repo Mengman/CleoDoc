@@ -1,6 +1,6 @@
 # CleoDoc 资料解析与切片设计
 
-状态：TXT/Markdown 解析已实现；结构切片、Chunk 入库和索引尚未实现
+状态：TXT/Markdown 解析及资料导入连接已实现；结构切片、Chunk 入库和索引尚未实现
 
 更新日期：2026-08-08
 
@@ -10,16 +10,17 @@
 
 v0.1 只解析：
 
-- UTF-8 TXT 纯文本。
-- Markdown 文档。
+- UTF-8、GB2312、GBK 或 GB18030 编码的 TXT 纯文本。
+- 上述编码的 Markdown 文档。
 
 PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围。对应格式需要页码、文档节点、DOM、坐标或时间范围等不同的来源定位模型，等真实需求进入版本范围后再设计。
 
 当前处理闭环为：
 
 ```text
-原始 TXT/Markdown
-→ 计算原始资料 Hash
+外部 TXT/Markdown 字节
+→ BOM / 严格 UTF-8 / GB18030 顺序检测并解码
+→ 统一写为项目内 UTF-8 资料副本并计算 Hash
 → 解析为临时 CDM
 → 依据 CDM 结构选择切片边界
 → 提取纯文本与原文字节范围
@@ -27,17 +28,17 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 → 可选保留临时 CDM 用于开发期 Debug
 ```
 
-当前 `packages/document-ingestion` 已完成从原始 UTF-8 TXT/Markdown 到临时 CDM、解析警告和 Node 原文字节范围的部分。它只返回内存结果，不读取项目目录、不访问 SQLite，也不自动写入 Debug 文件；Chunker 和 CleoDoc Application Service 后续消费该结果。
+当前 `packages/document-ingestion` 已完成从项目内 UTF-8 TXT/Markdown 到临时 CDM、解析警告和 Node 原文字节范围的部分。解析器本身只返回内存结果，不读取项目目录、不访问 SQLite，也不处理外部编码。CleoDoc `MaterialService` 在导入边界检测并解码 UTF-8、GB2312、GBK 或 GB18030，将内容统一为 UTF-8 后调用解析器，并把临时 CDM XML 写入 `.cleo/derived/documents/<source-id>.cdm.xml` 供开发期检查；Chunker 后续消费内存解析结果。
 
 ## 2. 数据职责
 
 ### 2.1 原始资料
 
-原始 TXT/Markdown 是导入事实源：
+导入后位于 `materials/` 的 UTF-8 TXT/Markdown 副本是项目事实源。用户选择的外部文件不会被修改，但 CleoDoc 不依赖其原路径继续存在：
 
 - 解析、切片或索引失败不能修改原件。
 - 数据库和索引损坏后可以重新读取原件生成。
-- 原件是否发生变化，以原始文件字节的 SHA-256 为准。
+- 项目副本是否发生变化，以其 UTF-8 字节的 SHA-256 为准。
 - 修改时间和文件大小只能用于快速检查，不能代替内容 Hash。
 
 ### 2.2 临时 CDM
@@ -55,7 +56,7 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 .cleo/derived/documents/<source-id>.cdm.xml
 ```
 
-该路径只是建议，真正实现可以调整，但必须保持“可删除、可重建、非运行必需”的语义。
+当前实现使用该路径。删除资料时同步删除对应临时 CDM；它仍保持“可删除、可重建、非运行必需”的语义。
 
 ### 2.3 Chunk
 
@@ -69,7 +70,7 @@ Chunk 是 SQLite 中的纯文本检索投影，不是 CDM 文档，也不是新�
 
 ## 3. Source Hash 与更新检测
 
-现有 `sources.content_hash` 保存原始文件字节的 SHA-256，`sources.index_status` 表示当前 Chunk 是否仍对应这份原件。
+现有 `sources.content_hash` 保存项目内规范化 UTF-8 资料副本的 SHA-256，`sources.index_status` 表示当前 Chunk 是否仍对应这份项目副本。不同输入编码解码为完全相同的 Unicode 内容时视为重复资料。
 
 检查资料时：
 
@@ -88,10 +89,10 @@ Chunk 是 SQLite 中的纯文本检索投影，不是 CDM 文档，也不是新�
 解析器负责：
 
 - 识别受支持格式。
-- 解码文本并报告编码错误。
+- 接收已经统一为 UTF-8 的文本；外部编码检测和解码由导入边界负责。
 - 恢复标题、段落、列表、引用、代码和表格结构。
 - 生成通过 CDM Schema 校验的临时 CDM。
-- 为结构节点保留其原始文件字节范围。
+- 为结构节点保留其项目内 UTF-8 资料副本字节范围。
 - 输出解析器版本、状态和警告。
 
 解析器不负责：
@@ -119,7 +120,7 @@ interface ParsedDocument {
 }
 ```
 
-`nodeRanges` 是本次解析任务的内存 Sidecar，通过临时 Node ID 连接 CDM Node 与原始文件字节范围。它不是 CDM 属性，也不进入长期 Chunk 或引用协议。临时 Node ID 仍按 CDM 规则随机生成；解析确定性比较忽略这些随机 ID，只比较结构、文字、警告、Node 顺序和字节范围。Chunk 内容与边界不得依赖随机 ID。
+`nodeRanges` 是本次解析任务的内存 Sidecar，通过临时 Node ID 连接 CDM Node 与项目内 UTF-8 资料副本的字节范围。它不是 CDM 属性，也不进入长期 Chunk 或引用协议。临时 Node ID 仍按 CDM 规则随机生成；解析确定性比较忽略这些随机 ID，只比较结构、文字、警告、Node 顺序和字节范围。Chunk 内容与边界不得依赖随机 ID。
 
 ## 5. 样式处理
 
@@ -154,16 +155,17 @@ interface ParsedDocument {
 
 ## 6. TXT 解析
 
-TXT 采用简单、确定的首版规则：
+外部 TXT 先按“BOM → 严格 UTF-8 → GB18030”的顺序检测；`gb2312` 和 `gbk` 显式选项统一交给 GB18030 兼容解码器。用户可以通过 `--encoding` 覆盖自动判断，项目副本始终写为 UTF-8。之后采用简单、确定的首版规则：
 
-- 连续空行分隔段落。
-- 普通文本块转换为 `<p>`。
+- 每个 `CRLF`、`LF` 或 `CR` 都是段落边界，每个非空文本行转换为独立 `<p>`。
+- 每行转换前移除首尾 Unicode 空白字符，包括普通空格、Tab、不换行空格和全角空格；行内空白保持不变。
+- 清理后为空的行只作为间隔，不生成空 `<p>`。
 - 不根据长度、数字或标点猜测标题。
 - 文件名可以成为 Source 标题，但不自动写入正文。
 - 无法解释的文字原样保留，不能静默丢失。
 - 相同输入、解析器版本和配置产生相同的文本结构。
 
-段落内部的单个 `CRLF`、`LF` 或 `CR` 统一为 CDM 文本中的 `LF`，不会合并成空格，也不会拆成多个 `<p>`；原始字节范围仍覆盖未规范化的原文。UTF-8 BOM 不进入 CDM 文字，但原文位置会计入 BOM 的 3 个字节。
+换行符本身不进入段落文字。`CRLF` 视为一个边界，`LF` 和 `CR` 各自视为一个边界；每个段落的字节范围只覆盖清理后保留的该行文字，不包含被移除的首尾空白或行尾换行符。字节范围对应项目内 UTF-8 资料副本。UTF-8 BOM 不进入项目副本，因此也不进入 CDM 文字或位置计算。
 
 ## 7. Markdown 解析
 
@@ -228,7 +230,7 @@ start_offset
 end_offset
 ```
 
-两者表示原始文件字节的左闭右开范围：
+两者表示项目内 UTF-8 资料副本字节的左闭右开范围：
 
 ```text
 [start_offset, end_offset)

@@ -523,7 +523,7 @@ flowchart LR
 4. 句子边界。
 5. 达到上限后强制拆分。
 
-正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、原始文件字节范围和 Chunker 版本；Source 表保存原始文件 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。
+正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、项目内 UTF-8 资料副本的字节范围和 Chunker 版本；Source 表保存该规范化副本的 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。
 
 ### 8.5 Embedding
 
@@ -996,7 +996,7 @@ v0.2 在此基础上增加：
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
-- 已实现：独立 `packages/document-ingestion`，将 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；不访问项目文件或 SQLite。
+- 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
 - 尚未实现：结构切片、统一知识 Chunk、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 

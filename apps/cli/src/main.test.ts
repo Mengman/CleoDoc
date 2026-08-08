@@ -298,6 +298,16 @@ describe("CleoDoc CLI", () => {
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
     )?.[0];
     expect(materialId).toBeDefined();
+    const derivedDocumentPath = path.join(
+      projectDirectory,
+      ".cleo",
+      "derived",
+      "documents",
+      `${materialId!}.cdm.xml`,
+    );
+    expect(added.stdout).toContain(`解析结果：.cleo/derived/documents/${materialId!}.cdm.xml`);
+    expect(await readFile(derivedDocumentPath, "utf8")).toContain("<h1");
+    expect(await readFile(derivedDocumentPath, "utf8")).toContain("末班车在午夜到站。");
 
     const duplicate = await runCli(["material", "add", inputFile], environment);
     expect(duplicate.exitCode).toBe(0);
@@ -328,10 +338,11 @@ describe("CleoDoc CLI", () => {
     const removed = await runCli(["material", "remove", materialId!], environment);
     expect(removed.exitCode).toBe(0);
     expect(removed.stdout).toContain("已删除资料：铁路历史资料");
+    await expect(readFile(derivedDocumentPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(runCli(["material", "show", materialId!], environment)).resolves.toMatchObject({
       exitCode: 3,
     });
-  });
+  }, 10_000);
 });
 
 async function runCli(

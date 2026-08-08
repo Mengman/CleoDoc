@@ -526,7 +526,7 @@ CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解�
 
 ### 12.1 复用并扩展现有 `sources`（规划）
 
-当前 Schema 已有 `sources` 表，字段和现状见 [6.6 `sources`](#66-sources)。RAG 不创建平行的 `knowledge_sources`；公开的 `source` 就是现有 `sources.id`，`sources.content_hash` 继续保存原始 UTF-8 资料字节的 SHA-256，`sources.size` 继续保存字节长度。
+当前 Schema 已有 `sources` 表，字段和现状见 [6.6 `sources`](#66-sources)。RAG 不创建平行的 `knowledge_sources`；公开的 `source` 就是现有 `sources.id`，`sources.content_hash` 继续保存项目内规范化 UTF-8 资料副本的 SHA-256，`sources.size` 继续保存该副本的字节长度。
 
 实现解析和索引状态时，计划向现有表增加：
 
@@ -535,7 +535,7 @@ CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解�
 | `parser_version` | TEXT | 可空 | 最近一次成功生成当前 Chunk 集合的解析器版本；尚未索引时为空。 |
 | `index_status` | TEXT | NOT NULL | `pending`、`ready`、`stale`、`failed` 等受控索引状态；最终枚举在实现前固定。 |
 
-当前实现的 `format` 已限制为 `text`、`markdown`，资料正文已经按 UTF-8 管理，因此 v0.1 不新增 `media_type` 或 `encoding` 字段。
+当前实现的 `format` 已限制为 `text`、`markdown`。外部文件可以是 UTF-8、GB2312、GBK 或 GB18030，但导入边界会统一转换为 UTF-8 项目副本；输入编码只作为本次导入诊断结果返回，不改变 Source 的长期内容语义，因此 v0.1 不新增 `media_type` 或 `encoding` 字段。
 
 `content_hash` 是判断原始资料是否变化的依据，并且不重复写入每个 Chunk。资料变更与索引更新必须避免“新 Hash 配旧 Chunk”：检测到变化后先将 `index_status` 标记为 `stale`；新解析和全部 Chunk 成功前，旧 Chunk 不能被认为拥有精确有效的位置。Source Hash、Chunk 集合与 FTS 的最终切换顺序必须由同一摄取服务协调。
 
@@ -550,8 +550,8 @@ CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解�
 | `source_id` | TEXT | NOT NULL, FOREIGN KEY | 关联现有 `sources.id`。Chunk 引用中的 `source` 必须与该字段一致。 |
 | `ordinal` | INTEGER | NOT NULL | Chunk 在同一 Source 中从零开始的稳定顺序。 |
 | `content` | TEXT | NOT NULL | 去除 CDM/XML 标签和 Markdown 格式后的规范化纯文本；不得拼入标题路径、来源 ID 或内部元数据。 |
-| `start_offset` | INTEGER | NOT NULL | 原始文件字节范围起点，使用左闭右开区间。 |
-| `end_offset` | INTEGER | NOT NULL | 原始文件字节范围终点，使用左闭右开区间。 |
+| `start_offset` | INTEGER | NOT NULL | 项目内 UTF-8 资料副本字节范围起点，使用左闭右开区间。 |
+| `end_offset` | INTEGER | NOT NULL | 项目内 UTF-8 资料副本字节范围终点，使用左闭右开区间。 |
 | `chunker_version` | TEXT | NOT NULL | 生成该 Chunk 的切片算法版本。 |
 | `created_at` | TEXT | NOT NULL | Chunk 创建时间。 |
 

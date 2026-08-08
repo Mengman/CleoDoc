@@ -155,10 +155,11 @@ npm run cleo -- document delete manuscript/notes.md
 
 ## 资料管理
 
-当前资料管理支持粘贴文本以及 UTF-8 编码的 TXT、Markdown 文件：
+当前资料管理支持粘贴文本以及 UTF-8、GB2312、GBK、GB18030 编码的 TXT、Markdown 文件。文件导入默认先严格检查 UTF-8，失败后尝试 GB18030；判断错误时可用 `--encoding` 明确指定：
 
 ```powershell
 npm run cleo -- material add .\references\railway.md --title "铁路资料" --source "地方志" --tags "历史,铁路"
+npm run cleo -- material add .\references\old-book.txt --encoding gb2312
 Get-Content .\notes.txt | npm run cleo -- material add --stdin --title "访谈笔记"
 npm run cleo -- material list
 npm run cleo -- material show <material-id>
@@ -166,7 +167,7 @@ npm run cleo -- material rename <material-id> "新标题"
 npm run cleo -- material remove <material-id>
 ```
 
-导入内容保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。SQLite 中的 `sources` 表是可重建投影；打开资料服务时会根据元数据校准。相同内容哈希只保留一份资料，即使文件名不同也不会重复导入。单份资料上限为 10 MiB。
+导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示本次识别的输入编码。导入成功后，开发期可检查的临时 CDM XML 写入 `.cleo/derived/documents/<资料 ID>.cdm.xml`；它是可删除、可重建的派生物，不是资料事实源。SQLite 中的 `sources` 表是可重建投影；打开资料服务时会根据元数据校准。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。
 
 ## 安全约束
 

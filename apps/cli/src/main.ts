@@ -24,7 +24,10 @@ import {
   type ModelProvider,
   type SavedDocument,
 } from "../../../packages/contracts/src/index.js";
-import { MaterialService } from "../../../packages/knowledge/src/index.js";
+import {
+  MaterialService,
+  parseMaterialEncodingLabel,
+} from "../../../packages/knowledge/src/index.js";
 import { createProvider, providerCatalog } from "../../../packages/model-providers/src/index.js";
 import {
   ConfigService,
@@ -251,7 +254,7 @@ async function documentCommand(parsed: ParsedArguments): Promise<void> {
 
 async function materialCommand(parsed: ParsedArguments): Promise<void> {
   const [subcommand, reference, value] = parsed.positionals;
-  assertOnlyOptions(parsed, ["project", "stdin", "title", "source", "tags", "format"]);
+  assertOnlyOptions(parsed, ["project", "stdin", "title", "source", "tags", "format", "encoding"]);
   const root = await resolveProjectRoot(optionString(parsed, "project"));
   const materials = await MaterialService.open(root);
   try {
@@ -262,12 +265,16 @@ async function materialCommand(parsed: ParsedArguments): Promise<void> {
         const sourceLabel = optionString(parsed, "source");
         const tags = parseTags(optionString(parsed, "tags"));
         const requestedFormat = optionString(parsed, "format");
+        const requestedEncoding = optionString(parsed, "encoding");
         if (fromStdin) {
           if (reference !== undefined || parsed.positionals.length !== 1) {
             throw new AppError("VALIDATION_ERROR", "用法：cleo material add --stdin [选项]");
           }
           if (requestedFormat !== undefined && !["text", "markdown"].includes(requestedFormat)) {
             throw new AppError("VALIDATION_ERROR", "--format 只能是 text 或 markdown。");
+          }
+          if (requestedEncoding !== undefined) {
+            throw new AppError("VALIDATION_ERROR", "--encoding 当前只用于文件导入。");
           }
           const result = await materials.addText(await readStandardInput(), {
             ...(title === undefined ? {} : { title }),
@@ -290,6 +297,9 @@ async function materialCommand(parsed: ParsedArguments): Promise<void> {
           ...(title === undefined ? {} : { title }),
           ...(sourceLabel === undefined ? {} : { sourceLabel }),
           ...(tags.length === 0 ? {} : { tags }),
+          ...(requestedEncoding === undefined
+            ? {}
+            : { encoding: parseMaterialEncodingLabel(requestedEncoding) }),
         });
         printMaterialImported(result);
         return;
@@ -381,6 +391,10 @@ function printMaterialImported(result: Awaited<ReturnType<MaterialService["addTe
     `${result.created ? "已添加资料" : "资料已存在，未重复导入"}：${result.source.title}\n`,
   );
   output.write(`资料 ID：${result.source.id}\n路径：${result.source.relativePath}\n`);
+  output.write(`输入编码：${result.inputEncoding}\n`);
+  if (result.created) {
+    output.write(`解析结果：.cleo/derived/documents/${result.source.id}.cdm.xml\n`);
+  }
   output.write(`内容哈希：${result.source.contentHash}\n`);
 }
 

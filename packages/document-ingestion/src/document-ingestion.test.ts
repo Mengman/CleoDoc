@@ -6,7 +6,7 @@ import type { CdmDocument, CdmRandomBytes } from "@cleodoc/cdm";
 import { DocumentIngestionError, parseDocument } from "./index.js";
 
 describe("TXT document ingestion", () => {
-  it("parses paragraphs, preserves single line breaks and records UTF-8 byte ranges", () => {
+  it("treats every non-empty line as a paragraph and records UTF-8 byte ranges", () => {
     const text = "第一段第一行\r\n第二行\r\n \t\r\n第二段🙂";
     const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, "utf8")]);
     const result = parseDocument(
@@ -17,16 +17,30 @@ describe("TXT document ingestion", () => {
 
     expect(result.status).toBe("ok");
     expect(result.sourceByteLength).toBe(bytes.byteLength);
-    expect(paragraphs.map(getCdmTextContent)).toEqual(["第一段第一行\n第二行", "第二段🙂"]);
+    expect(paragraphs.map(getCdmTextContent)).toEqual(["第一段第一行", "第二行", "第二段🙂"]);
     expect(rangeFor(result, paragraphs[0]!.attributes.id!)).toEqual({
       startOffset: 3,
-      endOffset: 3 + Buffer.byteLength("第一段第一行\r\n第二行", "utf8"),
+      endOffset: 3 + Buffer.byteLength("第一段第一行", "utf8"),
     });
+    const secondLineStart = 3 + Buffer.byteLength("第一段第一行\r\n", "utf8");
     expect(rangeFor(result, paragraphs[1]!.attributes.id!)).toEqual({
+      startOffset: secondLineStart,
+      endOffset: secondLineStart + Buffer.byteLength("第二行", "utf8"),
+    });
+    expect(rangeFor(result, paragraphs[2]!.attributes.id!)).toEqual({
       startOffset: bytes.indexOf(Buffer.from("第二段", "utf8")),
       endOffset: bytes.byteLength,
     });
     expect(validateCdm(result.cdm, cdmDraftSchema)).toEqual([]);
+  });
+
+  it("recognizes LF, CR and CRLF as paragraph boundaries", () => {
+    const result = parseDocument(
+      { format: "text", content: "甲\n乙\r丙\r\n丁" },
+      { randomSource: createRandomSource(7) },
+    );
+
+    expect(elementsNamed(result.cdm, "p").map(getCdmTextContent)).toEqual(["甲", "乙", "丙", "丁"]);
   });
 
   it("marks whitespace-only material as having no visible content", () => {
@@ -131,6 +145,26 @@ const value = 1;
       "RAW_HTML_PRESERVED_AS_TEXT",
       "IMAGE_REDUCED_TO_ALT_TEXT",
     ]);
+  });
+
+  it("trims Unicode whitespace around each line without changing inner whitespace", () => {
+    const text = " \t　第一 段  \r\n　\t第二段　";
+    const result = parseDocument(
+      { format: "text", content: text },
+      { randomSource: createRandomSource(8) },
+    );
+    const paragraphs = elementsNamed(result.cdm, "p");
+
+    expect(paragraphs.map(getCdmTextContent)).toEqual(["第一 段", "第二段"]);
+    expect(rangeFor(result, paragraphs[0]!.attributes.id!)).toEqual({
+      startOffset: Buffer.byteLength(" \t　", "utf8"),
+      endOffset: Buffer.byteLength(" \t　第一 段", "utf8"),
+    });
+    const secondStart = Buffer.byteLength(" \t　第一 段  \r\n　\t", "utf8");
+    expect(rangeFor(result, paragraphs[1]!.attributes.id!)).toEqual({
+      startOffset: secondStart,
+      endOffset: secondStart + Buffer.byteLength("第二段", "utf8"),
+    });
   });
 
   it("resolves reference links without emitting definition text", () => {

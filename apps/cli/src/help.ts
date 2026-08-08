@@ -31,6 +31,7 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo document delete <document-id|path> [--project <directory>]
 
   cleo material add <file> [--title <标题>] [--source <来源>] [--tags <标签列表>]
+    [--encoding <utf-8|gb2312|gbk|gb18030>]
   cleo material add --stdin [--title <标题>] [--format <text|markdown>]
   cleo material list [--project <directory>]
   cleo material show <material-id> [--project <directory>]

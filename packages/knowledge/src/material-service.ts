@@ -14,22 +14,29 @@ import {
   knowledgeSourceSchema,
 } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
+import { parseDocument } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
   resolveInsideProject,
   writeFileAtomic,
   writeJsonAtomic,
 } from "../../project/src/index.js";
+import { decodeMaterialText } from "./text-decoding.js";
+import type { MaterialInputEncoding } from "./text-decoding.js";
 
 const MAX_MATERIAL_BYTES = 10 * 1024 * 1024;
 
-export interface AddFileMaterialOptions {
+interface MaterialMetadataOptions {
   title?: string;
   sourceLabel?: string;
   tags?: readonly string[];
 }
 
-export interface AddTextMaterialOptions extends AddFileMaterialOptions {
+export interface AddFileMaterialOptions extends MaterialMetadataOptions {
+  encoding?: MaterialInputEncoding;
+}
+
+export interface AddTextMaterialOptions extends MaterialMetadataOptions {
   format?: "text" | "markdown";
 }
 
@@ -73,11 +80,12 @@ export class MaterialService {
       throw new AppError("VALIDATION_ERROR", "只能导入 TXT 或 Markdown 文件。");
     }
     const format = materialFormatFromPath(absoluteInputPath);
-    const content = await readUtf8Text(absoluteInputPath);
+    const decoded = await readMaterialFile(absoluteInputPath, options.encoding);
     const originalFileName = path.basename(absoluteInputPath);
-    return await this.addContent(content, {
+    return await this.addContent(decoded.content, {
       origin: "file",
       format,
+      inputEncoding: decoded.inputEncoding,
       title: options.title ?? path.basename(originalFileName, path.extname(originalFileName)),
       sourceLabel: options.sourceLabel ?? originalFileName,
       originalFileName,
@@ -92,6 +100,7 @@ export class MaterialService {
     return await this.addContent(content, {
       origin: "paste",
       format: options.format ?? "text",
+      inputEncoding: "utf-8",
       title: options.title ?? defaultPastedTitle(),
       sourceLabel: options.sourceLabel ?? null,
       originalFileName: null,
@@ -136,16 +145,24 @@ export class MaterialService {
     const content = await this.readSourceContent(current.source);
     const sourcePath = await resolveInsideProject(this.projectRoot, current.source.relativePath);
     const metadataPath = await this.resolveMetadataPath(id);
+    const derivedDocumentPath = await this.resolveDerivedDocumentPath(id);
     const metadataContent = await readFile(metadataPath.absolutePath, "utf8");
+    const derivedDocumentContent = await readOptionalFile(derivedDocumentPath.absolutePath);
 
     await rm(metadataPath.absolutePath);
     try {
       await rm(sourcePath.absolutePath);
+      await rm(derivedDocumentPath.absolutePath, { force: true });
       await this.repository.remove(id);
       return current.source;
     } catch (error) {
       await writeFileAtomic(sourcePath.absolutePath, content).catch(() => undefined);
       await writeFileAtomic(metadataPath.absolutePath, metadataContent).catch(() => undefined);
+      if (derivedDocumentContent !== null) {
+        await writeFileAtomic(derivedDocumentPath.absolutePath, derivedDocumentContent).catch(
+          () => undefined,
+        );
+      }
       throw error;
     }
   }
@@ -159,6 +176,7 @@ export class MaterialService {
     input: {
       origin: KnowledgeSource["origin"];
       format: KnowledgeSource["format"];
+      inputEncoding: MaterialInputEncoding;
       title: string;
       sourceLabel: string | null;
       originalFileName: string | null;
@@ -170,9 +188,10 @@ export class MaterialService {
     const contentHash = hashContent(content);
     const duplicate = this.repository.findByContentHash(contentHash);
     if (duplicate !== null) {
-      return { source: duplicate, created: false };
+      return { source: duplicate, created: false, inputEncoding: input.inputEncoding };
     }
 
+    const parsedDocument = parseDocument({ format: input.format, content });
     const id = randomUUID();
     const extension = input.format === "markdown" ? "md" : "txt";
     const relativePath = `materials/${id}.${extension}`;
@@ -196,15 +215,18 @@ export class MaterialService {
     });
     const sourcePath = await resolveInsideProject(this.projectRoot, source.relativePath);
     const metadataPath = await this.resolveMetadataPath(id);
+    const derivedDocumentPath = await this.resolveDerivedDocumentPath(id);
 
     await writeFileAtomic(sourcePath.absolutePath, content);
     try {
       await writeJsonAtomic(metadataPath.absolutePath, source);
+      await writeFileAtomic(derivedDocumentPath.absolutePath, `${parsedDocument.cdmXml}\n`);
       await this.repository.upsert(source);
-      return { source, created: true };
+      return { source, created: true, inputEncoding: input.inputEncoding };
     } catch (error) {
       await rm(sourcePath.absolutePath, { force: true }).catch(() => undefined);
       await rm(metadataPath.absolutePath, { force: true }).catch(() => undefined);
+      await rm(derivedDocumentPath.absolutePath, { force: true }).catch(() => undefined);
       throw error;
     }
   }
@@ -259,7 +281,7 @@ export class MaterialService {
   private async readSourceContent(source: KnowledgeSource): Promise<string> {
     const resolved = await resolveInsideProject(this.projectRoot, source.relativePath);
     try {
-      return await readUtf8Text(resolved.absolutePath);
+      return await readStoredUtf8Text(resolved.absolutePath);
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
@@ -273,18 +295,41 @@ export class MaterialService {
   private async resolveMetadataPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `sources/metadata/${id}.json`);
   }
+
+  private async resolveDerivedDocumentPath(id: string) {
+    return await resolveInsideProject(this.projectRoot, `.cleo/derived/documents/${id}.cdm.xml`);
+  }
 }
 
 async function ensureMaterialDirectories(projectRoot: string): Promise<void> {
   const materials = await resolveInsideProject(projectRoot, "materials");
   const metadata = await resolveInsideProject(projectRoot, "sources/metadata");
+  const derivedDocuments = await resolveInsideProject(projectRoot, ".cleo/derived/documents");
   await Promise.all([
     mkdir(materials.absolutePath, { recursive: true }),
     mkdir(metadata.absolutePath, { recursive: true }),
+    mkdir(derivedDocuments.absolutePath, { recursive: true }),
   ]);
 }
 
-async function readUtf8Text(filePath: string): Promise<string> {
+async function readOptionalFile(filePath: string): Promise<string | null> {
+  return await readFile(filePath, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  });
+}
+
+async function readMaterialFile(filePath: string, requestedEncoding?: MaterialInputEncoding) {
+  const content = await readFile(filePath);
+  if (content.byteLength > MAX_MATERIAL_BYTES) {
+    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 10 MiB。");
+  }
+  return decodeMaterialText(content, requestedEncoding);
+}
+
+async function readStoredUtf8Text(filePath: string): Promise<string> {
   const content = await readFile(filePath);
   if (content.byteLength > MAX_MATERIAL_BYTES) {
     throw new AppError("VALIDATION_ERROR", "单份资料不能超过 10 MiB。");
@@ -292,7 +337,9 @@ async function readUtf8Text(filePath: string): Promise<string> {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(content);
   } catch (error) {
-    throw new AppError("VALIDATION_ERROR", "资料必须是有效的 UTF-8 文本。", { cause: error });
+    throw new AppError("VALIDATION_ERROR", "项目内资料副本必须是有效的 UTF-8 文本。", {
+      cause: error,
+    });
   }
 }
 

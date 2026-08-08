@@ -30,4 +30,5 @@ export interface MaterialWithContent {
 export interface MaterialImportResult {
   source: KnowledgeSource;
   created: boolean;
+  inputEncoding: "utf-8" | "gb18030";
 }

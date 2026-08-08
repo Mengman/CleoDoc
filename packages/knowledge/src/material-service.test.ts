@@ -52,12 +52,48 @@ describe("MaterialService", () => {
         ),
       ) as { contentHash: string };
       expect(metadata.contentHash).toBe(imported.source.contentHash);
+      const derivedCdm = await readFile(
+        path.join(project.root, ".cleo", "derived", "documents", `${imported.source.id}.cdm.xml`),
+        "utf8",
+      );
+      expect(derivedCdm).toContain("<h1");
+      expect(derivedCdm).toContain("铁路资料");
+      expect(derivedCdm).toContain("夜间列车使用煤油灯。");
 
       const duplicatePath = path.join(directory, "copy.md");
       await writeFile(duplicatePath, "# 铁路资料\n\n夜间列车使用煤油灯。\n", "utf8");
       const duplicate = await service.addFile(duplicatePath);
-      expect(duplicate).toEqual({ source: imported.source, created: false });
+      expect(duplicate).toEqual({
+        source: imported.source,
+        created: false,
+        inputEncoding: "utf-8",
+      });
       expect(await service.list()).toHaveLength(1);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("detects GB2312-compatible files and stores a normalized UTF-8 project copy", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const inputPath = path.join(directory, "旧城资料.md");
+    await writeFile(
+      inputPath,
+      Buffer.from("2320d6d0cec4d7cac1cf0a0abec9b3c7b3b5d5bea1a30a", "hex"),
+    );
+    const service = await MaterialService.open(project.root);
+
+    try {
+      const imported = await service.addFile(inputPath);
+      expect(imported.inputEncoding).toBe("gb18030");
+      expect((await service.get(imported.source.id)).content).toBe("# 中文资料\n\n旧城车站。\n");
+      expect(
+        await readFile(
+          path.join(project.root, ".cleo", "derived", "documents", `${imported.source.id}.cdm.xml`),
+          "utf8",
+        ),
+      ).toContain("旧城车站。");
     } finally {
       await service.close();
     }
@@ -90,6 +126,12 @@ describe("MaterialService", () => {
       });
       await expect(
         readFile(path.join(project.root, "sources", "metadata", `${materialId}.json`), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        readFile(
+          path.join(project.root, ".cleo", "derived", "documents", `${materialId}.cdm.xml`),
+          "utf8",
+        ),
       ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await service.close();

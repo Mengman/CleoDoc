@@ -10,38 +10,26 @@ interface SourceLine {
 }
 
 export function parseTextBlocks(source: Utf8Source, builder: IngestionCdmBuilder): CdmElement[] {
-  const blocks: CdmElement[] = [];
-  let paragraphStart: number | undefined;
-  let paragraphEnd = 0;
-  let paragraphLines: string[] = [];
-
-  for (const line of readLines(source.text)) {
-    if (/^[\t ]*$/.test(line.content)) {
-      flushParagraph();
-      continue;
-    }
-    paragraphStart ??= line.start;
-    paragraphEnd = line.contentEnd;
-    paragraphLines.push(line.content);
-  }
-  flushParagraph();
-  return blocks;
-
-  function flushParagraph(): void {
-    if (paragraphStart === undefined) {
-      return;
-    }
-    blocks.push(
+  return readLines(source.text)
+    .map(trimLine)
+    .filter((line): line is SourceLine => line !== null)
+    .map((line) =>
       builder.node(
         "p",
-        [builder.text(paragraphLines.join("\n"))],
-        source.rangeFromTextOffsets(paragraphStart, paragraphEnd),
+        [builder.text(line.content)],
+        source.rangeFromTextOffsets(line.start, line.contentEnd),
       ),
     );
-    paragraphStart = undefined;
-    paragraphEnd = 0;
-    paragraphLines = [];
+}
+
+function trimLine(line: SourceLine): SourceLine | null {
+  const withoutLeadingWhitespace = line.content.trimStart();
+  const content = withoutLeadingWhitespace.trimEnd();
+  if (content.length === 0) {
+    return null;
   }
+  const start = line.start + line.content.length - withoutLeadingWhitespace.length;
+  return { start, contentEnd: start + content.length, content };
 }
 
 function readLines(text: string): SourceLine[] {

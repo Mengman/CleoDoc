@@ -86,7 +86,7 @@ interface KnowledgeChunk {
 这里：
 
 - `content` 只能是规范化纯文本，不含 CDM、XML、Markdown 或标题路径。
-- `startOffset`、`endOffset` 是当前 TXT/Markdown 原始文件的连续字节范围。
+- `startOffset`、`endOffset` 是项目内规范化 UTF-8 TXT/Markdown 资料副本的连续字节范围。
 - Source Hash 保存在现有 `sources` 表，不重复进入每个 Chunk。
 - 临时 CDM 和 Node ID 不进入 RAG 公共类型，也不参与长期引用回溯。
 - `chunk_rowid` 可以在数据库内部关联 FTS 和向量，但不能出现在 Tool Result 或 CDM 中。
@@ -365,7 +365,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 不跨章节错误拼接，不在普通情况下截断句子或连续对话。
 - 同一输入和同一配置生成相同 Chunk。
 - `content` 只包含纯文本，不保存 CDM、Markdown、Node ID 或标题路径。
-- 每个 Chunk 对应原始资料中的一个连续字节范围。
+- 每个 Chunk 对应项目内规范化 UTF-8 资料副本中的一个连续字节范围。
 - Chunk 可以从原始资料重新解析和切片，不需要 Chunk 文件或持久化 CDM。
 
 ### 检索

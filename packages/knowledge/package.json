@@ -2,5 +2,8 @@
   "name": "@cleodoc/knowledge",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@cleodoc/document-ingestion": "0.1.0"
+  }
 }
