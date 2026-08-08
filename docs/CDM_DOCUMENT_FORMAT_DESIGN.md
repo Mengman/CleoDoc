@@ -4,9 +4,9 @@
 
 更新日期：2026-08-08
 
-本文定义 CleoDoc 内部统一文档格式的基础方向。CDM 同时适用于导入资料、AI 生成内容和用户编写内容，并作为后续文档展示、编辑、检索、切块、版本比较与格式导出的共同上游。
+本文定义 CleoDoc 内部统一文档格式的基础方向。CDM 同时适用于导入资料的临时结构化解析、AI 生成内容和用户编写内容，并作为文档展示、编辑、切片、版本比较与格式导出的共同上游。
 
-本文只记录已经确认的原则。完整标签白名单、属性白名单、`<comment>` 与 `<reference>` 的最终结构、原文定位方式等尚未确认的内容，不在当前版本中提前定案。
+本文只记录已经确认的原则。完整标签白名单、属性白名单、`<comment>` 与 `<reference>` 的最终嵌套方式等尚未确认的内容，不在当前版本中提前定案。
 
 ## 1. 定位
 
@@ -14,14 +14,14 @@ CDM（CleoDoc Document Model）不是某一种外部文件格式的简单转写�
 
 CDM 应覆盖以下文档来源和使用场景：
 
-- PDF、DOCX、Markdown、TXT、网页快照等导入资料的解析结果。
+- TXT、Markdown 以及未来其他导入资料的临时解析结果。
 - AI 主笔创建的正文、草稿、大纲、设定和研究内容。
 - 用户在 CleoDoc 中创建或修改的文档。
 - 未来 GUI 编辑器和阅读器使用的文档模型。
-- 发送给 LLM 的正文、资料和检索证据。
-- Chunk、FTS、Embedding、Diff 和导出流程的输入。
+- 发送给 LLM 的原生正文和文档内容。
+- 结构切片、Diff 和导出流程的输入。
 
-不同来源的权威语义仍然不同：导入资料保留原始文件作为最高权威来源，CDM 是可以从原件重新生成的内部表达；AI 或用户在 CleoDoc 内创建的原生文档，则以 CDM 内容作为文档事实源。
+不同来源的权威语义仍然不同：导入资料保留原始文件作为最高权威来源，临时 CDM 可以在 Chunk 入库后删除，不属于长期检索或引用链路；AI 或用户在 CleoDoc 内创建的原生文档，则以 CDM 内容作为文档事实源。
 
 ## 2. 核心格式选择
 
@@ -197,7 +197,7 @@ CDM 标签分为两类：
 
 这里：
 
-- `id` 为 Node 提供可查找的稳定标识，可用于读取、编辑、引用、Diff、Chunk 来源和编辑器映射。
+- `id` 为 Node 提供可查找的稳定标识，可用于读取、编辑、引用、Diff、结构切片和编辑器映射；导入资料的长期 Chunk 回溯不保存临时 CDM Node ID。
 - `style` 表达基本文本样式。
 - HTML 原生属性能够准确表达需求时，CDM 优先沿用其名称和语义。
 - HTML 原生属性不够时，CDM 可以定义自己的扩展属性。
@@ -279,9 +279,44 @@ HTML 无法完整表达 CleoDoc 的文档业务语义，因此 CDM 允许增加�
 `<reference>` 与 HTML 的 `<cite>` 不等价：
 
 - `<cite>` 保留 HTML 中表示作品名称或引用作品标题的语义。
-- `<reference>` 用于连接 CleoDoc 管理的资料、证据及其具体来源位置。
+- `<reference>` 用于连接正式文档内容与 CleoDoc 管理的资料或文献。
 
-`<comment>` 是直接嵌入正文、附着到目标节点，还是集中存放在独立批注区域，目前尚未确认。`<reference>` 是包围被支持的文字，还是作为独立引用节点，目前也尚未确认。这些问题将在后续设计中单独确定。
+### 6.1 Reference 的三种来源
+
+当前确认三种引用场景：
+
+1. **LLM Chunk 引用**：LLM 使用 RAG 返回的具体 Chunk 写作，`<reference>` 同时包含 `source` 和 `chunk_id`。
+2. **LLM 文献引用**：LLM 只声明使用了某项文献，`<reference>` 只有 `source`，没有具体位置。
+3. **用户文献引用**：用户为自己或 LLM 的文字手动添加文献，格式同样只有 `source`；用户不需要知道 `chunk_id`。
+
+概念示例：
+
+```xml
+<reference
+  id="7k3m9qx2vc"
+  source="src_triton_guide"
+  chunk_id="chk_8r2v5x9m"
+>
+  Triton 提供了一种接近 Python 的 GPU 内核开发方式。
+</reference>
+```
+
+是否存在 `chunk_id` 直接区分引用目标，不增加额外的 `reference_type`：
+
+```text
+存在 chunk_id → Chunk 引用
+不存在 chunk_id → 文献引用
+```
+
+在 Chunk 引用中，`source` 是公开的导入资料标识，`chunk_id` 是公开的 Chunk 标识；两者都不能是 SQLite Row ID。数据库中的 Chunk 再通过自己的 `start_offset` 和 `end_offset` 定位原始 TXT/Markdown。正式引用不依赖导入阶段的临时 CDM、CDM Node ID 或原始文件绝对路径。
+
+在文献引用中，`source` 表示文献名称或未来的公开文献条目。它只建立文献级联系，不承诺能够定位到某个原文范围。
+
+引用由用户还是 LLM 创建，不由模型填写属性声明，而是由 CleoDoc 的文档变更记录判断。`source`、`chunk_id` 等模型输出仍是不可信输入；CleoDoc 必须检查 Source、Chunk、项目范围和归属关系。无法解析或相互不匹配的引用可以保留在正式文档中，但必须标记为无效，不能静默删除、替换或伪装为已验证引用。
+
+数据库关系有效也不代表引用在语义上支持当前文字。语义检查由用户主动发起；未来 GUI 可以提供“引用修复”，让 LLM 根据当前文字和候选 Chunk 提出修复建议，再由用户确认或手动更正。
+
+`<comment>` 是直接嵌入正文、附着到目标节点，还是集中存放在独立批注区域，目前尚未确认。`<reference>` 已确认属性语义，但究竟包围被支持的文字，还是作为文字后的独立节点，仍需在正式 Schema 中确定。
 
 ## 7. 与 LLM 的关系
 
@@ -315,22 +350,23 @@ CDM → TipTap Node/Mark → 用户编辑 → CDM
 
 ```mermaid
 flowchart TD
-    SOURCE["PDF / DOCX / Markdown / TXT / 网页快照"] --> PARSER["格式解析器"]
-    PARSER --> CDM["CDM XML"]
-    AI["AI 主笔"] --> CDM
-    USER["用户编辑"] --> CDM
+    SOURCE["原始 TXT / Markdown"] --> PARSER["格式解析器"]
+    PARSER --> TEMP["临时 CDM"]
+    TEMP --> CHUNKER["结构切片与纯文本提取"]
+    CHUNKER --> CHUNK["SQLite 纯文本 Chunk"]
+    TEMP -. 可删除 .-> DEBUG["开发期解析 Debug"]
 
-    CDM --> VIEW["文档展示与 TipTap 编辑"]
-    CDM --> LLM["LLM 上下文"]
-    CDM --> CHUNK["结构化 Chunk"]
-    CDM --> DIFF["文档 Diff"]
-    CDM --> EXPORT["Markdown / TXT / DOCX / EPUB"]
-
-    CHUNK --> FTS["SQLite FTS5"]
-    CHUNK --> VECTOR["Embedding 与向量检索"]
+    AI["AI 主笔"] --> NATIVE["原生创作 CDM"]
+    USER["用户编辑"] --> NATIVE
+    NATIVE --> VIEW["文档展示与 TipTap 编辑"]
+    NATIVE --> LLM["LLM 文档上下文"]
+    NATIVE --> DIFF["文档 Diff"]
+    NATIVE --> EXPORT["Markdown / TXT / DOCX / EPUB"]
 ```
 
-Chunk、FTS 和 Embedding 都是从 CDM 生成的可重建投影，不反向成为文档事实源。展示层和编辑器也必须消费 CDM，不能建立另一套独立、无法往返的文档模型。
+对导入资料而言，CDM 只在解析与切片之间传递结构。Chunk 入库后只保存纯文本及独立来源字段，不保存 CDM 标签、Node ID 或片段；长期引用通过 Source、Chunk 和原文字节范围回溯，不经过临时 CDM。完整规则见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)。
+
+对 AI 和用户创作的原生文档而言，CDM 仍是展示、编辑、版本比较和导出的事实源，展示层与编辑器不能建立另一套无法往返的文档模型。
 
 ## 10. 当前示例
 
@@ -371,12 +407,14 @@ Chunk、FTS 和 Embedding 都是从 CDM 生成的可重建投影，不反向成�
 - 首版支持节点前后插入、删除、完整内容替换和同父节点前后移动。
 - 节点写入以文档 Revision 进行陈旧写入检查。
 - CDM 支持受控的基本文本样式。
+- 导入资料解析固定丢弃纯展示样式；该限制不删除原生创作文档使用样式 Mark 的能力。
 - HTML 原生标签和属性足够时优先直接采用。
 - HTML 语义不足时允许增加 CleoDoc 扩展。
 - 书籍使用 `<book>`、可选 `<volume>`、`<chapter>` 和 `<chapter-ref>` 表达逻辑结构；独立论文、新闻和专业文章使用 HTML `<article>`。
 - 书籍正文默认每个 Chapter 一个 CDM 文件，`book.cdm.xml` 保存逻辑层级和章节顺序；Volume 文件夹只是可选物理映射。
 - `<story>`、`<screenplay>` 和 `<series>` 暂不进入 CDM v1，等出现真实写作场景后再确定。
-- `<comment>` 和 `<reference>` 是当前明确提出的扩展方向。
+- `<comment>` 和 `<reference>` 是当前明确提出的扩展方向；`<reference>` 通过是否存在 `chunk_id` 区分 Chunk 引用与文献引用。
+- 导入资料的临时 CDM 可以在 Chunk 入库后删除；Chunk 只保存纯文本和独立来源字段，引用回溯不依赖临时 CDM 或其 Node ID。
 - CDM 内容直接作为 LLM 可见的文档协议，不转换成 JSON AST。
 - HTML 标签映射到 TipTap Node/Mark，CDM 扩展映射到 TipTap Custom Extension。
 
@@ -387,8 +425,7 @@ Chunk、FTS 和 Embedding 都是从 CDM 生成的可重建投影，不反向成�
 - 每种标签允许的 HTML 原生属性和 CleoDoc 扩展属性。
 - `style` 的安全属性白名单和规范化方式。
 - `<comment>` 的正文关系、锚点、重叠和生命周期。
-- `<reference>` 的来源标识、原文范围和展示方式。
-- PDF、DOCX 等导入资料的页码、坐标和解析警告如何表达。
+- `<reference>` 是包围被支持文字还是作为独立引用节点，以及无效引用在 CDM/数据库之间的状态投影方式。
 - CDM 文档与外部原始文件、资源和图片的关联方式。
 - `book.cdm.xml` 的最终文件名、`<chapter-ref>` 属性和公开文档引用格式。
 - 发送局部 CDM 给 LLM 时的片段外壳和定位信息。

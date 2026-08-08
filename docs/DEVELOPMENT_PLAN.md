@@ -369,13 +369,13 @@ CLI 命令：
 
 ### 步骤 6：统一知识模型与 FTS5
 
-统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；文档解析、结构优先切块、Chunk 存储和 External Content FTS 的统一设计见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、结构切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、External Content FTS 和检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
 工作内容：
 
-- 将当前正文和资料解析为通过 Schema 校验的 CDM，再从 CDM 生成 Chunk。
+- 将导入 TXT/Markdown 解析为通过 Schema 校验的临时 CDM，再生成带原文字节范围的纯文本 Chunk；临时 CDM 不进入长期检索链路。
 - 实现章节、段落和句子感知的增量切块。
-- 建立内容哈希和 `sourceRevision`。
+- 在 Source 上建立原始文件 SHA-256，Chunk 通过 `source_id`、`start_offset` 和 `end_offset` 回溯原件。
 - 使用 FTS5 trigram 建立中文全文索引。
 - 为标题、人名、别名和短专名建立精确字段索引。
 - 实现索引状态、失败重试和完整重建。
@@ -395,7 +395,7 @@ cleo search <query> --scope material
 - 正文和资料可以统一或分范围检索。
 - 修改单个文档只重建相关 Chunk。
 - 两字人物名可以通过精确索引命中。
-- 搜索结果包含文件、结构路径、revision 和原文片段。
+- 搜索结果包含公开 Source、Chunk ID、资料标题和纯文本片段，并能由 Core 回溯原文范围。
 
 ### 步骤 7：本地 Embedding 与向量检索
 
@@ -423,7 +423,7 @@ cleo search <query> --semantic
 
 - 模型下载完成后可以离线向量化和搜索。
 - Embedding 不阻塞 CLI 进度输出。
-- 过期 `sourceRevision` 的结果不会写入。
+- Source 已过期、Chunk 已被替换或输入内容已经变化的 Embedding 结果不会写入。
 - Embedding 失败时 FTS5 仍可使用。
 
 ### 步骤 8：混合 RAG

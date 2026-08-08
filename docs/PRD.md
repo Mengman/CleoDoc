@@ -160,14 +160,14 @@ Conversation 的原始消息、Session 摘要和临时讨论结论默认相互�
 
 ### 4.2 资料摄取与增量索引
 
-统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；原始资料、CDM、Chunk、FTS5、Embedding 和可替换向量后端的技术边界见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；资料解析和切片见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、FTS5、Embedding 和可替换向量后端见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-支持粘贴内容以及 TXT、Markdown、DOCX、PDF 和网页快照导入。
+v0.1 支持粘贴内容以及 TXT、Markdown 导入。DOCX、PDF、网页快照和其他格式等进入对应版本范围后再设计来源定位与解析规则。
 
 处理流水线：
 
 1. 解析正文、标题、段落、表格和来源元数据。
-2. 根据章节、场景、段落和语义边界切块，保留结构路径。
+2. 使用临时 CDM 识别结构边界，生成只含纯文本和原文字节范围的 Chunk；临时 CDM 可以在入库后删除。
 3. 通过内容哈希去重，仅更新发生变化的块。
 4. 写入 SQLite FTS5 中文全文索引。
 5. 使用本地 ONNX 嵌入模型生成向量。
@@ -404,7 +404,7 @@ MyNovel.cleo/
 ## 8. 核心公共类型
 
 - `KnowledgeSource`：原始文件、网页快照、来源、作用域和版本。
-- `KnowledgeChunk`：结构路径、文本、向量、哈希、实体标注和访问范围。
+- `KnowledgeChunk`：公开 Chunk ID、来源、顺序、纯文本和当前格式对应的原文范围；向量和索引信息使用独立投影。
 - `CanonFact`：事实声明、权威等级、状态、时间范围和证据。
 - `Entity`、`Relation`、`StoryEvent`：实体、关系和时间事件图。
 - `KnowledgeCandidate`：尚未确认的自动抽取事实或关系。

@@ -377,7 +377,7 @@ Agent
 - 正式发布后的内容表和运行表执行带备份的前向迁移；索引表允许丢弃后重建。
 - 项目打开时执行轻量 `quick_check`，异常时进入只读恢复模式。
 - 备份必须使用 Backup API 或 `VACUUM INTO`，不能只复制打开中的主数据库文件。
-- `rebuild-index` 从 CDM、领域 JSON 和原始附件重建 Chunk、FTS、Embedding 和关系投影；过渡期同时读取当前 Markdown/TXT 事实文件。
+- `rebuild-index` 从原生创作 CDM、领域 JSON 和导入原始资料重建 Chunk、FTS、Embedding 和关系投影；导入资料的临时 CDM 不是重建前提。
 
 ### 7.5 v0.1 资料事实源与投影
 
@@ -416,14 +416,14 @@ interface ContextAssembler {
 
 ### 8.2 摄取流水线
 
-统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；文档格式解析、CDM、Chunk、FTS5、Embedding 和向量后端的完整边界见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。CleoDoc 自己拥有解析管线与稳定内部格式；第三方低层格式库不得成为领域模型或持久化格式。
+统一内部文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、纯文本切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；FTS5、Embedding 和向量后端见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
 ```mermaid
 flowchart LR
-    SOURCE["文件或粘贴内容"] --> PARSE["CleoDoc 解析器"]
-    PARSE --> CDM["CDM XML"]
-    CDM --> CHUNK["结构化切块"]
-    CHUNK --> SQLITE["Chunks"]
+    SOURCE["TXT / Markdown"] --> PARSE["CleoDoc 解析器"]
+    PARSE --> CDM["临时 CDM"]
+    CDM --> CHUNK["结构切片与纯文本提取"]
+    CHUNK --> SQLITE["纯文本 Chunks"]
     SQLITE --> FTS["FTS5"]
     SQLITE --> EMBED["本地 Embedding"]
     SQLITE --> EXTRACT["实体与事实抽取"]
@@ -441,7 +441,7 @@ flowchart LR
 4. 句子边界。
 5. 达到上限后强制拆分。
 
-正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。每个 Chunk 保存 `sourceRevision`、结构路径、块 ID、内容哈希、权威等级和实体标注。
+正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、原始文件字节范围和 Chunker 版本；Source 表保存原始文件 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。
 
 ### 8.3 Embedding
 

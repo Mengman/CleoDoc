@@ -512,9 +512,9 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ## 12. 尚未实现的数据库范围
 
-以下结构尚未进入当前 Schema 基线，当前文档不预先固定最终结构：
+以下结构尚未进入当前 Schema 基线。资料 Source、纯文本 Chunk 和 External Content FTS 的字段语义已经确认，可以作为下一次 Schema 评审的输入；其他能力仍不预先固定最终结构：
 
-- 统一文档、稳定 CDM Node 和 Chunk。
+- 导入资料、纯文本 Chunk 和资料 FTS。
 - 作品/资料 FTS、本地 Embedding、模型版本和索引代次。
 - RetrievalRun、ContextManifest 及证据项。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
@@ -522,7 +522,80 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
 
-其中，CDM、`knowledge_chunks`、External Content FTS、`chunk_embeddings` 和可替换向量后端的已确认语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)与 [本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。这些表仍未进入当前 Schema；实际落地前需要连同项目归属、来源关系和删除语义完成最终字段评审。
+CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解析、切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)，FTS、Embedding 和混合检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。这些表仍未进入当前 Schema；实施时必须提升 Schema 版本，并在编码前再次核对 SQL、索引和删除语义。
+
+### 12.1 复用并扩展现有 `sources`（规划）
+
+当前 Schema 已有 `sources` 表，字段和现状见 [6.6 `sources`](#66-sources)。RAG 不创建平行的 `knowledge_sources`；公开的 `source` 就是现有 `sources.id`，`sources.content_hash` 继续保存原始 UTF-8 资料字节的 SHA-256，`sources.size` 继续保存字节长度。
+
+实现解析和索引状态时，计划向现有表增加：
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `parser_version` | TEXT | 可空 | 最近一次成功生成当前 Chunk 集合的解析器版本；尚未索引时为空。 |
+| `index_status` | TEXT | NOT NULL | `pending`、`ready`、`stale`、`failed` 等受控索引状态；最终枚举在实现前固定。 |
+
+当前实现的 `format` 已限制为 `text`、`markdown`，资料正文已经按 UTF-8 管理，因此 v0.1 不新增 `media_type` 或 `encoding` 字段。
+
+`content_hash` 是判断原始资料是否变化的依据，并且不重复写入每个 Chunk。资料变更与索引更新必须避免“新 Hash 配旧 Chunk”：检测到变化后先将 `index_status` 标记为 `stale`；新解析和全部 Chunk 成功前，旧 Chunk 不能被认为拥有精确有效的位置。Source Hash、Chunk 集合与 FTS 的最终切换顺序必须由同一摄取服务协调。
+
+### 12.2 `knowledge_chunks`（规划）
+
+保存可由原始资料重建的纯文本检索投影。Chunk 不保存 CDM、Markdown、临时 CDM Node ID 或标题路径。
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `chunk_rowid` | INTEGER | PRIMARY KEY | 仅供 SQLite、FTS 和向量关联使用的内部整数，不对 LLM、CDM 或用户公开。 |
+| `chunk_id` | TEXT | NOT NULL UNIQUE | 公开、稳定、不透明的 Chunk 标识；用于 RAG Tool Result 和 `<reference chunk_id="...">`。 |
+| `source_id` | TEXT | NOT NULL, FOREIGN KEY | 关联现有 `sources.id`。Chunk 引用中的 `source` 必须与该字段一致。 |
+| `ordinal` | INTEGER | NOT NULL | Chunk 在同一 Source 中从零开始的稳定顺序。 |
+| `content` | TEXT | NOT NULL | 去除 CDM/XML 标签和 Markdown 格式后的规范化纯文本；不得拼入标题路径、来源 ID 或内部元数据。 |
+| `start_offset` | INTEGER | NOT NULL | 原始文件字节范围起点，使用左闭右开区间。 |
+| `end_offset` | INTEGER | NOT NULL | 原始文件字节范围终点，使用左闭右开区间。 |
+| `chunker_version` | TEXT | NOT NULL | 生成该 Chunk 的切片算法版本。 |
+| `created_at` | TEXT | NOT NULL | Chunk 创建时间。 |
+
+约束与索引要求：
+
+- `UNIQUE(source_id, ordinal)`。
+- `start_offset >= 0`。
+- `end_offset > start_offset`。
+- `end_offset <= sources.size` 由写入服务在同一流程中校验。
+- 一个 Chunk 只能对应原始资料中的一个连续范围；当前不增加 Locator JSON 或一对多范围表。
+- 删除 Source 时级联删除活动 Chunk、FTS 和 Embedding；正式文档中已经存在的 `<reference>` 保留并显示为无效引用。
+- `chunk_id` 当前视为稳定标识。资料更新和重新切片时如何继承 ID 暂缓设计，不能在尚未确认前静默复用旧 ID 指向不同内容。
+
+规划 SQL 轮廓为：
+
+```sql
+CREATE TABLE knowledge_chunks (
+  chunk_rowid     INTEGER PRIMARY KEY,
+  chunk_id        TEXT NOT NULL UNIQUE,
+  source_id       TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  ordinal         INTEGER NOT NULL CHECK (ordinal >= 0),
+  content         TEXT NOT NULL,
+  start_offset    INTEGER NOT NULL CHECK (start_offset >= 0),
+  end_offset      INTEGER NOT NULL CHECK (end_offset > start_offset),
+  chunker_version TEXT NOT NULL,
+  created_at      TEXT NOT NULL,
+  UNIQUE (source_id, ordinal)
+);
+```
+
+### 12.3 `knowledge_chunk_fts`（规划）
+
+FTS5 使用 External Content 模式索引 `knowledge_chunks.content`：
+
+```sql
+CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
+  content,
+  content = 'knowledge_chunks',
+  content_rowid = 'chunk_rowid',
+  tokenize = 'trigram'
+);
+```
+
+这里的 External Content 表示 FTS 通过 `chunk_rowid` 读取同一个 SQLite 数据库中的纯文本 Chunk，不表示正文保存在文件系统。FTS 的内部影子表是可重建索引，不是新的业务表。Chunk 与 FTS 的增删改必须由同一个 Repository 短事务维护。
 
 这些能力的任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。确定数据语义后必须提升 Schema 版本；正式发布后通过新的前向 migration 落地，不能要求用户删除项目数据库。
 
