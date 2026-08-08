@@ -16,7 +16,7 @@ const structuralContainer: CdmTagDefinition = {
   allowsChildren: true,
 };
 
-const mark: CdmTagDefinition = {
+const inlineStyleDefinition: CdmTagDefinition = {
   kind: "mark",
   allowedChildKinds: ["mark"],
   allowsText: true,
@@ -95,10 +95,10 @@ export const cdmDraftSchema: CdmSchemaProfile = {
       allowedAttributes: ["id", "source", "chunk_id"],
       requiredAttributes: ["source"],
     },
-    strong: mark,
-    em: mark,
-    mark,
-    i: mark,
+    strong: inlineStyleDefinition,
+    em: inlineStyleDefinition,
+    mark: inlineStyleDefinition,
+    i: inlineStyleDefinition,
     code: {
       kind: "node",
       allowedAttributes: ["id"],

@@ -66,6 +66,15 @@ describe("CDM XML and draft schema", () => {
       expect.objectContaining({ code: "INVALID_PARENT" }),
     );
   });
+
+  it("maps the HTML mark tag to the inline style definition", () => {
+    const document = parseCdmXml(`<document id="7k3m9qx2vc" version="1">
+      <p id="b4r8t2w6yz">普通文字<mark>重点文字</mark></p>
+    </document>`);
+
+    expect(cdmDraftSchema.tags.mark?.kind).toBe("mark");
+    expect(validateCdm(document, cdmDraftSchema)).toEqual([]);
+  });
 });
 
 describe("CDM Node IDs", () => {
