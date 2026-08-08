@@ -220,10 +220,12 @@ preload / renderer
 MyNovel.cleo/
 ├─ cleo.project.json
 ├─ manuscript/
+│  ├─ book.cdm.xml
 │  ├─ volume-01/
-│  │  └─ chapter-001.md
-│  └─ .meta/
-│     └─ chapter-001.blocks.json
+│  │  ├─ chapter-001.cdm.xml
+│  │  └─ chapter-002.cdm.xml
+│  └─ volume-02/
+│     └─ chapter-010.cdm.xml
 ├─ canon/
 │  ├─ characters/
 │  ├─ locations/
@@ -248,7 +250,7 @@ MyNovel.cleo/
 
 | 分类 | 数据 | 持久化 | Git |
 |---|---|---|---|
-| 创作事实 | 正文、大纲、委托书、研究笔记 | CDM；当前 Markdown 文档待制定过渡方案 | 是 |
+| 创作事实 | 正文、大纲、委托书、研究笔记 | CDM；书籍默认每章一个文件，`book.cdm.xml` 保存结构；当前 Markdown 文档待制定过渡方案 | 是 |
 | 权威设定 | 人物、规则、事件、伏笔 | JSON | 是 |
 | 原始附件 | PDF、DOCX、网页快照 | `.cleo/blobs/<sha256>` | 否，Git 只记录元数据 |
 | 解析派生物 | 导入资料的 CDM | `.cleo/derived/documents/` | 否，可重建 |

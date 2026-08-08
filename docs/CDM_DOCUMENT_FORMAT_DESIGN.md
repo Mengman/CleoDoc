@@ -59,15 +59,116 @@ CDM 将吸收 HTML 中与文本和文档结构相关的标签。已经确认需�
 
 CDM 实现必须采用显式白名单，不能因为某个标签能够被 HTML 解析器识别，就自动接受并保存到文档中。
 
-## 4. 节点属性
+## 4. 书籍、文章与文件粒度
+
+### 4.1 逻辑结构与物理存储分离
+
+作品的语义层级不能由文件夹和文件路径代替。卷名、卷号、章节顺序、导出结构和卷级内容属于作品本身；文件夹只负责物理整理，可能被移动、重命名或在导出时消失。
+
+CDM 的书籍结构采用：
+
+```text
+book
+└─ volume（可选）
+   └─ chapter
+      └─ 内容 Node
+```
+
+- `<book>`：一部完整的书籍作品。
+- `<volume>`：一本书内部可选的卷，不表示书籍本身，也不用于表示系列中的某一本书。
+- `<chapter>`：书籍中的章节。
+- `<article>`：沿用 HTML 标准，表示论文、新闻文章、专业文章等可以独立成立的作品。
+
+普通单卷书籍不创建没有实际语义的 `<volume>`，章节可以直接属于 `<book>`。多卷书籍才使用 `<volume>` 分组。
+
+### 4.2 书籍结构文档
+
+书籍类作品使用 `book.cdm.xml`（文件名暂定）保存 Book、Volume 和 Chapter 的逻辑层级及顺序。章节正文不内联到该结构文件，而是通过 `<chapter-ref>` 引用独立章节文档。
+
+单卷书籍示例：
+
+```xml
+<document id="7k3m9qx2vc" version="1">
+  <book id="b4r8t2w6yz">
+    <h1 id="c5s9v3x7z0">书名</h1>
+    <chapter-ref id="d6t0w4y8a1" document="chapter_001"/>
+    <chapter-ref id="e7v1x5z9b2" document="chapter_002"/>
+  </book>
+</document>
+```
+
+多卷书籍示例：
+
+```xml
+<document id="7k3m9qx2vc" version="1">
+  <book id="b4r8t2w6yz">
+    <h1 id="c5s9v3x7z0">书名</h1>
+
+    <volume id="d6t0w4y8a1" number="1">
+      <h2 id="e7v1x5z9b2">第一卷：雨夜</h2>
+      <chapter-ref id="f8w2y6a0c3" document="chapter_001"/>
+      <chapter-ref id="g9x3z7b1d4" document="chapter_002"/>
+    </volume>
+
+    <volume id="h0y4a8c2e5" number="2">
+      <h2 id="j1z5b9d3f6">第二卷：深海</h2>
+      <chapter-ref id="k2a6c0e4g7" document="chapter_010"/>
+    </volume>
+  </book>
+</document>
+```
+
+`<chapter-ref>` 是可寻址结构 Node，必须拥有 ID；`document` 指向项目内公开的章节文档引用，不能是数据库内部 ID。其最终属性名和引用格式随正式 Schema 确认。
+
+### 4.3 章节文件
+
+书籍正文默认每个 Chapter 保存为一个独立 CDM 文件：
+
+```xml
+<document id="7k3m9qx2vc" version="1">
+  <chapter id="b4r8t2w6yz" number="1">
+    <h1 id="c5s9v3x7z0">第一章 雨夜</h1>
+    <p id="d6t0w4y8a1">雨从凌晨开始下。</p>
+    <p id="e7v1x5z9b2">林默站在旧车站外。</p>
+  </chapter>
+</document>
+```
+
+默认项目结构可以是：
+
+```text
+manuscript/
+├─ book.cdm.xml
+├─ volume-01/
+│  ├─ chapter-001.cdm.xml
+│  └─ chapter-002.cdm.xml
+└─ volume-02/
+   └─ chapter-010.cdm.xml
+```
+
+Volume 文件夹只是可选的物理映射，`book.cdm.xml` 中的 `<volume>` 和 `<chapter-ref>` 才是作品结构事实。章节身份由 CDM Node 和文档引用确定，不依赖文件名或目录位置。
+
+按 Chapter 保存有利于局部编辑、Git Diff、恢复、审批、RAG 增量索引和并发隔离。CDM 不默认按 Volume 保存全部正文，也不进一步拆成每段一个文件；段落及其他内容单元通过 Node ID 管理。
+
+### 4.4 暂不确定的作品标签
+
+以下标签只保留为未来研究方向，不进入 CDM v1 标签白名单、Schema、TipTap 映射或解析实现：
+
+- `<story>`：短篇故事或独立文学作品的语义尚未确定。
+- `<screenplay>`：影视脚本、舞台剧本或其他脚本的共同模型尚未确定。
+- `<series>`：系列作品与 Book 之间的关系尚未确定。
+
+脚本作品不能复用 HTML `<script>`，因为 `<script>` 表示可执行内容并被 CDM 明确禁止。等 CleoDoc 真正进入相应写作场景后，再依据真实结构确定扩展标签。
+
+## 5. 节点属性
 
 CDM 使用标签属性承载节点标识、文本样式和其他与节点有关的信息。例如：
 
 ```xml
-<p id="node_91Lm" style="color: blue">Triton 是一个 GPU 编译器。</p>
+<p id="7k3m9qx2vc" style="color: blue">Triton 是一个 GPU 编译器。</p>
 ```
 
-### 4.1 Node 与 Mark
+### 5.1 Node 与 Mark
 
 CDM 标签分为两类：
 
@@ -81,18 +182,18 @@ CDM 标签分为两类：
 除 Schema 明确声明为 Mark 的样式类标签外，其他 CDM 标签都必须拥有 `id`。文本本身是 XML 文本节点，不适用标签 ID 规则。
 
 ```xml
-<article id="article_A1">
-  <h1 id="heading_B1">第一章</h1>
-  <p id="p_91Lm">
+<article id="7k3m9qx2vc">
+  <h1 id="b4r8t2w6yz">第一章</h1>
+  <p id="c5s9v3x7z0">
     Triton 是一个 <strong>GPU 编译器</strong>。
   </p>
-  <ul id="list_C1">
-    <li id="item_D1">第一个列表项</li>
+  <ul id="d6t0w4y8a1">
+    <li id="e7v1x5z9b2">第一个列表项</li>
   </ul>
 </article>
 ```
 
-### 4.2 ID 的职责
+### 5.2 ID 的职责
 
 这里：
 
@@ -103,16 +204,51 @@ CDM 标签分为两类：
 
 CDM 不会无条件接受所有 HTML 属性。事件处理、任意网页行为和可能破坏文档安全或展示一致性的属性不在允许范围内。`style` 支持哪些基本文字样式，仍需在正式 Schema 中继续确定。
 
-### 4.3 ID 生命周期
+### 5.3 ID 格式与唯一性范围
 
-- ID 在一份 CDM 文档内唯一，不是 SQLite Row ID。
-- ID 是节点身份，不是节点位置；移动、修改内容或修改样式后保持不变。
+Node ID 使用 10 位小写 Crockford Base32 随机字符串：
+
+```text
+字符集：0123456789abcdefghjkmnpqrstvwxyz
+长度：10
+示例：7k3m9qx2vc
+```
+
+该字符集排除了容易混淆的 `i`、`l`、`o` 和 `u`。10 位 Base32 提供 `32^10 = 2^50`，约 `1.126 × 10^15` 种取值。Node ID 不编码创建时间、节点类型、文档位置、内容哈希或数据库内部信息，也不使用自增序列；它是短小、稳定、不透明的公开文档标识。
+
+唯一性按以下范围理解：
+
+- 当前 CDM 文档内的 Node ID 必须严格唯一，Schema 校验和写入流程必须拒绝重复 ID。
+- 不同 CDM 文档可以出现相同 Node ID；跨文档定位使用公开的 Document ID 与 Node ID 组合。
+- CleoDoc 不维护历史 ID 台账，也不扫描全部历史版本。历史版本间意外复用依靠 50 位随机空间降低到工程上可接受的概率。
+- 历史 Diff 看到相同的 Document ID 与 Node ID 时，将其视为同一个逻辑节点；这是一项建立在随机 ID 生成规则上的工程约定，不是数学上的绝对无碰撞保证。
+
+### 5.4 ID 生成与重复检查
+
+ID 由 CleoDoc 使用 Node.js `node:crypto` 的加密随机数生成，不得使用 `Math.random()`、时间戳、截断 UUID、内容哈希或数据库自增编号。生成流程为：
+
+1. 解析当前 CDM，收集全部已有 Node ID；如果文档本身存在重复 ID，停止修改并报告格式错误。
+2. 读取 10 个加密随机字节。每个字节通过 `byte & 31` 均匀映射到 Crockford Base32 字符集，组成 10 位候选 ID。
+3. 检查候选 ID 是否已存在于当前文档；如有重复，重新生成。
+4. 候选 ID 一旦通过检查，立即加入本次操作的内存 ID 集合，确保批量新增的节点之间也不会重复。
+5. 补齐全部新 Node 的 ID 后，重新执行 CDM Schema、ID 唯一性和 Document Revision 校验。
+6. 校验通过后原子写入文档；校验或写入失败时不保留任何额外的 ID 状态。
+
+单次分配连续 10 次都无法得到可用 ID 时，操作失败并返回稳定的 ID 生成错误，不得写入不完整文档。正常随机源下几乎不会到达这一错误路径。
+
+该方案不需要维护文档计数器或 ID 分配状态。程序在原子写入前崩溃时，候选 ID 随内存一起丢弃；原子写入完成后，ID 已成为 CDM 事实源的一部分，下次读取时自然参与重复检查。
+
+### 5.5 ID 生命周期
+
+- ID 是节点身份，不是节点位置，也不是 SQLite Row ID。
+- 移动、修改内容或修改样式时保留原 ID。
+- 复制 Node 时生成新 ID，不能复制原 ID。
 - 新 Node 的 ID 由 CleoDoc 生成。LLM 提交新节点时可以省略 ID，由 CleoDoc 在写入前补齐。
-- LLM 不得修改已有 Node 的 ID，也不负责生成 ID。
-- Node 删除后，其 ID 不在同一文档内复用。
-- ID 应保持紧凑，避免在发送大量 CDM 节点时产生不必要的 Token 开销；最终字符格式和长度仍需在 Schema 中确定。
+- LLM 不得指定或修改已有 Node 的 ID，也不负责生成 ID。
+- 删除 Node 会删除当前文档中的 ID；CleoDoc 不主动复用该 ID，但也不为已删除 ID 保存墓碑或自增状态。
+- 从外部导入 CDM 时必须验证当前文档内的 ID；发生冲突时，由 CleoDoc 重新分配相关 Node ID，并同步更新该导入内容内部的引用。
 
-### 4.4 节点级编辑
+### 5.6 节点级编辑
 
 CDM 不使用视觉行号作为文档坐标。页面宽度、字体、字号、缩放和渲染器都会改变视觉换行，同一段文字在不同展示环境中不存在稳定行号。
 
@@ -131,7 +267,7 @@ LLM 和 Core 通过 Node ID 定位操作目标。首版节点操作包括：
 
 每次节点变更必须携带模型最近读取到的文档 Revision。Revision 是文档协议中的公开并发令牌，不是数据库内部 ID；如果文档已经变化，CleoDoc 拒绝陈旧操作并要求重新读取。
 
-## 5. CleoDoc 扩展语义
+## 6. CleoDoc 扩展语义
 
 HTML 无法完整表达 CleoDoc 的文档业务语义，因此 CDM 允许增加自定义标签。
 
@@ -147,7 +283,7 @@ HTML 无法完整表达 CleoDoc 的文档业务语义，因此 CDM 允许增加�
 
 `<comment>` 是直接嵌入正文、附着到目标节点，还是集中存放在独立批注区域，目前尚未确认。`<reference>` 是包围被支持的文字，还是作为独立引用节点，目前也尚未确认。这些问题将在后续设计中单独确定。
 
-## 6. 与 LLM 的关系
+## 7. 与 LLM 的关系
 
 CDM 内容可以直接发送给 LLM，不再转换成另一套 JSON AST。LLM 已经熟悉 HTML 标签及其常见语义，因此可以直接理解标题、段落、列表、强调、表格、链接等结构，CleoDoc 只需要补充自己的扩展规则。
 
@@ -155,7 +291,7 @@ CDM 内容可以直接发送给 LLM，不再转换成另一套 JSON AST。LLM �
 
 LLM 返回的 CDM 内容仍是不可信外部输入，必须经过 XML 解析、CDM Schema 校验和写入审批。不能因为模型熟悉 HTML，就跳过格式校验、项目作用域校验或文档写入规则。
 
-## 7. 与 JavaScript、DOM 和 TipTap 的关系
+## 8. 与 JavaScript、DOM 和 TipTap 的关系
 
 CDM 选择 XML 和 HTML 语义，可以复用 JavaScript 生态中成熟的 DOM、XML 和 HTML 处理能力：
 
@@ -175,7 +311,7 @@ CDM → TipTap Node/Mark → 用户编辑 → CDM
 
 往返后必须保留受支持的文档结构、节点 ID、属性和 CleoDoc 扩展。
 
-## 8. 在系统中的位置
+## 9. 在系统中的位置
 
 ```mermaid
 flowchart TD
@@ -196,32 +332,32 @@ flowchart TD
 
 Chunk、FTS 和 Embedding 都是从 CDM 生成的可重建投影，不反向成为文档事实源。展示层和编辑器也必须消费 CDM，不能建立另一套独立、无法往返的文档模型。
 
-## 9. 当前示例
+## 10. 当前示例
 
 下面的示例只展示已经确认的基本方向，不代表最终 CDM 外壳或扩展标签结构：
 
 ```xml
-<document id="document_A1" version="1">
-  <h1 id="node_title">Triton 调研</h1>
+<document id="7k3m9qx2vc" version="1">
+  <h1 id="b4r8t2w6yz">Triton 调研</h1>
 
-  <p id="node_91Lm" style="color: blue">
+  <p id="c5s9v3x7z0" style="color: blue">
     Triton 是一个 <strong>GPU 编译器</strong>。
   </p>
 
-  <blockquote id="node_quote">
-    <p id="node_quote_p1">这里是一段引用内容。</p>
+  <blockquote id="d6t0w4y8a1">
+    <p id="e7v1x5z9b2">这里是一段引用内容。</p>
   </blockquote>
 
-  <comment id="comment_C1">这里需要补充 Triton 与 CUDA 的关系。</comment>
-  <reference id="reference_D1" source="material_triton_doc"/>
+  <comment id="f8w2y6a0c3">这里需要补充 Triton 与 CUDA 的关系。</comment>
+  <reference id="g9x3z7b1d4" source="material_triton_doc"/>
 </document>
 ```
 
 示例中的 `<document>`、`version`、`<comment>`、`<reference>` 和 `source` 只是用于说明总体方向，其最终名称、位置、属性和嵌套规则仍待继续讨论。
 
-## 10. 已确认与待继续讨论
+## 11. 已确认与待继续讨论
 
-### 10.1 已确认
+### 11.1 已确认
 
 - CDM 是 CleoDoc 所有内部文档统一使用的格式。
 - CDM 使用严格 XML 语法。
@@ -229,28 +365,32 @@ Chunk、FTS 和 Embedding 都是从 CDM 生成的可重建投影，不反向成�
 - 页面布局、表单交互和脚本执行标签不纳入 CDM。
 - CDM 标签分为可寻址 Node 与格式 Mark；`<p>`、`<h1>`、`<li>` 等都可以作为基本文档单位。
 - 除 Schema 明确声明的样式类 Mark 外，其他标签都必须拥有 `id`。
-- Node ID 由 CleoDoc 生成，在同一文档内唯一；修改和移动保留 ID，删除后不复用。
+- Node ID 由 CleoDoc 使用加密随机数生成，为 10 位小写 Crockford Base32 字符串；当前文档内强制唯一，不编码时间、类型、位置或数据库信息。
+- Node 修改和移动时保留 ID，复制时生成新 ID；删除后不维护墓碑或计数状态，历史版本间依靠 50 位随机空间避免意外复用。
 - CDM 不使用视觉行号作为读取或编辑坐标，LLM 通过 Node ID 操作文档。
 - 首版支持节点前后插入、删除、完整内容替换和同父节点前后移动。
 - 节点写入以文档 Revision 进行陈旧写入检查。
 - CDM 支持受控的基本文本样式。
 - HTML 原生标签和属性足够时优先直接采用。
 - HTML 语义不足时允许增加 CleoDoc 扩展。
+- 书籍使用 `<book>`、可选 `<volume>`、`<chapter>` 和 `<chapter-ref>` 表达逻辑结构；独立论文、新闻和专业文章使用 HTML `<article>`。
+- 书籍正文默认每个 Chapter 一个 CDM 文件，`book.cdm.xml` 保存逻辑层级和章节顺序；Volume 文件夹只是可选物理映射。
+- `<story>`、`<screenplay>` 和 `<series>` 暂不进入 CDM v1，等出现真实写作场景后再确定。
 - `<comment>` 和 `<reference>` 是当前明确提出的扩展方向。
 - CDM 内容直接作为 LLM 可见的文档协议，不转换成 JSON AST。
 - HTML 标签映射到 TipTap Node/Mark，CDM 扩展映射到 TipTap Custom Extension。
 
-### 10.2 待继续讨论
+### 11.2 待继续讨论
 
 - CDM 根元素、文档元数据和正式版本字段。
 - CDM v1 的完整标签白名单与嵌套规则。
 - 每种标签允许的 HTML 原生属性和 CleoDoc 扩展属性。
 - `style` 的安全属性白名单和规范化方式。
-- 节点 ID 的最终字符格式、长度和标签前缀规则。
 - `<comment>` 的正文关系、锚点、重叠和生命周期。
 - `<reference>` 的来源标识、原文范围和展示方式。
 - PDF、DOCX 等导入资料的页码、坐标和解析警告如何表达。
 - CDM 文档与外部原始文件、资源和图片的关联方式。
+- `book.cdm.xml` 的最终文件名、`<chapter-ref>` 属性和公开文档引用格式。
 - 发送局部 CDM 给 LLM 时的片段外壳和定位信息。
 - CDM 文件扩展名、MIME 类型和确定性序列化规则。
 - CDM 与当前 Markdown 项目文档的过渡方式。

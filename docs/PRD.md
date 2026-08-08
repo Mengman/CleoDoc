@@ -331,6 +331,8 @@ Git 负责提供两个版本的文件树和 Blob，CleoDoc 在其上计算文档
 
 正文使用 CDM 作为目标事实格式。除 Schema 明确声明为样式 Mark 的标签外，其他 Node 都通过 `id` 属性保存稳定标识；`<p>`、`<h1>`、`<li>` 等都可以作为基本文档单位。Node ID 由 CleoDoc 生成，随 CDM 一起进入版本管理，内容修改和移动不改变 ID。LLM 通过 Node ID 插入、替换内容、删除和移动节点，不使用视觉行号。完整规则见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)和[文档处理设计](./文档处理设计.md)；当前 CLI Markdown 文档的过渡方式尚未确定。
 
+书籍类作品使用 `<book>`、可选 `<volume>`、`<chapter>` 和 `<chapter-ref>` 表达逻辑结构，默认每个 Chapter 保存为独立 CDM 文件，由 `book.cdm.xml` 管理卷、章节和顺序。Volume 文件夹只是可选的物理整理方式，不能代替 `<volume>` 语义。论文、新闻和独立专业文章沿用 HTML `<article>`；`<story>`、`<screenplay>` 和 `<series>` 暂不进入 CDM v1。
+
 ### 6.5 Diff 操作
 
 - 对普通历史版本提供“恢复整个项目”和“恢复此文档”。
