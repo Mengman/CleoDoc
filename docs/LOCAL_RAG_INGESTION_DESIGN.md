@@ -34,16 +34,20 @@ CleoDoc 的 RAG 面向单机桌面应用以及未来可能的移动端、嵌入�
 3. **Chunk 直接回溯原件。** `source_id` 关联 Source，`start_offset` 与 `end_offset` 定位当前 TXT/Markdown 的连续原文字节范围。
 4. **不为每个 Chunk 创建文件。** 正式 Chunk 正文和定位字段直接保存在 SQLite；当前 `.cleo/derived/chunks/<source-id>.chunks.json` 只是按 Source 汇总的临时检查产物，不是 RAG 存储层。
 5. **FTS5 与 Chunk 使用 External Content 模式。** FTS 索引通过整数 `rowid` 引用 `knowledge_chunks`，不另存一份业务正文。
-6. **Embedding 与 Chunk 分表。** 一个 Chunk 可以针对不同模型生成不同向量，模型升级不要求修改 Chunk。
+6. **Embedding 与 Chunk 分表。** 一个 Chunk 可以针对不同模型生成不同向量；但切片长度由当前模型的 Tokenizer 决定，模型、Tokenizer 或输入上限变化时可能需要重新切片。
 7. **v0.1 使用 sqlite-vec 的稳定基础函数。** 向量以 Float32 Little-Endian BLOB 保存在普通 SQLite 表中，经元数据过滤后由 `vec_distance_cosine()` 执行精确余弦检索。
 8. **v0.1 不创建 `vec0`，也不实现 ANN。** `sqlite-vec` 只能位于 `VectorIndex` SQLite Adapter 后面，不能渗透到领域类型和事实文件；SQLite vec1 继续保持观察。
+9. **Embedding 使用 `node-llama-cpp` 加载 GGUF。** 同一个 GGUF 提供 Tokenizer 和向量推理，切片不再使用字符数作为硬上限。
+10. **Source 的语言是列表。** 当前根据主要语言选择中文或英文 Embedding 模型，多语言资料分别生成多套 Embedding 的逻辑暂缓实现。
 
 ## 3. 总体数据流
 
 ```mermaid
 flowchart TD
     SOURCE["原始 TXT / Markdown"] --> PARSER["解析与临时 CDM"]
-    PARSER --> CHUNKER["结构切片与纯文本提取"]
+    PARSER --> LANGUAGE["正文块语言检测"]
+    LANGUAGE --> MODEL["选择 Embedding 模型与 Tokenizer"]
+    MODEL --> CHUNKER["Token 上限下的结构切片"]
     CHUNKER --> CHUNKS["SQLite knowledge_chunks"]
     CHUNKS --> FTS["SQLite FTS5"]
     CHUNKS --> EMBEDDER["本地 Embedding Worker"]
@@ -70,7 +74,7 @@ flowchart TD
 
 ## 4. 解析与 Chunk 输入边界
 
-资料解析和切片由[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)负责。RAG 层只接受已经通过校验并写入 SQLite 的 Chunk：
+资料解析先生成临时 CDM 和规范化纯文本；语言检测、Embedding 模型选择和 Token 长度校验发生在 RAG 索引阶段。切片实现仍位于 Document Ingestion，但只依赖注入的 Tokenizer 接口，不直接依赖 `node-llama-cpp`。最终写入 RAG 的 Chunk 类型为：
 
 ```ts
 interface KnowledgeChunk {
@@ -94,6 +98,61 @@ interface KnowledgeChunk {
 - `chunk_rowid` 可以在数据库内部关联 FTS 和向量，但不能出现在 Tool Result 或 CDM 中。
 
 Chunk 是 FTS、Embedding、混合召回和 LLM 证据包的候选单元。它不是事实源，也不创建独立文件；数据库损坏时从原始资料重新解析和切片。
+
+### 4.1 资料语言
+
+`KnowledgeSource` 使用语言列表而不是单值：
+
+```ts
+languages: Array<"zh" | "en">;
+```
+
+数组第一项是主要语言。资料元数据保存 `languages`，SQLite `sources.languages_json` 保存同一数组的 JSON 投影。`sources` 不保存 `embedding_model_id`；实际生成向量的模型只由 `chunk_embeddings.embedding_model_id` 记录。
+
+语言检测只读取可能包含连续正文的 CDM `<p>` 和 `<blockquote>` 节点。标题、`<li>`、`<code>`、`<pre>` 和其他结构或样式节点不参与检测；当 `<blockquote>` 包含 `<p>` 时只检测内部段落，避免重复统计。
+
+每个候选节点使用以下单位：
+
+```text
+检测单位数 = 汉字字符数 + 英文单词数
+```
+
+只有检测单位数大于软件配置 `rag.languageDetection.minBlockUnits` 的节点才参与判断，默认下限为 `50`。汉字字符数较多的节点记为中文，英文单词数较多的节点记为英文，相等时忽略。最终按有效内容量从高到低排列语言；没有节点满足条件时默认为 `["zh"]`。
+
+当前只使用 `languages[0]` 选择模型：
+
+```text
+zh → BAAI/bge-small-zh-v1.5
+en → BAAI/bge-small-en-v1.5
+```
+
+数据结构允许未来保存 `["zh", "en"]`，但同一 Source 分别使用多个模型切片、生成向量和融合检索不在本次实现范围。
+
+### 4.2 Tokenizer 与 Token 切片
+
+Embedding 模型使用 GGUF 格式并由 `node-llama-cpp` 加载。同一个 GGUF 同时提供 Tokenizer 和 Embedding 推理：只执行切片时可以使用 `vocabOnly: true`；切片后立即生成向量时完整加载一次模型，并复用同一个实例完成 Tokenize 与 Embedding。不得为每个 Chunk 重复加载模型。
+
+切片器只依赖以下能力，不直接导入 `node-llama-cpp`：
+
+```ts
+interface EmbeddingTokenizer {
+  readonly modelId: string;
+  readonly maxInputTokens: number;
+
+  countDocumentTokens(content: string): number;
+  countQueryTokens(query: string): number;
+}
+```
+
+`countDocumentTokens()` 和 `countQueryTokens()` 负责模型实际输入格式及特殊 Token，切片器不写死 `[CLS]`、`[SEP]` 数量。原有 `maxChunkChars` 配置删除，任何最终 Chunk 必须满足：
+
+```text
+countDocumentTokens(chunk.content) <= tokenizer.maxInputTokens
+```
+
+原有 Baseline 结构规则保持不变：同一章节内的小块贪心向上合并；超长块先确定不超过 Token 上限的最远位置，再在其前方由 `splitSearchWindowRatio` 指定的区域内向前寻找句子、次级标点或空白边界。合并后的完整文本必须重新 Tokenize，不能把两个片段的 Token 数直接相加。
+
+当前仍处于早期开发阶段，直接修改 `structural-baseline-v1` 的实现和测试，不保留旧字符切片逻辑，也不升级切片器版本。字符数只保留在开发期切片预览中供人工检查；通用 `token_count` 不写入 `knowledge_chunks`，因为它依赖具体模型。有效 `chunking_config_json` 必须包含 Tokenizer/模型 Revision、最大输入 Token 和切片参数，任一项变化都使当前 Chunk 索引过期。
 
 ## 5. Chunk 身份与引用边界
 
@@ -191,7 +250,7 @@ CREATE INDEX chunk_embeddings_chunk_rowid
 
 `embedding_model_id` 标识包含具体 Revision 的模型；同名模型升级后创建新标识，不覆盖旧向量。模型表不保存 `model_hash`、维度、距离算法或推理运行参数。向量维度由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到，同一模型下的维度一致性由 Repository 校验。
 
-向量由 `@huggingface/transformers` 在 Worker 中运行本地 ONNX 模型生成，以无头部的 IEEE 754 Float32 Little-Endian 连续 BLOB 保存，不使用 JSON 数组。`knowledge_chunks.content_hash` 记录当前 Chunk 纯文本 Hash，`chunk_embeddings.content_hash` 记录生成该向量时的 Hash；两者不一致时向量过期。原始空间约为 `Chunk 数量 × 维度 × 4 字节`，尚未包含 SQLite 页、索引和元数据开销。
+向量由 `node-llama-cpp` 在 Worker 中运行本地 GGUF 模型生成，以无头部的 IEEE 754 Float32 Little-Endian 连续 BLOB 保存，不使用 JSON 数组。v0.1 中文模型为 `BAAI/bge-small-zh-v1.5`，英文模型为 `BAAI/bge-small-en-v1.5`；具体 Revision 由 `embedding_models` 登记。`knowledge_chunks.content_hash` 记录当前 Chunk 纯文本 Hash，`chunk_embeddings.content_hash` 记录生成该向量时的 Hash；两者不一致时向量过期。原始空间约为 `Chunk 数量 × 维度 × 4 字节`，尚未包含 SQLite 页、索引和元数据开销。
 
 写入时，Little-Endian 平台将 `Float32Array` 的有效内存范围映射为 `Uint8Array`，绑定到 `vec_f32(?)` 进行格式校验后保存。实现必须在边界确认本机字节序，非 Little-Endian 平台显式转换。Query Embedding 使用同一协议作为查询参数，不写入数据库。
 
@@ -319,11 +378,12 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 1. 安全保存或读取项目内原始资料。
 2. 计算原始文件 SHA-256，并与 Source 当前 `content_hash` 比较。
-3. 在数据库事务外解析临时 CDM 并生成纯文本 Chunk。
-4. 校验每个 Chunk 的连续字节范围。
-5. 以短事务切换 Source Hash、Chunk 集合和 FTS。
-6. 在 Worker 中生成缺失或过期的 Embedding。
-7. 校验 Source 与 Chunk 状态后写回向量并切换可用索引代次。
+3. 在数据库事务外解析临时 CDM，并检测符合条件的正文块语言。
+4. 根据主要语言选择 GGUF 模型，加载其 Tokenizer，并按 Token 上限生成纯文本 Chunk。
+5. 校验每个 Chunk 的 Token 上限和连续字节范围。
+6. 以短事务切换 Source Hash、语言、Chunk 集合和 FTS。
+7. 在 Worker 中使用同一模型生成缺失或过期的 Embedding。
+8. 校验 Source 与 Chunk 状态后写回向量并切换可用索引代次。
 
 检测到原始 Hash 变化后，新 Chunk 全部成功前不能覆盖 Source 的旧 `content_hash`。资料更新后的 Chunk ID 继承和已有引用迁移暂不实现。
 
@@ -335,6 +395,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 - 解析、切片或 Embedding 在数据库写事务外运行。
 - 应用退出后，未完成任务恢复为 pending 或 failed，不写入半成品索引。
+- Tokenizer 或 Embedding 模型加载失败时保留原始资料，不静默退回旧字符切片。
 - FTS 或向量表损坏时从已有纯文本 Chunk 重建。
 - Chunk 表损坏时从原始资料重新解析和切片；开发期临时 CDM不是重建前提。
 - 导入资料的临时 CDM 损坏或删除不影响现有检索和引用回溯。
@@ -345,7 +406,9 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 ### v0.1
 
 - 将 TXT、Markdown 解析为可删除的临时 CDM，固定丢弃纯展示样式。
-- 实现基于块级段落结构的确定性 Baseline Chunk：超长块向前寻找自然边界递归拆分，同一标题区域内的小块按最大长度贪心向前合并，并保留连续原文字节范围。
+- 检测符合长度下限的 `<p>` 与 `<blockquote>` 正文块语言，并以 `languages` 列表保存；当前按主要语言选择中文或英文 GGUF 模型。
+- 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
+- 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
 - 实现 FTS 与向量的混合召回、RAG Tool 和 ContextManifest。
 - 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。
@@ -373,6 +436,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 - 不跨章节错误拼接，不在普通情况下截断句子或连续对话。
 - 同一输入和同一配置生成相同 Chunk。
+- 每个最终 Chunk 经当前 Embedding 模型的完整输入 Token 统计后都不超过模型上限。
 - `content` 只包含纯文本，不保存 CDM、Markdown、Node ID 或标题路径。
 - 每个 Chunk 对应项目内规范化 UTF-8 资料副本中的一个连续字节范围。
 - Chunk 可以从原始资料重新解析和切片，不需要 Chunk 文件或持久化 CDM。
@@ -387,6 +451,13 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 删除资料后无法再从 FTS 或向量结果中检索到该资料。
 - RAG Tool 只向 LLM 返回公开的 Source、Chunk ID、资料标题和纯文本证据。
 - Chunk 引用能够回到原件；Source Hash 变化时引用被标记为过期。
+
+### 语言与模型
+
+- 标题、列表、代码和不足长度下限的短块不会干扰资料语言判断。
+- 中文、英文和中英分段资料分别得到稳定、顺序确定的 `languages`。
+- 当前只按主要语言选择模型；多语言多模型索引没有被当前实现静默模拟。
+- Tokenizer 或 GGUF 加载失败不会损坏原始资料，也不会生成旧字符规则的替代 Chunk。
 
 ### 向量后端评测
 
