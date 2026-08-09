@@ -1005,7 +1005,8 @@ v0.2 在此基础上增加：
 - 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
 - 已实现：`packages/rag` 的 `node-llama-cpp` CPU Baseline、本地 GGUF 解析、Document/Query Token 统计、归一化向量输出和开发期 CLI 检查命令。
 - 已实现：Embedding Worker 的任务分批、模型复用、逐项进度、取消和纯数据向量回传；Worker 不访问 SQLite。
-- 尚未实现：正文 FTS、Embedding 安全写回编排、向量检索、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 已实现：资料 Chunk/FTS 增量投影，以及按主语言和模型筛选缺失向量、冻结任务 Hash、短事务条件写回和增量重试的 Embedding 编排；过期结果不会覆盖新 Chunk，Embedding 失败不影响 FTS。
+- 尚未实现：正文 FTS、sqlite-vec 精确向量检索、混合 RAG、`ContextManifest`、RAG Tool、Embedding 用户命令和 CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

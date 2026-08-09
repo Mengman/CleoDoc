@@ -1,3 +1,8 @@
+import type {
+  MaterialEmbeddingModel,
+  MaterialEmbeddingTaskOptions,
+} from "../packages/knowledge/src/material-types.js";
+
 export const TEST_DATABASE_OPTIONS = { busyTimeoutMs: 5_000 } as const;
 
 export const TEST_CONTEXT_POLICY = {
@@ -31,8 +36,9 @@ export function createTestMaterialOptions(
 ) {
   const maxInputTokens = options.maxInputTokens ?? 800;
   const modelRevision = options.modelRevision ?? "test-v1";
-  const tokenizerModel = (language: "zh" | "en") => ({
+  const embeddingModel = (language: "zh" | "en"): MaterialEmbeddingModel => ({
     modelId: `test-${language}-tokenizer`,
+    modelName: `test/${language}-embedding`,
     modelRevision,
     maxInputTokens,
     async openTokenizer() {
@@ -44,13 +50,29 @@ export function createTestMaterialOptions(
         async dispose() {},
       };
     },
+    async runEmbeddingTask({ chunks, onProgress, onBatch }: MaterialEmbeddingTaskOptions) {
+      const results = chunks.map((chunk, index) => {
+        onProgress?.({
+          completedChunks: index + 1,
+          totalChunks: chunks.length,
+          chunkId: chunk.chunkId,
+        });
+        return {
+          chunkId: chunk.chunkId,
+          tokenCount: Array.from(chunk.content).length,
+          vector: Float32Array.from([chunk.content.length, language === "zh" ? 1 : 2]),
+        };
+      });
+      await onBatch?.(results);
+    },
   });
   return {
     database: TEST_DATABASE_OPTIONS,
     maxImportBytes: 10 * 1024 * 1024,
     chunking: { splitSearchWindowRatio: 0.75 },
     languageDetection: { minBlockUnits: 50 },
-    tokenizerModels: { zh: tokenizerModel("zh"), en: tokenizerModel("en") },
+    embeddingChunkBatchSize: 16,
+    embeddingModels: { zh: embeddingModel("zh"), en: embeddingModel("en") },
   };
 }
 

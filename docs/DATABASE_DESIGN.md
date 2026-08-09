@@ -543,10 +543,12 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 ### 10.6 资料索引
 
 - `MaterialRepository` 从资料元数据事实源同步 Source；相同内容 Hash 的元数据更新保留索引状态，内容 Hash 变化时清除索引版本并标记 `stale`。
-- `KnowledgeChunkRepository.replaceForSource` 在事务内再次校验 Source Hash 与范围，然后整组替换 Chunk；完全相同的 ordinal、正文、范围和 Chunker 版本复用原 Chunk ID。
+- `KnowledgeChunkRepository.replaceForSource` 在事务内再次校验 Source Hash 与范围，并增量同步 Chunk；完全相同的正文和范围保留 Row ID、Chunk ID 与有效向量，局部变化复用位置对应行但通过新 `content_hash` 使旧向量失效，删除项由外键级联清理。
 - 切片配置、Parser 或 Chunker 版本与当前运行配置不一致时，`ready` Source 转为 `stale`，搜索只读取 `ready`。
 - Source 删除通过外键级联删除 Chunk，Chunk DELETE Trigger 同步清理 FTS。
 - `MaterialIndexer` 在数据库事务外解析和切片；批量重建失败时保留资料事实源，将 Source 标记为 `failed` 并记录稳定错误码。
+- `ChunkEmbeddingRepository.listPending` 只选择当前项目中 `ready`、主语言匹配且指定模型向量缺失或 Hash 不匹配的 Chunk。候选快照包含 Source Hash、Chunk Hash 和切片配置，但 Worker 输入只包含公开 Chunk ID 与正文。
+- `ChunkEmbeddingRepository.writeBatch` 在短事务中重新校验项目、Source 主语言、索引状态、Source/Chunk Hash 和切片配置；过期结果直接计为丢弃。有效结果登记最小模型身份、校验同模型向量维度，以 Float32 Little-Endian BLOB 批量 Upsert。Embedding 失败不会修改 Source 状态或 FTS。
 
 ## 11. 当前设计评审结论
 

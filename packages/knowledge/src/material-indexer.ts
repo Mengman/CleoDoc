@@ -18,8 +18,13 @@ import type {
   ParsedDocument,
 } from "@cleodoc/document-ingestion";
 import { resolveInsideProject, writeJsonAtomic } from "../../project/src/index.js";
+import { MaterialEmbeddingIndexer } from "./material-embedding-indexer.js";
 import { MaterialTokenizerPool } from "./material-tokenizers.js";
-import type { MaterialTokenizerModel } from "./material-types.js";
+import type {
+  MaterialEmbeddingIndexOptions,
+  MaterialEmbeddingIndexResult,
+  MaterialEmbeddingModel,
+} from "./material-types.js";
 
 export interface MaterialIndexRebuildFailure {
   readonly sourceId: string;
@@ -36,16 +41,24 @@ export interface MaterialIndexRebuildResult {
 export class MaterialIndexer {
   private readonly repository: KnowledgeChunkRepository;
   private readonly tokenizers: MaterialTokenizerPool;
+  private readonly embeddings: MaterialEmbeddingIndexer;
 
   constructor(
     private readonly projectRoot: string,
     private readonly projectId: string,
     database: ProjectDatabase,
     private readonly chunking: ChunkDocumentOptions,
-    tokenizerModels: Readonly<Record<KnowledgeSourceLanguage, MaterialTokenizerModel>>,
+    embeddingModels: Readonly<Record<KnowledgeSourceLanguage, MaterialEmbeddingModel>>,
+    embeddingChunkBatchSize: number,
   ) {
     this.repository = new KnowledgeChunkRepository(database);
-    this.tokenizers = new MaterialTokenizerPool(tokenizerModels);
+    this.tokenizers = new MaterialTokenizerPool(embeddingModels);
+    this.embeddings = new MaterialEmbeddingIndexer(
+      projectId,
+      database,
+      embeddingModels,
+      embeddingChunkBatchSize,
+    );
   }
 
   async markOutdated(sources: readonly KnowledgeSource[]): Promise<void> {
@@ -128,6 +141,10 @@ export class MaterialIndexer {
 
   async rebuildFts(): Promise<void> {
     await this.repository.rebuildFts();
+  }
+
+  async embed(options: MaterialEmbeddingIndexOptions = {}): Promise<MaterialEmbeddingIndexResult> {
+    return await this.embeddings.embed(options);
   }
 
   async close(): Promise<void> {

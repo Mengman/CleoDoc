@@ -386,7 +386,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 5. 校验每个 Chunk 的 Token 上限和连续字节范围。
 6. 以短事务切换 Source Hash、语言、Chunk 集合和 FTS。
 7. 在 Worker 中使用同一模型生成缺失或过期的 Embedding。
-8. 校验 Source 与 Chunk 状态后写回向量并切换可用索引代次。
+8. 每批结果写回前重新校验 Source 与 Chunk 状态；只写入仍匹配的向量，过期结果丢弃，未完成部分由下次任务补齐。
 
 检测到原始 Hash 变化后，新 Chunk 全部成功前不能覆盖 Source 的旧 `content_hash`。资料更新后的 Chunk ID 继承和已有引用迁移暂不实现。
 
@@ -397,7 +397,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 ### 10.3 中断和损坏
 
 - 解析、切片或 Embedding 在数据库写事务外运行。
-- 应用退出后，未完成任务恢复为 pending 或 failed，不写入半成品索引。
+- 应用退出或任务取消后，已完成向量保持单条原子有效，未完成 Chunk 仍表现为缺失或失效；下次任务只补齐这些 Chunk，不创建无法识别的半条向量。
 - Tokenizer 或 Embedding 模型加载失败时保留原始资料，不静默退回旧字符切片。
 - FTS 或向量表损坏时从已有纯文本 Chunk 重建。
 - Chunk 表损坏时从原始资料重新解析和切片；开发期临时 CDM不是重建前提。
@@ -406,7 +406,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和完整 Schema v9 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 已实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；重复切片保留未变化 Row ID 与有效向量，局部变化通过 Hash 不一致使旧向量失效。Embedding Worker 已实现一次任务一次模型加载、Chunk 任务分批、逐项进度、取消和 Transferable 向量回传，且不访问 SQLite。逐 Chunk 输入只传递 Chunk ID 和正文，结果只返回 Chunk ID、Token 数与向量；模型 ID 和输入 Hash 留在主线程任务上下文中。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查。Embedding 安全写回编排和向量查询仍按下述 v0.1 范围继续实现。
+当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和完整 Schema v9 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 已实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；重复切片保留未变化 Row ID 与有效向量，局部变化通过 Hash 不一致使旧向量失效。Embedding Worker 已实现一次任务一次模型加载、Chunk 任务分批、逐项进度、取消和 Transferable 向量回传，且不访问 SQLite。安全写回编排已经按 Source 主语言选择模型，冻结 Source/Chunk Hash 与切片配置，并在每批短事务中重新校验后写入 Float32 Little-Endian BLOB；过期结果直接丢弃，再次运行只补齐缺失或失效向量。逐 Chunk 输入只传递 Chunk ID 和正文，模型 ID 与 Hash 留在主线程。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查；sqlite-vec 精确向量查询和用户可见的索引命令仍按下述 v0.1 范围继续实现。
 
 ### v0.1
 

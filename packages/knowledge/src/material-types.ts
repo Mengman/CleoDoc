@@ -25,9 +25,68 @@ export interface DisposableChunkTokenizer extends ChunkTokenizer {
 
 export interface MaterialTokenizerModel {
   readonly modelId: string;
+  readonly modelName: string;
   readonly modelRevision: string;
   readonly maxInputTokens: number;
   openTokenizer(): Promise<DisposableChunkTokenizer>;
+}
+
+export interface MaterialEmbeddingChunk {
+  readonly chunkId: string;
+  readonly content: string;
+}
+
+export interface MaterialEmbeddingChunkResult {
+  readonly chunkId: string;
+  readonly tokenCount: number;
+  readonly vector: Float32Array;
+}
+
+export interface MaterialEmbeddingTaskProgress {
+  readonly completedChunks: number;
+  readonly totalChunks: number;
+  readonly chunkId: string;
+}
+
+export interface MaterialEmbeddingTaskOptions {
+  readonly chunks: readonly MaterialEmbeddingChunk[];
+  readonly chunkBatchSize: number;
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: MaterialEmbeddingTaskProgress) => void;
+  readonly onBatch?: (results: readonly MaterialEmbeddingChunkResult[]) => void | Promise<void>;
+}
+
+export interface MaterialEmbeddingModel extends MaterialTokenizerModel {
+  runEmbeddingTask(options: MaterialEmbeddingTaskOptions): Promise<void>;
+}
+
+export interface MaterialEmbeddingIndexProgress extends MaterialEmbeddingTaskProgress {
+  readonly language: "zh" | "en";
+  readonly modelId: string;
+}
+
+export interface MaterialEmbeddingModelResult {
+  readonly language: "zh" | "en";
+  readonly modelId: string;
+  readonly totalChunks: number;
+  readonly processedChunks: number;
+  readonly skippedChunks: number;
+  readonly writtenChunks: number;
+  readonly discardedChunks: number;
+}
+
+export interface MaterialEmbeddingIndexResult {
+  readonly totalChunks: number;
+  readonly processedChunks: number;
+  readonly skippedChunks: number;
+  readonly writtenChunks: number;
+  readonly discardedChunks: number;
+  readonly models: readonly MaterialEmbeddingModelResult[];
+}
+
+export interface MaterialEmbeddingIndexOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: MaterialEmbeddingIndexProgress) => void;
 }
 
 export interface MaterialServiceOptions {
@@ -35,5 +94,6 @@ export interface MaterialServiceOptions {
   readonly maxImportBytes: number;
   readonly chunking: ChunkDocumentOptions;
   readonly languageDetection: LanguageDetectionOptions;
-  readonly tokenizerModels: Readonly<Record<"zh" | "en", MaterialTokenizerModel>>;
+  readonly embeddingChunkBatchSize: number;
+  readonly embeddingModels: Readonly<Record<"zh" | "en", MaterialEmbeddingModel>>;
 }

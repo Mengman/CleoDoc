@@ -46,7 +46,7 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、语言检测、Tokenizer 切片、Embedding 表结构、增量 Chunk Repository 和 Worker 推理已完成；下一步实现安全写回编排 |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、Tokenizer 切片、增量 Chunk/Embedding Repository、Worker 推理和安全写回编排已完成；下一步实现 sqlite-vec 精确检索 |
 | 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务已经实现；向量安全写回编排与语义检索尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务及安全写回编排已经实现；sqlite-vec 精确检索与语义检索 CLI 尚未实现。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -459,7 +459,7 @@ cleo search <query> --scope material
 
 验收门：批量生成期间调用方持续收到进度；取消或异常退出后数据库仍可正常打开，原始资料和已有 FTS 不受影响。
 
-实施状态：已完成独立 Worker 协议、一次任务一次模型加载、Chunk 任务分批、逐项进度、Transferable 向量回传、取消和稳定错误映射。Worker 不导入数据库模块；CLI 索引命令、缺失向量选择、Hash 再校验和数据库写回属于步骤 7.6、7.8。
+实施状态：已完成独立 Worker 协议、一次任务一次模型加载、Chunk 任务分批、逐项进度、Transferable 向量回传、取消和稳定错误映射。Worker 不导入数据库模块；CLI 索引命令属于步骤 7.8。
 
 #### 7.6 Embedding 编排与安全写回
 
@@ -469,6 +469,8 @@ cleo search <query> --scope material
 - 模型 revision、Tokenizer 上限或切片配置变化时，将相关 Source 标为需要重建，不静默混用不同切片结果。
 
 验收门：资料在推理期间被修改时，旧任务不能把过期向量写回；再次执行只补齐缺失或失效向量。
+
+实施状态：已完成。`ChunkEmbeddingRepository` 按项目、Source 主语言和模型筛选缺失或 Hash 失效的 Chunk；主线程冻结 Source Hash、Chunk Hash 和切片配置，只把 Chunk ID 与正文发送给 Worker。每批结果写回前在短事务中重新校验项目、语言、Source/Chunk Hash、切片配置和 `ready` 状态，过期结果计为丢弃且不写入。模型身份登记、维度一致性与 Float32 Little-Endian BLOB 编码也在 Repository 边界完成。`MaterialService.embedIndex()` 串联中英文模型、进度、取消和增量重试；Embedding 失败不修改 Source/FTS 状态。用户可见的 `cleo index embed` 命令和完整度诊断仍属于步骤 7.8。
 
 #### 7.7 sqlite-vec 精确向量检索
 

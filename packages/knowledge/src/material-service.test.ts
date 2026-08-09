@@ -351,6 +351,76 @@ describe("MaterialService", () => {
     }
   });
 
+  it("embeds ready chunks by primary language and skips valid vectors on retry", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    const progress: string[] = [];
+    try {
+      await service.addText("城门在午夜关闭，守卫会记录所有出入者。", { title: "城门记录" });
+      await service.addText(
+        Array.from({ length: 70 }, (_, index) => `evidence${index}`).join(" "),
+        { title: "English evidence" },
+      );
+
+      const first = await service.embedIndex({
+        onProgress: ({ modelId, chunkId }) => progress.push(`${modelId}:${chunkId}`),
+      });
+      expect(first).toMatchObject({
+        totalChunks: 2,
+        processedChunks: 2,
+        skippedChunks: 0,
+        writtenChunks: 2,
+        discardedChunks: 0,
+      });
+      expect(first.models).toEqual([
+        expect.objectContaining({ language: "zh", processedChunks: 1, writtenChunks: 1 }),
+        expect.objectContaining({ language: "en", processedChunks: 1, writtenChunks: 1 }),
+      ]);
+      expect(progress).toHaveLength(2);
+
+      await expect(service.embedIndex()).resolves.toMatchObject({
+        totalChunks: 2,
+        processedChunks: 0,
+        skippedChunks: 2,
+        writtenChunks: 0,
+      });
+      expect(await service.search("守卫")).toHaveLength(1);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("keeps FTS available when embedding inference fails", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const baseOptions = createTestMaterialOptions();
+    const service = await MaterialService.open(project.root, {
+      ...baseOptions,
+      embeddingModels: {
+        ...baseOptions.embeddingModels,
+        zh: {
+          ...baseOptions.embeddingModels.zh,
+          async runEmbeddingTask() {
+            throw new Error("inference failed");
+          },
+        },
+      },
+    });
+    try {
+      await service.addText("旧地图标出了已经封闭的地下通道。", { title: "旧地图" });
+      await expect(service.embedIndex()).rejects.toThrow("inference failed");
+      expect(await service.search("地下通道")).toHaveLength(1);
+      expect((await service.getIndexStatus())[0]).toMatchObject({ status: "ready" });
+    } finally {
+      await service.close();
+    }
+  });
+
   it("rejects unsupported and non-UTF-8 files", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

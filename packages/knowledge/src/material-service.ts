@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { lstat, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
-import { TextDecoder } from "node:util";
 
 import type {
   KnowledgeSearchResult,
@@ -23,12 +22,19 @@ import {
   writeFileAtomic,
   writeJsonAtomic,
 } from "../../project/src/index.js";
-import { decodeMaterialText } from "./text-decoding.js";
 import type { MaterialInputEncoding } from "./text-decoding.js";
+import {
+  ensureMaterialDirectories,
+  readMaterialFile,
+  readOptionalFile,
+  readStoredUtf8Text,
+} from "./material-files.js";
 import { MaterialIndexer, type MaterialIndexRebuildResult } from "./material-indexer.js";
 import type {
   AddFileMaterialOptions,
   AddTextMaterialOptions,
+  MaterialEmbeddingIndexOptions,
+  MaterialEmbeddingIndexResult,
   MaterialServiceOptions,
 } from "./material-types.js";
 
@@ -43,10 +49,18 @@ export class MaterialService {
     private readonly maxImportBytes: number,
     private readonly languageDetection: MaterialServiceOptions["languageDetection"],
     chunking: MaterialServiceOptions["chunking"],
-    tokenizerModels: MaterialServiceOptions["tokenizerModels"],
+    embeddingModels: MaterialServiceOptions["embeddingModels"],
+    embeddingChunkBatchSize: number,
   ) {
     this.repository = new MaterialRepository(database);
-    this.indexer = new MaterialIndexer(projectRoot, projectId, database, chunking, tokenizerModels);
+    this.indexer = new MaterialIndexer(
+      projectRoot,
+      projectId,
+      database,
+      chunking,
+      embeddingModels,
+      embeddingChunkBatchSize,
+    );
   }
 
   static async open(
@@ -63,7 +77,8 @@ export class MaterialService {
       options.maxImportBytes,
       options.languageDetection,
       options.chunking,
-      options.tokenizerModels,
+      options.embeddingModels,
+      options.embeddingChunkBatchSize,
     );
     try {
       await service.synchronizeProjection();
@@ -177,6 +192,15 @@ export class MaterialService {
 
   async rebuildFts(): Promise<void> {
     await this.indexer.rebuildFts();
+  }
+
+  async embedIndex(
+    options: MaterialEmbeddingIndexOptions = {},
+  ): Promise<MaterialEmbeddingIndexResult> {
+    await this.synchronizeProjection();
+    const sources = this.repository.list();
+    await this.indexer.markOutdated(sources);
+    return await this.indexer.embed(options);
   }
 
   async remove(id: string): Promise<KnowledgeSource> {
@@ -360,54 +384,6 @@ export class MaterialService {
 
   private async resolveDerivedChunksPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `.cleo/derived/chunks/${id}.chunks.json`);
-  }
-}
-
-async function ensureMaterialDirectories(projectRoot: string): Promise<void> {
-  const materials = await resolveInsideProject(projectRoot, "materials");
-  const metadata = await resolveInsideProject(projectRoot, "sources/metadata");
-  const derivedDocuments = await resolveInsideProject(projectRoot, ".cleo/derived/documents");
-  const derivedChunks = await resolveInsideProject(projectRoot, ".cleo/derived/chunks");
-  await Promise.all([
-    mkdir(materials.absolutePath, { recursive: true }),
-    mkdir(metadata.absolutePath, { recursive: true }),
-    mkdir(derivedDocuments.absolutePath, { recursive: true }),
-    mkdir(derivedChunks.absolutePath, { recursive: true }),
-  ]);
-}
-
-async function readOptionalFile(filePath: string): Promise<string | null> {
-  return await readFile(filePath, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  });
-}
-
-async function readMaterialFile(
-  filePath: string,
-  requestedEncoding: MaterialInputEncoding | undefined,
-  maxImportBytes: number,
-) {
-  const content = await readFile(filePath);
-  if (content.byteLength > maxImportBytes) {
-    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
-  }
-  return decodeMaterialText(content, requestedEncoding);
-}
-
-async function readStoredUtf8Text(filePath: string, maxImportBytes: number): Promise<string> {
-  const content = await readFile(filePath);
-  if (content.byteLength > maxImportBytes) {
-    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(content);
-  } catch (error) {
-    throw new AppError("VALIDATION_ERROR", "项目内资料副本必须是有效的 UTF-8 文本。", {
-      cause: error,
-    });
   }
 }
 
