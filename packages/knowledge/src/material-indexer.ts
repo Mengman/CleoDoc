@@ -1,12 +1,14 @@
+import { performance } from "node:perf_hooks";
+
 import type {
   KnowledgeSearchResult,
   KnowledgeSource,
   KnowledgeSourceLanguage,
-  KnowledgeSourceIndexStatus,
   VectorSearchHit,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
 import {
+  ChunkEmbeddingRepository,
   KnowledgeChunkRepository,
   SqliteVectorIndex,
   type ProjectDatabase,
@@ -29,6 +31,8 @@ import type {
   MaterialEmbeddingIndexOptions,
   MaterialEmbeddingIndexResult,
   MaterialEmbeddingModel,
+  MaterialIndexDiagnostic,
+  MaterialSemanticSearchResult,
 } from "./material-types.js";
 
 export interface MaterialIndexRebuildFailure {
@@ -45,6 +49,7 @@ export interface MaterialIndexRebuildResult {
 
 export class MaterialIndexer {
   private readonly repository: KnowledgeChunkRepository;
+  private readonly embeddingRepository: ChunkEmbeddingRepository;
   private readonly tokenizers: MaterialTokenizerPool;
   private readonly embeddings: MaterialEmbeddingIndexer;
   private vectorIndex: SqliteVectorIndex | null = null;
@@ -54,10 +59,13 @@ export class MaterialIndexer {
     private readonly projectId: string,
     private readonly database: ProjectDatabase,
     private readonly chunking: ChunkDocumentOptions,
-    embeddingModels: Readonly<Record<KnowledgeSourceLanguage, MaterialEmbeddingModel>>,
+    private readonly embeddingModels: Readonly<
+      Record<KnowledgeSourceLanguage, MaterialEmbeddingModel>
+    >,
     embeddingChunkBatchSize: number,
   ) {
     this.repository = new KnowledgeChunkRepository(database);
+    this.embeddingRepository = new ChunkEmbeddingRepository(database);
     this.tokenizers = new MaterialTokenizerPool(embeddingModels);
     this.embeddings = new MaterialEmbeddingIndexer(
       projectId,
@@ -130,8 +138,57 @@ export class MaterialIndexer {
     );
   }
 
-  listStatus(): KnowledgeSourceIndexStatus[] {
-    return this.repository.listStatus();
+  async searchSemantic(query: string, limit = 10): Promise<MaterialSemanticSearchResult> {
+    const normalized = query.trim();
+    if (normalized === "") {
+      throw new AppError("VALIDATION_ERROR", "语义检索内容不能为空。");
+    }
+    const language = detectQueryLanguage(normalized);
+    const model = this.embeddingModels[language];
+    const embeddingStartedAt = performance.now();
+    const embedding = await model.embedQuery(normalized);
+    const embeddingDurationMs = performance.now() - embeddingStartedAt;
+    const searchStartedAt = performance.now();
+    const results = await this.searchVector(language, embedding.vector, limit);
+    return {
+      language,
+      modelId: model.modelId,
+      tokenCount: embedding.tokenCount,
+      dimensions: embedding.vector.length,
+      embeddingDurationMs,
+      searchDurationMs: performance.now() - searchStartedAt,
+      results,
+    };
+  }
+
+  listStatus(sources: readonly KnowledgeSource[]): MaterialIndexDiagnostic[] {
+    const baseStatuses = new Map(
+      this.repository.listStatus().map((status) => [status.sourceId, status] as const),
+    );
+    const coverage = new Map(
+      (["zh", "en"] as const).flatMap((language) => {
+        const modelId = this.embeddingModels[language].modelId;
+        return this.embeddingRepository
+          .listCoverage(this.projectId, language, modelId)
+          .map((item) => [item.sourceId, item] as const);
+      }),
+    );
+    return sources.map((source) => {
+      const base = baseStatuses.get(source.id);
+      if (base === undefined) {
+        throw new AppError("DATABASE_ERROR", "资料索引状态投影缺失。");
+      }
+      const language = source.languages[0]!;
+      const storedEmbeddingCount = coverage.get(source.id)?.embeddedChunks ?? 0;
+      const embeddedChunkCount = base.status === "ready" ? storedEmbeddingCount : 0;
+      return {
+        ...base,
+        language,
+        embeddingModelId: this.embeddingModels[language].modelId,
+        embeddedChunkCount,
+        pendingEmbeddingCount: Math.max(0, base.chunkCount - embeddedChunkCount),
+      };
+    });
   }
 
   async rebuild(
@@ -198,4 +255,10 @@ export class MaterialIndexer {
       ...chunkedDocument,
     });
   }
+}
+
+export function detectQueryLanguage(query: string): KnowledgeSourceLanguage {
+  const hanCharacters = query.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const englishWords = query.match(/[A-Za-z]+(?:['’][A-Za-z]+)*/gu)?.length ?? 0;
+  return englishWords > hanCharacters ? "en" : "zh";
 }

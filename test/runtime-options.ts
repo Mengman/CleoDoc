@@ -65,6 +65,12 @@ export function createTestMaterialOptions(
       });
       await onBatch?.(results);
     },
+    async embedQuery(query: string) {
+      return {
+        tokenCount: Array.from(query).length,
+        vector: Float32Array.from([query.length, language === "zh" ? 1 : 2]),
+      };
+    },
   });
   return {
     database: TEST_DATABASE_OPTIONS,

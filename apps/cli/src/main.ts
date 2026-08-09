@@ -49,6 +49,7 @@ import { helpText } from "./help.js";
 import { LlmDebugFileLogger } from "./debug-log.js";
 import { runEmbeddingCommand } from "./embedding-command.js";
 import { createMaterialServiceOptions } from "./material-service-options.js";
+import { runIndexCommand, runSearchCommand } from "./rag-command.js";
 
 const softwareConfigService = new SoftwareConfigService();
 const appStateService = new AppStateService();
@@ -93,10 +94,10 @@ async function main(argumentsList: readonly string[]): Promise<void> {
       await materialCommand(parsed);
       return;
     case "index":
-      await indexCommand(parsed);
+      await runIndexCommand(parsed, ragCommandDependencies());
       return;
     case "search":
-      await searchCommand(parsed);
+      await runSearchCommand(parsed, ragCommandDependencies());
       return;
     case "embedding":
       await runEmbeddingCommand(
@@ -384,74 +385,6 @@ async function materialCommand(parsed: ParsedArguments): Promise<void> {
       }
       default:
         throw new AppError("VALIDATION_ERROR", "用法：cleo material <add|list|show|rename|remove>");
-    }
-  } finally {
-    await materials.close();
-  }
-}
-
-async function indexCommand(parsed: ParsedArguments): Promise<void> {
-  assertOnlyOptions(parsed, ["project"]);
-  const [subcommand] = parsed.positionals;
-  if (parsed.positionals.length !== 1 || !["status", "rebuild"].includes(subcommand ?? "")) {
-    throw new AppError("VALIDATION_ERROR", "用法：cleo index <status|rebuild>");
-  }
-  const root = await resolveProjectRoot(optionString(parsed, "project"));
-  const materials = await MaterialService.open(root, materialServiceOptions());
-  try {
-    if (subcommand === "status") {
-      const statuses = await materials.getIndexStatus();
-      if (statuses.length === 0) {
-        output.write("尚无可索引资料。\n");
-      }
-      for (const status of statuses) {
-        output.write(
-          `${status.sourceId}\t${status.title}\t${status.status}\t${status.chunkCount} chunks` +
-            `${status.errorCode === null ? "" : `\t${status.errorCode}`}\n`,
-        );
-      }
-      return;
-    }
-
-    const result = await materials.rebuildIndex();
-    await materials.rebuildFts();
-    output.write(
-      `索引重建完成：${result.indexedCount} 份资料成功，${result.failed.length} 份失败。\n`,
-    );
-    for (const failure of result.failed) {
-      output.write(
-        `失败 [${failure.errorCode}]：${failure.title}（${failure.sourceId}）— ${failure.message}\n`,
-      );
-    }
-  } finally {
-    await materials.close();
-  }
-}
-
-async function searchCommand(parsed: ParsedArguments): Promise<void> {
-  assertOnlyOptions(parsed, ["project", "limit", "scope"]);
-  const [query] = parsed.positionals;
-  if (query === undefined || parsed.positionals.length !== 1) {
-    throw new AppError("VALIDATION_ERROR", "用法：cleo search <query> [--limit <数量>]");
-  }
-  const scope = optionString(parsed, "scope") ?? "material";
-  if (scope !== "material") {
-    throw new AppError("VALIDATION_ERROR", "当前全文检索只支持 --scope material。");
-  }
-  const limit = optionPositiveInteger(parsed, "limit") ?? 10;
-  const root = await resolveProjectRoot(optionString(parsed, "project"));
-  const materials = await MaterialService.open(root, materialServiceOptions());
-  try {
-    const results = await materials.search(query, limit);
-    if (results.length === 0) {
-      output.write("没有找到匹配的资料。\n");
-      return;
-    }
-    for (const [index, result] of results.entries()) {
-      output.write(
-        `[${index + 1}] ${result.sourceTitle}\n` +
-          `source: ${result.sourceId}\nchunk: ${result.chunkId}\n${result.content}\n\n`,
-      );
     }
   } finally {
     await materials.close();
@@ -1395,6 +1328,16 @@ function chatServiceOptions() {
 
 function materialServiceOptions() {
   return createMaterialServiceOptions(softwareConfig, softwareConfigService.defaultConfigPath);
+}
+
+function ragCommandDependencies() {
+  return {
+    output,
+    defaultDebug: softwareConfig.debug.enabled,
+    resolveProjectRoot,
+    openMaterials: async (projectRoot: string) =>
+      await MaterialService.open(projectRoot, materialServiceOptions()),
+  };
 }
 
 function optionPositiveInteger(parsed: ParsedArguments, name: string): number | undefined {

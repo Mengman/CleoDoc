@@ -4,6 +4,11 @@ import type {
   LanguageDetectionOptions,
 } from "@cleodoc/document-ingestion";
 import type { MaterialInputEncoding } from "./text-decoding.js";
+import type {
+  KnowledgeSourceIndexStatus,
+  KnowledgeSourceLanguage,
+  VectorSearchHit,
+} from "../../contracts/src/index.js";
 
 interface MaterialMetadataOptions {
   title?: string;
@@ -58,6 +63,9 @@ export interface MaterialEmbeddingTaskOptions {
 
 export interface MaterialEmbeddingModel extends MaterialTokenizerModel {
   runEmbeddingTask(options: MaterialEmbeddingTaskOptions): Promise<void>;
+  embedQuery(
+    query: string,
+  ): Promise<{ readonly vector: Float32Array; readonly tokenCount: number }>;
 }
 
 export interface MaterialEmbeddingIndexProgress extends MaterialEmbeddingTaskProgress {
@@ -73,6 +81,12 @@ export interface MaterialEmbeddingModelResult {
   readonly skippedChunks: number;
   readonly writtenChunks: number;
   readonly discardedChunks: number;
+  readonly failedChunks: number;
+  readonly tokenCount: number;
+  readonly dimensions: number | null;
+  readonly durationMs: number;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
 }
 
 export interface MaterialEmbeddingIndexResult {
@@ -81,12 +95,31 @@ export interface MaterialEmbeddingIndexResult {
   readonly skippedChunks: number;
   readonly writtenChunks: number;
   readonly discardedChunks: number;
+  readonly failedChunks: number;
   readonly models: readonly MaterialEmbeddingModelResult[];
 }
 
 export interface MaterialEmbeddingIndexOptions {
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: MaterialEmbeddingIndexProgress) => void;
+  readonly continueOnError?: boolean;
+}
+
+export interface MaterialIndexDiagnostic extends KnowledgeSourceIndexStatus {
+  readonly language: KnowledgeSourceLanguage;
+  readonly embeddingModelId: string;
+  readonly embeddedChunkCount: number;
+  readonly pendingEmbeddingCount: number;
+}
+
+export interface MaterialSemanticSearchResult {
+  readonly language: KnowledgeSourceLanguage;
+  readonly modelId: string;
+  readonly tokenCount: number;
+  readonly dimensions: number;
+  readonly embeddingDurationMs: number;
+  readonly searchDurationMs: number;
+  readonly results: readonly VectorSearchHit[];
 }
 
 export interface MaterialServiceOptions {

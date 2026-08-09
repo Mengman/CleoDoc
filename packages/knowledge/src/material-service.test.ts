@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { AppError } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { MaterialService } from "./material-service.js";
@@ -414,10 +415,68 @@ describe("MaterialService", () => {
     try {
       await service.addText("旧地图标出了已经封闭的地下通道。", { title: "旧地图" });
       await expect(service.embedIndex()).rejects.toThrow("inference failed");
+      await expect(service.embedIndex({ continueOnError: true })).resolves.toMatchObject({
+        processedChunks: 0,
+        failedChunks: 1,
+        models: expect.arrayContaining([
+          expect.objectContaining({
+            language: "zh",
+            failedChunks: 1,
+            errorCode: "EMBEDDING_GENERATION_FAILED",
+          }),
+        ]),
+      });
       expect(await service.search("地下通道")).toHaveLength(1);
       expect((await service.getIndexStatus())[0]).toMatchObject({ status: "ready" });
     } finally {
       await service.close();
+    }
+  });
+
+  it("keeps successful model batches and retries only the failed model", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const baseOptions = createTestMaterialOptions();
+    const failing = await MaterialService.open(project.root, {
+      ...baseOptions,
+      embeddingModels: {
+        ...baseOptions.embeddingModels,
+        zh: {
+          ...baseOptions.embeddingModels.zh,
+          async runEmbeddingTask() {
+            throw new AppError("EMBEDDING_GENERATION_FAILED", "inference failed");
+          },
+        },
+      },
+    });
+    try {
+      await failing.addText("城门守卫会在午夜检查所有通行证。".repeat(4), {
+        title: "城门记录",
+      });
+      await failing.addText(Array.from({ length: 70 }, (_, index) => `archive${index}`).join(" "), {
+        title: "English archive",
+      });
+      const partial = await failing.embedIndex({ continueOnError: true });
+      expect(partial.failedChunks).toBe(1);
+      expect(partial.writtenChunks).toBeGreaterThan(0);
+    } finally {
+      await failing.close();
+    }
+
+    const recovered = await MaterialService.open(project.root, baseOptions);
+    try {
+      const result = await recovered.embedIndex();
+      expect(result.models).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ language: "zh", processedChunks: 1, writtenChunks: 1 }),
+          expect.objectContaining({ language: "en", processedChunks: 0, writtenChunks: 0 }),
+        ]),
+      );
+      expect(result.failedChunks).toBe(0);
+    } finally {
+      await recovered.close();
     }
   });
 
@@ -432,20 +491,56 @@ describe("MaterialService", () => {
     try {
       const chineseSource = await service.addText(chinese, { title: "古城档案" });
       const englishSource = await service.addText(english, { title: "Railway archive" });
+      expect(await service.getIndexStatus()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceId: chineseSource.source.id,
+            language: "zh",
+            embeddingModelId: "test-zh-tokenizer",
+            embeddedChunkCount: 0,
+            pendingEmbeddingCount: 1,
+          }),
+          expect.objectContaining({
+            sourceId: englishSource.source.id,
+            language: "en",
+            embeddingModelId: "test-en-tokenizer",
+            embeddedChunkCount: 0,
+            pendingEmbeddingCount: 2,
+          }),
+        ]),
+      );
       await service.embedIndex();
 
-      const chineseResults = await service.searchVector(
-        "zh",
-        Float32Array.from([chinese.length, 1]),
-      );
-      const englishResults = await service.searchVector(
-        "en",
-        Float32Array.from([english.length, 2]),
-      );
-      expect(chineseResults.map((result) => result.sourceId)).toEqual([chineseSource.source.id]);
-      expect(englishResults.length).toBeGreaterThan(0);
-      expect(new Set(englishResults.map((result) => result.sourceId))).toEqual(
+      const chineseResults = await service.searchSemantic("关闭城门");
+      const englishResults = await service.searchSemantic("railway evidence");
+      expect(chineseResults).toMatchObject({
+        language: "zh",
+        modelId: "test-zh-tokenizer",
+      });
+      expect(chineseResults.results.map((result) => result.sourceId)).toEqual([
+        chineseSource.source.id,
+      ]);
+      expect(englishResults).toMatchObject({
+        language: "en",
+        modelId: "test-en-tokenizer",
+      });
+      expect(englishResults.results.length).toBeGreaterThan(0);
+      expect(new Set(englishResults.results.map((result) => result.sourceId))).toEqual(
         new Set([englishSource.source.id]),
+      );
+      expect(await service.getIndexStatus()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceId: chineseSource.source.id,
+            embeddedChunkCount: 1,
+            pendingEmbeddingCount: 0,
+          }),
+          expect.objectContaining({
+            sourceId: englishSource.source.id,
+            embeddedChunkCount: 2,
+            pendingEmbeddingCount: 0,
+          }),
+        ]),
       );
     } finally {
       await service.close();

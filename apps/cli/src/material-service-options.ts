@@ -48,5 +48,15 @@ function createEmbeddingModel(
         await import("../../../packages/rag/src/embedding-worker-task.js");
       await runEmbeddingWorkerTask({ definition, ...options });
     },
+    async embedQuery(query) {
+      const { NodeLlamaCppEmbeddingRuntime } =
+        await import("../../../packages/rag/src/node-llama-cpp-embedding.js");
+      const runtime = await NodeLlamaCppEmbeddingRuntime.open(definition);
+      try {
+        return await runtime.embedQuery(query);
+      } finally {
+        await runtime.dispose();
+      }
+    },
   };
 }

@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+
 import { AppError, type KnowledgeSourceLanguage } from "../../contracts/src/index.js";
 import {
   ChunkEmbeddingRepository,
@@ -35,37 +37,66 @@ export class MaterialEmbeddingIndexer {
     language: KnowledgeSourceLanguage,
     options: MaterialEmbeddingIndexOptions,
   ): Promise<MaterialEmbeddingModelResult> {
+    const startedAt = performance.now();
     const model = this.models[language];
     const pending = this.repository.listPending(this.projectId, language, model.modelId);
     let writtenChunks = 0;
     let discardedChunks = 0;
+    let tokenCount = 0;
+    let dimensions: number | null = null;
     const snapshots = new Map(pending.chunks.map((chunk) => [chunk.chunkId, chunk] as const));
 
-    await model.runEmbeddingTask({
-      chunks: pending.chunks.map(({ chunkId, content }) => ({ chunkId, content })),
-      chunkBatchSize: this.chunkBatchSize,
-      signal: options.signal,
-      onProgress: (progress) =>
-        options.onProgress?.({ language, modelId: model.modelId, ...progress }),
-      onBatch: async (results) => {
-        const writes = results.map((result) => ({
-          snapshot: requireSnapshot(snapshots, result.chunkId),
-          vector: result.vector,
-        }));
-        const written = await this.repository.writeBatch(
-          this.projectId,
-          language,
-          {
-            modelId: model.modelId,
-            modelName: model.modelName,
-            revision: model.modelRevision,
-          },
-          writes,
-        );
-        writtenChunks += written.writtenCount;
-        discardedChunks += written.discardedCount;
-      },
-    });
+    try {
+      await model.runEmbeddingTask({
+        chunks: pending.chunks.map(({ chunkId, content }) => ({ chunkId, content })),
+        chunkBatchSize: this.chunkBatchSize,
+        signal: options.signal,
+        onProgress: (progress) =>
+          options.onProgress?.({ language, modelId: model.modelId, ...progress }),
+        onBatch: async (results) => {
+          for (const result of results) {
+            tokenCount += result.tokenCount;
+            dimensions ??= result.vector.length;
+          }
+          const writes = results.map((result) => ({
+            snapshot: requireSnapshot(snapshots, result.chunkId),
+            vector: result.vector,
+          }));
+          const written = await this.repository.writeBatch(
+            this.projectId,
+            language,
+            {
+              modelId: model.modelId,
+              modelName: model.modelName,
+              revision: model.modelRevision,
+            },
+            writes,
+          );
+          writtenChunks += written.writtenCount;
+          discardedChunks += written.discardedCount;
+        },
+      });
+    } catch (error) {
+      const applicationError = asEmbeddingError(error);
+      if (!options.continueOnError || !isRecoverableEmbeddingError(applicationError)) {
+        throw error;
+      }
+      return {
+        language,
+        modelId: model.modelId,
+        totalChunks: pending.totalChunks,
+        processedChunks: writtenChunks + discardedChunks,
+        skippedChunks: pending.totalChunks - pending.chunks.length,
+        writtenChunks,
+        discardedChunks,
+        failedChunks: pending.chunks.length - writtenChunks - discardedChunks,
+        tokenCount,
+        dimensions,
+        durationMs: performance.now() - startedAt,
+        errorCode: applicationError.code,
+        errorMessage: applicationError.message,
+      };
+    }
 
     return {
       language,
@@ -75,8 +106,29 @@ export class MaterialEmbeddingIndexer {
       skippedChunks: pending.totalChunks - pending.chunks.length,
       writtenChunks,
       discardedChunks,
+      failedChunks: 0,
+      tokenCount,
+      dimensions,
+      durationMs: performance.now() - startedAt,
+      errorCode: null,
+      errorMessage: null,
     };
   }
+}
+
+function asEmbeddingError(error: unknown): AppError {
+  return error instanceof AppError
+    ? error
+    : new AppError("EMBEDDING_GENERATION_FAILED", "Embedding 推理失败。", { cause: error });
+}
+
+function isRecoverableEmbeddingError(error: AppError): boolean {
+  return [
+    "EMBEDDING_MODEL_NOT_FOUND",
+    "EMBEDDING_MODEL_LOAD_FAILED",
+    "EMBEDDING_GENERATION_FAILED",
+    "EMBEDDING_INPUT_TOO_LONG",
+  ].includes(error.code);
 }
 
 function requireSnapshot(
@@ -99,6 +151,7 @@ function summarize(models: readonly MaterialEmbeddingModelResult[]): MaterialEmb
     skippedChunks: total((result) => result.skippedChunks),
     writtenChunks: total((result) => result.writtenChunks),
     discardedChunks: total((result) => result.discardedChunks),
+    failedChunks: total((result) => result.failedChunks),
     models,
   };
 }

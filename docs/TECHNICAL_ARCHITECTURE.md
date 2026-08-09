@@ -1007,7 +1007,8 @@ v0.2 在此基础上增加：
 - 已实现：Embedding Worker 的任务分批、模型复用、逐项进度、取消和纯数据向量回传；Worker 不访问 SQLite。
 - 已实现：资料 Chunk/FTS 增量投影，以及按主语言和模型筛选缺失向量、冻结任务 Hash、短事务条件写回和增量重试的 Embedding 编排；过期结果不会覆盖新 Chunk，Embedding 失败不影响 FTS。
 - 已实现：锁定 `sqlite-vec` 0.1.9 的延迟加载和精确余弦 `VectorIndex`；扩展加载后立即关闭任意加载入口，检索会排除其他项目、非 `ready` Source、不同模型及 Hash 失效向量。
-- 尚未实现：正文 FTS、混合 RAG、`ContextManifest`、RAG Tool、Embedding 用户命令和 CLI 发布验收。
+- 已实现：`index embed/status` 的增量补齐、进度、完整度、部分失败恢复与取消，以及按 Query 语言选择模型的 `search --semantic`；RAG Debug 日志只保存安全的运行元数据。
+- 尚未实现：正文 FTS、混合 RAG、`ContextManifest`、RAG Tool、步骤 7.9 完整基准和 CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

@@ -5,7 +5,6 @@ import path from "node:path";
 import type {
   KnowledgeSearchResult,
   KnowledgeSource,
-  KnowledgeSourceIndexStatus,
   MaterialImportResult,
   MaterialWithContent,
   KnowledgeSourceLanguage,
@@ -37,6 +36,8 @@ import type {
   AddTextMaterialOptions,
   MaterialEmbeddingIndexOptions,
   MaterialEmbeddingIndexResult,
+  MaterialIndexDiagnostic,
+  MaterialSemanticSearchResult,
   MaterialServiceOptions,
 } from "./material-types.js";
 
@@ -187,10 +188,17 @@ export class MaterialService {
     return await this.indexer.searchVector(language, query, limit);
   }
 
-  async getIndexStatus(): Promise<KnowledgeSourceIndexStatus[]> {
+  async searchSemantic(query: string, limit = 10): Promise<MaterialSemanticSearchResult> {
     await this.synchronizeProjection();
     await this.indexer.markOutdated(this.repository.list());
-    return this.indexer.listStatus();
+    return await this.indexer.searchSemantic(query, limit);
+  }
+
+  async getIndexStatus(): Promise<MaterialIndexDiagnostic[]> {
+    await this.synchronizeProjection();
+    const sources = this.repository.list();
+    await this.indexer.markOutdated(sources);
+    return this.indexer.listStatus(sources);
   }
 
   async rebuildIndex(): Promise<MaterialIndexRebuildResult> {

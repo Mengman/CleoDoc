@@ -33,6 +33,11 @@ export interface ChunkEmbeddingWriteResult {
   readonly discardedCount: number;
 }
 
+export interface SourceEmbeddingCoverage {
+  readonly sourceId: string;
+  readonly embeddedChunks: number;
+}
+
 interface CandidateRow {
   chunk_id: string;
   source_id: string;
@@ -91,6 +96,36 @@ export class ChunkEmbeddingRepository {
         return mapPendingChunk(row, row.chunking_config_json);
       });
     return { totalChunks: rows.length, chunks };
+  }
+
+  listCoverage(
+    projectId: string,
+    language: KnowledgeSourceLanguage,
+    modelId: string,
+  ): readonly SourceEmbeddingCoverage[] {
+    return this.projectDatabase.read((database) =>
+      database
+        .prepare(
+          `SELECT s.id AS source_id,
+                  SUM(CASE WHEN ce.content_hash = kc.content_hash THEN 1 ELSE 0 END)
+                    AS embedded_chunks
+           FROM sources s
+           LEFT JOIN knowledge_chunks kc ON kc.source_id = s.id
+           LEFT JOIN chunk_embeddings ce
+             ON ce.chunk_rowid = kc.chunk_rowid AND ce.embedding_model_id = ?
+           WHERE s.project_id = ? AND s.source_type = 'material'
+             AND json_extract(s.languages_json, '$[0]') = ?
+           GROUP BY s.id`,
+        )
+        .all(modelId, projectId, language)
+        .map((value) => {
+          const row = value as Record<string, unknown>;
+          return {
+            sourceId: String(row.source_id),
+            embeddedChunks: Number(row.embedded_chunks),
+          };
+        }),
+    );
   }
 
   async writeBatch(
