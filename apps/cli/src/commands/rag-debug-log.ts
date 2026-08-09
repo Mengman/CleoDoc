@@ -1,7 +1,7 @@
 import { mkdir, open, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
-import { AppError } from "../../../packages/contracts/src/index.js";
+import { AppError } from "../../../../packages/contracts/src/index.js";
 
 export type RagDebugEvent =
   | {

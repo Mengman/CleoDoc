@@ -184,6 +184,7 @@ YAML 和操作系统配置目录只由配置包访问。Database、Project、RAG
 ```text
 apps/
 ├─ cli/
+│  └─ src/commands/  # 每个顶层 CLI 命令一个入口模块；Chat 的交互与终端 UI 再按职责拆分
 └─ desktop/
    ├─ src/main/
    ├─ src/preload/
@@ -205,6 +206,8 @@ packages/
 ├─ model-providers/ # OpenAI-compatible、Anthropic、Gemini、Ollama
 └─ testing/         # fixtures、benchmark 和 test helpers
 ```
+
+`apps/cli/src/main.ts` 只负责启动、软件配置初始化、顶层命令路由和统一错误处理。`switch (parsed.command)` 中每个业务命令必须委托给独立的 `commands/*-command.ts`，不得把命令实现重新堆回入口文件。跨命令共享的项目定位、Provider 参数和终端输出辅助保持为小型公共模块；单个复杂命令仍需遵守 500 行原则并按明确职责继续拆分。
 
 面向未来拆分 RAG 的关键依赖方向固定为：
 

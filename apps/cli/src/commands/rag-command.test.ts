@@ -4,9 +4,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AppError } from "../../../packages/contracts/src/index.js";
-import { parseArguments } from "./arguments.js";
-import { runIndexCommand, runSearchCommand, type RagCommandDependencies } from "./rag-command.js";
+import { AppError } from "../../../../packages/contracts/src/index.js";
+import { parseArguments } from "../arguments.js";
+import { executeIndexCommand } from "./index-command.js";
+import type { RagCommandDependencies } from "./rag-command-types.js";
+import { executeSearchCommand } from "./search-command.js";
 
 const temporaryDirectories: string[] = [];
 type RagMaterialService = Awaited<ReturnType<RagCommandDependencies["openMaterials"]>>;
@@ -36,7 +38,7 @@ describe("RAG CLI commands", () => {
       },
     });
 
-    await runIndexCommand(parseArguments(["index", "embed", "--debug"]), {
+    await executeIndexCommand(parseArguments(["index", "embed", "--debug"]), {
       output,
       defaultDebug: false,
       resolveProjectRoot: async () => root,
@@ -76,7 +78,7 @@ describe("RAG CLI commands", () => {
         ];
       },
     });
-    await runIndexCommand(parseArguments(["index", "status"]), dependencies(output, service));
+    await executeIndexCommand(parseArguments(["index", "status"]), dependencies(output, service));
     expect(output.content).toContain("embedding: 2/3");
     expect(output.content).toContain("pending: 1");
     expect(output.content).toContain("model: model-zh");
@@ -111,17 +113,17 @@ describe("RAG CLI commands", () => {
     };
 
     await expect(
-      runSearchCommand(
+      executeSearchCommand(
         parseArguments(["search", "private query text", "--semantic", "--debug"]),
         commandDependencies,
       ),
     ).rejects.toMatchObject({ code: "VECTOR_INDEX_UNAVAILABLE" });
     semanticUnavailable = false;
-    await runSearchCommand(
+    await executeSearchCommand(
       parseArguments(["search", "private query text", "--semantic", "--debug"]),
       commandDependencies,
     );
-    await runSearchCommand(parseArguments(["search", "exact keyword"]), commandDependencies);
+    await executeSearchCommand(parseArguments(["search", "exact keyword"]), commandDependencies);
 
     expect(output.content).toContain("distance: 0.250000");
     expect(output.content).toContain("FTS:exact keyword");
