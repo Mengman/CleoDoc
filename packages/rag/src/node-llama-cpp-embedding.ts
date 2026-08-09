@@ -96,6 +96,8 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
       modelPath: this.definition.modelPath,
       maxInputTokens: this.definition.maxInputTokens,
       embeddingDimensions: this.model.embeddingVectorSize,
+      gpuBackend: this.llama.gpu,
+      gpuLayers: this.model.gpuLayers,
       modelWarnings: this.model
         .getWarnings()
         .map((warning) => warning.replaceAll(this.definition.modelPath, this.definition.modelFile)),

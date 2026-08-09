@@ -25,6 +25,18 @@ afterEach(async () => {
 });
 
 describe("SqliteVectorIndex", () => {
+  it("reports extension loading failures without changing database state", () => {
+    const unavailableDatabase = {
+      read() {
+        throw new Error("extension unavailable");
+      },
+    } as unknown as ProjectDatabase;
+
+    expect(() => SqliteVectorIndex.open(unavailableDatabase)).toThrow(
+      expect.objectContaining({ code: "VECTOR_INDEX_UNAVAILABLE" }),
+    );
+  });
+
   it("loads the pinned extension, performs exact cosine search, then disables loading", async () => {
     const database = await createDatabase();
     try {

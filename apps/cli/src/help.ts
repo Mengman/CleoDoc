@@ -46,6 +46,7 @@ export const helpText = `CleoDoc v0.1 CLI
 
   cleo embedding model
   cleo embedding test <zh|en> <text> [--query]
+  cleo embedding benchmark <zh|en> [--gpu] [--copies <每篇复制数>] [--runs <查询轮数>]
 
   cleo conversation list [--project <directory>]
   cleo conversation show <conversation-id> [--project <directory>]

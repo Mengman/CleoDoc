@@ -1001,7 +1001,7 @@ v0.2 在此基础上增加：
 
 实施顺序、任务依赖和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，本架构文档不再保存重复的交付计划。
 
-截至 2026-08-09：
+截至 2026-08-10：
 
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
@@ -1012,7 +1012,8 @@ v0.2 在此基础上增加：
 - 已实现：资料 Chunk/FTS 增量投影，以及按主语言和模型筛选缺失向量、冻结任务 Hash、短事务条件写回和增量重试的 Embedding 编排；过期结果不会覆盖新 Chunk，Embedding 失败不影响 FTS。
 - 已实现：锁定 `sqlite-vec` 0.1.9 的延迟加载和精确余弦 `VectorIndex`；扩展加载后立即关闭任意加载入口，检索会排除其他项目、非 `ready` Source、不同模型及 Hash 失效向量。
 - 已实现：`index embed/status` 的增量补齐、进度、完整度、部分失败恢复与取消，以及按 Query 语言选择模型的 `search --semantic`；RAG Debug 日志只保存安全的运行元数据。
-- 尚未实现：正文 FTS、混合 RAG、`ContextManifest`、RAG Tool、步骤 7.9 完整基准和 CLI 发布验收。
+- 已实现：Embedding 步骤 7.9 的编码、级联、恢复、失败隔离测试，以及固定中英文近义语料和真实 Q8_0 CPU/GPU 模型的可重复基准命令；GPU 模式会报告实际后端和卸载层数，首份加载、首次与稳态推理、吞吐、SQLite 查询、Top-1/Top-5 Query Recall 和回溯结果记录在 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
+- 尚未实现：正文 FTS、混合 RAG、`ContextManifest`、RAG Tool 和 CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

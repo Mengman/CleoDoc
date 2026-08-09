@@ -237,6 +237,7 @@ describe("MaterialService", () => {
       });
       materialId = added.source.id;
       relativePath = added.source.relativePath;
+      await service.embedIndex();
       const renamed = await service.rename(materialId, "车站场景笔记");
       expect(renamed.title).toBe("车站场景笔记");
       expect(renamed.relativePath).toBe(relativePath);
@@ -271,6 +272,24 @@ describe("MaterialService", () => {
     const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     try {
       expect(new MaterialRepository(database).get(materialId)).toBeNull();
+      expect(
+        database.read((sqlite) => ({
+          chunks: Number(
+            (
+              sqlite.prepare("SELECT COUNT(*) AS count FROM knowledge_chunks").get() as {
+                count: number;
+              }
+            ).count,
+          ),
+          embeddings: Number(
+            (
+              sqlite.prepare("SELECT COUNT(*) AS count FROM chunk_embeddings").get() as {
+                count: number;
+              }
+            ).count,
+          ),
+        })),
+      ).toEqual({ chunks: 0, embeddings: 0 });
     } finally {
       await database.close();
     }
@@ -391,6 +410,37 @@ describe("MaterialService", () => {
       expect(await service.search("守卫")).toHaveLength(1);
     } finally {
       await service.close();
+    }
+  });
+
+  it("reuses valid embeddings after closing and reopening the project", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const options = createTestMaterialOptions();
+    const initial = await MaterialService.open(project.root, options);
+    const source = await initial.addText("守卫在深夜封闭城门并核对旅人的通行凭证。", {
+      title: "城门记录",
+    });
+    await expect(initial.embedIndex()).resolves.toMatchObject({ writtenChunks: 1 });
+    await initial.close();
+
+    const reopened = await MaterialService.open(project.root, options);
+    try {
+      await expect(reopened.embedIndex()).resolves.toMatchObject({
+        processedChunks: 0,
+        skippedChunks: 1,
+        writtenChunks: 0,
+      });
+      expect((await reopened.searchSemantic("夜间关闭入口")).results[0]).toMatchObject({
+        sourceId: source.source.id,
+        chunkId: expect.any(String),
+        startOffset: 0,
+        endOffset: expect.any(Number),
+      });
+    } finally {
+      await reopened.close();
     }
   });
 

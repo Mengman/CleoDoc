@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；下一步执行 7.9 的完整测试与基准。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test/benchmark` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；步骤 7.9 的完整测试与 CPU/GPU 基准已经完成，下一步进入步骤 8 混合 RAG。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -504,6 +504,7 @@ cleo search <query> --scope material
 ```text
 cleo embedding model
 cleo embedding test <zh|en> <text> [--query]
+cleo embedding benchmark <zh|en> [--gpu] [--copies <数量>] [--runs <数量>]
 cleo index embed
 cleo search <query> --semantic
 ```
@@ -516,6 +517,8 @@ cleo search <query> --semantic
 - Embedding 失败时 FTS5 仍可使用。
 - 重建相同内容不会重复计算或写入相同模型的有效向量。
 - 向量结果严格隔离当前项目，并能回溯公开 Source、Chunk ID 和原文范围。
+
+实施状态：已完成。既有测试覆盖 Token 上限、自然边界拆分、短块合并、Hash 过期、模型/项目隔离、批次间取消、失败后 FTS 可用和过期结果拒绝写回；本步骤补充了 Float32 Little-Endian 精确字节测试、sqlite-vec 加载失败、Source 删除后的 Chunk/向量级联清理，以及关闭并重新打开项目后复用有效向量。`cleo embedding benchmark` 使用真实 Q8_0 GGUF、固定中英文近义语料和临时 SQLite 数据库，默认强制 CPU，`--gpu` 使用 llama.cpp auto 并核验实际后端与卸载层数；命令报告模型加载、首次推理、稳态单 Chunk 平均/P50/P95、Chunk/Token 吞吐、Query Embedding、sqlite-vec 精确查询、Top-1/Top-5 Query Recall 和结果可追溯性。本机 CPU/AMD GPU 对比见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
 
 ### 步骤 8：混合 RAG
 

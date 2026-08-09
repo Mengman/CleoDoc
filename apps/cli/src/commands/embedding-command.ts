@@ -11,6 +11,8 @@ import { resolveEmbeddingModelDefinition } from "../../../../packages/rag/src/em
 import type { EmbeddingLanguage } from "../../../../packages/rag/src/embedding-types.js";
 import { assertOnlyOptions, optionBoolean, type ParsedArguments } from "../arguments.js";
 import type { CliCommandContext } from "./command-context.js";
+import { optionPositiveInteger } from "./command-utils.js";
+import { runEmbeddingBenchmark } from "./embedding-benchmark.js";
 
 export async function runEmbeddingCommand(
   parsed: ParsedArguments,
@@ -40,8 +42,39 @@ export async function runEmbeddingCommand(
     return;
   }
 
+  if (subcommand === "benchmark" && isEmbeddingLanguage(languageValue)) {
+    assertOnlyOptions(parsed, ["copies", "gpu", "runs"]);
+    if (parsed.positionals.length !== 2) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "用法：cleo embedding benchmark <zh|en> [--gpu] [--copies <数量>] [--runs <数量>]",
+      );
+    }
+    const copiesPerDocument = optionPositiveInteger(parsed, "copies") ?? 16;
+    const queryRuns = optionPositiveInteger(parsed, "runs") ?? 20;
+    if (copiesPerDocument > 1_000 || queryRuns > 1_000) {
+      throw new AppError("VALIDATION_ERROR", "--copies 和 --runs 不能超过 1000。");
+    }
+    await runEmbeddingBenchmark({
+      definition: resolveEmbeddingModelDefinition(
+        languageValue,
+        config.rag.embedding.models[languageValue],
+        resourceRoot,
+      ),
+      databaseBusyTimeoutMs: config.database.busyTimeoutMs,
+      gpuAcceleration: optionBoolean(parsed, "gpu"),
+      copiesPerDocument,
+      queryRuns,
+      output: context.output,
+    });
+    return;
+  }
+
   if (subcommand !== "test" || !isEmbeddingLanguage(languageValue) || text === undefined) {
-    throw new AppError("VALIDATION_ERROR", "用法：cleo embedding test <zh|en> <text> [--query]");
+    throw new AppError(
+      "VALIDATION_ERROR",
+      "用法：cleo embedding test <zh|en> <text> [--query]，或 cleo embedding benchmark <zh|en>",
+    );
   }
   assertOnlyOptions(parsed, ["query"]);
   if (parsed.positionals.length !== 3) {

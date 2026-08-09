@@ -41,6 +41,8 @@ export interface EmbeddingRuntimeInfo {
   readonly modelPath: string;
   readonly maxInputTokens: number;
   readonly embeddingDimensions: number;
+  readonly gpuBackend: string | false;
+  readonly gpuLayers: number;
   readonly modelWarnings: readonly string[];
 }
 
