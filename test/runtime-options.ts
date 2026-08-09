@@ -29,4 +29,8 @@ export const TEST_CHAT_OPTIONS = {
 export const TEST_MATERIAL_OPTIONS = {
   database: TEST_DATABASE_OPTIONS,
   maxImportBytes: 10 * 1024 * 1024,
+  chunking: {
+    maxChunkChars: 800,
+    splitSearchWindowRatio: 0.75,
+  },
 } as const;

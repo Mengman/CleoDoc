@@ -1,7 +1,7 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.8 已完成，步骤 6 的 CDM Core 与资料解析已交付
-> 日期：2026-08-08
+> 状态：实施中；v0.1 步骤 1–5.8 已完成，步骤 6 的 CDM、资料解析和切片预览已交付
+> 日期：2026-08-09
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
 
@@ -43,8 +43,9 @@ v0.1 的核心闭环是：
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、版本化 Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | 6a. CDM 最小 Core | 已完成 | 严格 XML、`draft-1` Schema、Node/Mark 校验、10 位 Node ID、基础序列化和树遍历 |
 | 6b. TXT/Markdown 资料解析 | 已完成 | UTF-8/GB 系导入、UTF-8 规范化、TXT 逐行成段、临时 CDM、样式展平、CommonMark + GFM 表格、解析警告、Node 原文字节范围及资料导入连接 |
+| 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 6c–8、9b–10 | 未开始 | 结构切片、FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
+| 6d–8、9b–10 | 未开始 | Chunk 入库、FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -374,7 +375,7 @@ CLI 命令：
 
 统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、结构切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、External Content FTS 和检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-实施状态：CDM 最小 Core 和独立 `packages/document-ingestion` 资料解析模块已完成，并已接入 `MaterialService`。文件导入按 BOM、严格 UTF-8、GB18030 的顺序检测，兼容 GB2312/GBK，并统一为 UTF-8 项目副本；随后生成通过 `draft-1` 校验的临时 CDM，写入 `.cleo/derived/documents/<source-id>.cdm.xml` 供开发期检查。结构切片、Chunk、FTS 与索引状态尚未实现。
+实施状态：CDM 最小 Core、独立 `packages/document-ingestion` 资料解析模块和 Baseline 结构切片已经完成，并接入 `MaterialService`。文件导入按 BOM、严格 UTF-8、GB18030 的顺序检测，兼容 GB2312/GBK，并统一为 UTF-8 项目副本；随后生成临时 CDM 和纯文本 ChunkDraft。开发期分别写入 `.cleo/derived/documents/<source-id>.cdm.xml` 与 `.cleo/derived/chunks/<source-id>.chunks.json` 供人工检查。Chunk 入库、FTS 与索引状态尚未实现。
 
 工作内容：
 

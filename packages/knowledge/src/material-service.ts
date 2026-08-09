@@ -14,7 +14,8 @@ import {
   knowledgeSourceSchema,
 } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
-import { parseDocument } from "@cleodoc/document-ingestion";
+import { chunkDocument, parseDocument } from "@cleodoc/document-ingestion";
+import type { ChunkDocumentOptions } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
   resolveInsideProject,
@@ -38,6 +39,12 @@ export interface AddTextMaterialOptions extends MaterialMetadataOptions {
   format?: "text" | "markdown";
 }
 
+export interface MaterialServiceOptions {
+  readonly database: { busyTimeoutMs: number };
+  readonly maxImportBytes: number;
+  readonly chunking: ChunkDocumentOptions;
+}
+
 export class MaterialService {
   private readonly repository: MaterialRepository;
 
@@ -46,13 +53,14 @@ export class MaterialService {
     private readonly projectId: string,
     private readonly database: ProjectDatabase,
     private readonly maxImportBytes: number,
+    private readonly chunking: ChunkDocumentOptions,
   ) {
     this.repository = new MaterialRepository(database);
   }
 
   static async open(
     projectRoot: string,
-    options: { database: { busyTimeoutMs: number }; maxImportBytes: number },
+    options: MaterialServiceOptions,
   ): Promise<MaterialService> {
     const project = await new ProjectService(options.database).open(projectRoot);
     await ensureMaterialDirectories(project.root);
@@ -62,6 +70,7 @@ export class MaterialService {
       project.manifest.id,
       database,
       options.maxImportBytes,
+      options.chunking,
     );
     try {
       await service.synchronizeProjection();
@@ -157,13 +166,16 @@ export class MaterialService {
     const sourcePath = await resolveInsideProject(this.projectRoot, current.source.relativePath);
     const metadataPath = await this.resolveMetadataPath(id);
     const derivedDocumentPath = await this.resolveDerivedDocumentPath(id);
+    const derivedChunksPath = await this.resolveDerivedChunksPath(id);
     const metadataContent = await readFile(metadataPath.absolutePath, "utf8");
     const derivedDocumentContent = await readOptionalFile(derivedDocumentPath.absolutePath);
+    const derivedChunksContent = await readOptionalFile(derivedChunksPath.absolutePath);
 
     await rm(metadataPath.absolutePath);
     try {
       await rm(sourcePath.absolutePath);
       await rm(derivedDocumentPath.absolutePath, { force: true });
+      await rm(derivedChunksPath.absolutePath, { force: true });
       await this.repository.remove(id);
       return current.source;
     } catch (error) {
@@ -171,6 +183,11 @@ export class MaterialService {
       await writeFileAtomic(metadataPath.absolutePath, metadataContent).catch(() => undefined);
       if (derivedDocumentContent !== null) {
         await writeFileAtomic(derivedDocumentPath.absolutePath, derivedDocumentContent).catch(
+          () => undefined,
+        );
+      }
+      if (derivedChunksContent !== null) {
+        await writeFileAtomic(derivedChunksPath.absolutePath, derivedChunksContent).catch(
           () => undefined,
         );
       }
@@ -203,6 +220,10 @@ export class MaterialService {
     }
 
     const parsedDocument = parseDocument({ format: input.format, content });
+    const chunkedDocument = chunkDocument(
+      { parsedDocument, sourceContent: content },
+      this.chunking,
+    );
     const id = randomUUID();
     const extension = input.format === "markdown" ? "md" : "txt";
     const relativePath = `materials/${id}.${extension}`;
@@ -227,17 +248,25 @@ export class MaterialService {
     const sourcePath = await resolveInsideProject(this.projectRoot, source.relativePath);
     const metadataPath = await this.resolveMetadataPath(id);
     const derivedDocumentPath = await this.resolveDerivedDocumentPath(id);
+    const derivedChunksPath = await this.resolveDerivedChunksPath(id);
 
     await writeFileAtomic(sourcePath.absolutePath, content);
     try {
       await writeJsonAtomic(metadataPath.absolutePath, source);
       await writeFileAtomic(derivedDocumentPath.absolutePath, `${parsedDocument.cdmXml}\n`);
+      await writeJsonAtomic(derivedChunksPath.absolutePath, {
+        schemaVersion: 1,
+        sourceId: source.id,
+        sourceHash: source.contentHash,
+        ...chunkedDocument,
+      });
       await this.repository.upsert(source);
       return { source, created: true, inputEncoding: input.inputEncoding };
     } catch (error) {
       await rm(sourcePath.absolutePath, { force: true }).catch(() => undefined);
       await rm(metadataPath.absolutePath, { force: true }).catch(() => undefined);
       await rm(derivedDocumentPath.absolutePath, { force: true }).catch(() => undefined);
+      await rm(derivedChunksPath.absolutePath, { force: true }).catch(() => undefined);
       throw error;
     }
   }
@@ -310,16 +339,22 @@ export class MaterialService {
   private async resolveDerivedDocumentPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `.cleo/derived/documents/${id}.cdm.xml`);
   }
+
+  private async resolveDerivedChunksPath(id: string) {
+    return await resolveInsideProject(this.projectRoot, `.cleo/derived/chunks/${id}.chunks.json`);
+  }
 }
 
 async function ensureMaterialDirectories(projectRoot: string): Promise<void> {
   const materials = await resolveInsideProject(projectRoot, "materials");
   const metadata = await resolveInsideProject(projectRoot, "sources/metadata");
   const derivedDocuments = await resolveInsideProject(projectRoot, ".cleo/derived/documents");
+  const derivedChunks = await resolveInsideProject(projectRoot, ".cleo/derived/chunks");
   await Promise.all([
     mkdir(materials.absolutePath, { recursive: true }),
     mkdir(metadata.absolutePath, { recursive: true }),
     mkdir(derivedDocuments.absolutePath, { recursive: true }),
+    mkdir(derivedChunks.absolutePath, { recursive: true }),
   ]);
 }
 

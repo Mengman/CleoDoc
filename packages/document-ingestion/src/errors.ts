@@ -1,5 +1,9 @@
 export type DocumentIngestionErrorCode =
-  "UNSUPPORTED_DOCUMENT_FORMAT" | "INVALID_UTF8" | "EMPTY_DOCUMENT" | "INVALID_SOURCE_POSITION";
+  | "UNSUPPORTED_DOCUMENT_FORMAT"
+  | "INVALID_UTF8"
+  | "EMPTY_DOCUMENT"
+  | "INVALID_SOURCE_POSITION"
+  | "INVALID_CHUNK_OPTIONS";
 
 export class DocumentIngestionError extends Error {
   readonly code: DocumentIngestionErrorCode;

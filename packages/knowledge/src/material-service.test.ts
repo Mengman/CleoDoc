@@ -62,6 +62,35 @@ describe("MaterialService", () => {
       expect(derivedCdm).toContain("<h1");
       expect(derivedCdm).toContain("铁路资料");
       expect(derivedCdm).toContain("夜间列车使用煤油灯。");
+      const chunkPreview = JSON.parse(
+        await readFile(
+          path.join(
+            project.root,
+            ".cleo",
+            "derived",
+            "chunks",
+            `${imported.source.id}.chunks.json`,
+          ),
+          "utf8",
+        ),
+      ) as {
+        sourceId: string;
+        sourceHash: string;
+        chunkerVersion: string;
+        chunks: Array<{ content: string; startOffset: number; endOffset: number }>;
+      };
+      expect(chunkPreview).toMatchObject({
+        sourceId: imported.source.id,
+        sourceHash: imported.source.contentHash,
+        chunkerVersion: "structural-baseline-v1",
+      });
+      expect(chunkPreview.chunks).toEqual([
+        expect.objectContaining({
+          content: "铁路资料\n\n夜间列车使用煤油灯。",
+          startOffset: 0,
+          endOffset: Buffer.byteLength("# 铁路资料\n\n夜间列车使用煤油灯。", "utf8"),
+        }),
+      ]);
 
       const duplicatePath = path.join(directory, "copy.md");
       await writeFile(duplicatePath, "# 铁路资料\n\n夜间列车使用煤油灯。\n", "utf8");
@@ -137,6 +166,12 @@ describe("MaterialService", () => {
       await expect(
         readFile(
           path.join(project.root, ".cleo", "derived", "documents", `${materialId}.cdm.xml`),
+          "utf8",
+        ),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        readFile(
+          path.join(project.root, ".cleo", "derived", "chunks", `${materialId}.chunks.json`),
           "utf8",
         ),
       ).rejects.toMatchObject({ code: "ENOENT" });

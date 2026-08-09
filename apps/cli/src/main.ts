@@ -416,6 +416,7 @@ function printMaterialImported(result: Awaited<ReturnType<MaterialService["addTe
   output.write(`输入编码：${result.inputEncoding}\n`);
   if (result.created) {
     output.write(`解析结果：.cleo/derived/documents/${result.source.id}.cdm.xml\n`);
+    output.write(`切片结果：.cleo/derived/chunks/${result.source.id}.chunks.json\n`);
   }
   output.write(`内容哈希：${result.source.contentHash}\n`);
 }
@@ -1310,6 +1311,7 @@ function materialServiceOptions() {
   return {
     database: { busyTimeoutMs: softwareConfig.database.busyTimeoutMs },
     maxImportBytes: softwareConfig.materials.maxImportBytes,
+    chunking: softwareConfig.rag.chunking,
   };
 }
 

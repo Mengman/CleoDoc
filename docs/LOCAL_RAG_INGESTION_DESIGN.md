@@ -1,6 +1,6 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：上游 TXT/Markdown 解析已实现，Baseline 切片算法已确认；Chunk、索引与 RAG 尚未实现
+状态：上游 TXT/Markdown 解析与 Baseline ChunkDraft 已实现；Chunk 入库、索引与 RAG 尚未实现
 
 更新日期：2026-08-09
 
@@ -32,7 +32,7 @@ CleoDoc 的 RAG 面向单机桌面应用以及未来可能的移动端、嵌入�
 1. **导入资料的原始文件是最高权威来源。** 临时 CDM 可以在 Chunk 入库后删除，RAG 和引用回溯不能依赖临时 CDM 或其 Node ID。
 2. **Chunk 是纯文本数据库投影。** `knowledge_chunks.content` 不保存 CDM、Markdown、标题路径或格式信息。
 3. **Chunk 直接回溯原件。** `source_id` 关联 Source，`start_offset` 与 `end_offset` 定位当前 TXT/Markdown 的连续原文字节范围。
-4. **不为每个 Chunk 创建文件。** Chunk 正文和定位字段直接保存在 SQLite。
+4. **不为每个 Chunk 创建文件。** 正式 Chunk 正文和定位字段直接保存在 SQLite；当前 `.cleo/derived/chunks/<source-id>.chunks.json` 只是按 Source 汇总的临时检查产物，不是 RAG 存储层。
 5. **FTS5 与 Chunk 使用 External Content 模式。** FTS 索引通过整数 `rowid` 引用 `knowledge_chunks`，不另存一份业务正文。
 6. **Embedding 与 Chunk 分表。** 一个 Chunk 可以针对不同模型生成不同向量，模型升级不要求修改 Chunk。
 7. **v0.1 不依赖向量扩展。** 向量先以 `Float32Array` BLOB 保存在 SQLite，经元数据过滤后在 Worker 中执行精确余弦检索。
@@ -60,6 +60,7 @@ flowchart TD
 | CleoDoc 原生 CDM 文档 | 项目文档目录（具体扩展名待定） | 可移植事实源 | 否 |
 | 导入或现存 Markdown/TXT | `materials/` 等项目目录 | 原始事实源 | 否 |
 | 导入资料的临时 CDM XML | `.cleo/derived/documents/<source-id>.cdm.xml`（开发期暂定） | 可选解析 Debug 产物 | 是 |
+| 导入资料的临时切片预览 | `.cleo/derived/chunks/<source-id>.chunks.json`（开发期暂定） | 按 Source 汇总的可选 Debug 产物 | 是 |
 | Chunk 正文和定位信息 | SQLite `knowledge_chunks` | 检索投影 | 是 |
 | FTS5 倒排索引 | SQLite `knowledge_chunk_fts*` | 查询索引 | 是 |
 | Embedding | SQLite `chunk_embeddings` | 模型派生物 | 是 |

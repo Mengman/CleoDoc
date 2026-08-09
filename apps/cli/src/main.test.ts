@@ -314,6 +314,7 @@ describe("CleoDoc CLI", () => {
       `${materialId!}.cdm.xml`,
     );
     expect(added.stdout).toContain(`解析结果：.cleo/derived/documents/${materialId!}.cdm.xml`);
+    expect(added.stdout).toContain(`切片结果：.cleo/derived/chunks/${materialId!}.chunks.json`);
     expect(await readFile(derivedDocumentPath, "utf8")).toContain("<h1");
     expect(await readFile(derivedDocumentPath, "utf8")).toContain("末班车在午夜到站。");
 
