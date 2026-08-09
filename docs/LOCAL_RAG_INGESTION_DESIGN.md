@@ -1,8 +1,8 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：上游 TXT/Markdown 解析已实现；Chunk、索引与 RAG 尚未实现
+状态：上游 TXT/Markdown 解析已实现，Baseline 切片算法已确认；Chunk、索引与 RAG 尚未实现
 
-更新日期：2026-08-08
+更新日期：2026-08-09
 
 本文定义 CleoDoc 如何使用已经生成的纯文本 Chunk 建立本地全文、向量和混合检索，并把 LLM 使用的证据回溯到原始资料。重点回答三个问题：
 
@@ -336,7 +336,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 ### v0.1
 
 - 将 TXT、Markdown 解析为可删除的临时 CDM，固定丢弃纯展示样式。
-- 实现结构优先的确定性纯文本 Chunk及原文字节范围。
+- 实现基于块级段落结构的确定性 Baseline Chunk：超长块向前寻找自然边界递归拆分，同一标题区域内的小块按最大长度贪心向前合并，并保留连续原文字节范围。
 - 实现 `knowledge_chunks`、FTS5、Embedding BLOB 和精确余弦检索。
 - 实现 FTS 与向量的混合召回、RAG Tool 和 ContextManifest。
 - 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。

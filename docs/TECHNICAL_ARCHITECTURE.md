@@ -1,7 +1,7 @@
 # CleoDoc 技术架构设计（v0.1 CLI / v0.2 Desktop）
 
 > 状态：架构基线  
-> 日期：2026-08-02
+> 日期：2026-08-09
 > 对应产品需求：[PRD.md](./PRD.md)  
 > 开发计划：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md)  
 > 适用范围：CleoDoc v0.1 CLI 核心与 v0.2 Electron 桌面应用
@@ -515,15 +515,9 @@ flowchart LR
 
 临时 CDM 的生命周期在 Document Ingestion 内结束。RAG Core 从 `ChunkDraft` 开始工作，不导入 CDM 包，也不把 CDM 标签、Node ID 或 Markdown 写入 Chunk。实体与事实抽取属于 CleoDoc 的知识能力，可以消费 RAG Chunk，但不能反向成为 RAG Core 的必要依赖。
 
-切块规则优先级：
+v0.1 导入资料使用基于块级段落结构的确定性 Baseline Chunker。它只执行两种操作：超过项目配置上限的大块在上限前的自然边界递归拆分；同一标题区域内的小块按原文顺序贪心合并到上一个 Chunk。首版取消最短长度和尾块重平衡，默认最大长度为 `800` 个规范化纯文本 Unicode 字符，默认从上限的 `75%` 位置开始向上限方向选择自然边界。TXT 不猜测标题，所有 `<p>` 在整个文档范围内使用普通合并规则。完整算法以[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)为准。
 
-1. 卷、章节和标题。
-2. 场景分隔。
-3. 完整段落与连续对话。
-4. 句子边界。
-5. 达到上限后强制拆分。
-
-正文目标 600–1200 个中文字符，资料目标 400–800 个中文字符。导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、项目内 UTF-8 资料副本的字节范围和 Chunker 版本；Source 表保存该规范化副本的 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。
+导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、项目内 UTF-8 资料副本的字节范围和 Chunker 版本；Source 表保存该规范化副本的 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。有效切片配置必须参与索引是否过期的判断，具体持久化字段随下一次 Chunk Schema 评审确定。正文是否采用不同切片参数留待正文检索进入实现范围后通过固定测试集确定，不与当前资料 Baseline 混为同一配置。
 
 ### 8.5 Embedding
 
