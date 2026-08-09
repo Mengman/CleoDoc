@@ -26,7 +26,7 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 加载顺序固定为：
 
 ```text
-发行默认 YAML → 用户 YAML 的有效字段覆盖 → 完整 Schema 校验 → 业务服务参数注入
+发行默认 YAML → 用户 YAML 的有效字段覆盖 → 完整 Schema 校验 → 初始化进程级只读配置快照
 ```
 
 - 默认 YAML 缺失或无效属于软件安装错误，启动相关命令时返回 `CONFIG_ERROR`。
@@ -36,7 +36,9 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 - 未支持的配置项被忽略并显示警告，防止拼写错误静默生效。
 - `softCompactionRatio < hardCompactionRatio` 等跨字段关系不成立时，相关字段一起回退到默认值。
 
-底层 Project、Database、Material、Agent 和 Provider 服务不自行读取 YAML。CLI（未来是桌面应用的组合层）加载一次配置，再通过构造参数注入服务。
+应用启动层只加载一次 YAML，并通过 `initializeSoftwareConfig()` 发布进程级配置快照。CLI 命令和 CleoDoc 组合模块在需要配置时直接调用 `getSoftwareConfig()`，不再把完整 `SoftwareConfig` 作为参数逐层传递。配置不会自动热更新；只有再次显式初始化才会替换当前快照。
+
+这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和 Provider 等可独立模块不自行读取 YAML，也不直接导入全局配置；组合层从快照读取值后，只把子系统真正需要的窄参数或运行对象交给它们。这样既减少上层接口泄漏，又保留模块测试、复用和未来独立拆分 RAG 的能力。
 
 ## 3. 当前默认配置
 

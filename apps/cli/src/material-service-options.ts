@@ -1,6 +1,9 @@
 import path from "node:path";
 
-import type { SoftwareConfig } from "../../../packages/config/src/index.js";
+import {
+  getSoftwareConfig,
+  getSoftwareDefaultConfigPath,
+} from "../../../packages/config/src/index.js";
 import type {
   MaterialEmbeddingModel,
   MaterialServiceOptions,
@@ -8,11 +11,9 @@ import type {
 import { resolveEmbeddingModelDefinition } from "../../../packages/rag/src/index.js";
 import type { ResolvedEmbeddingModelDefinition } from "../../../packages/rag/src/index.js";
 
-export function createMaterialServiceOptions(
-  config: SoftwareConfig,
-  defaultConfigPath: string,
-): MaterialServiceOptions {
-  const resourceRoot = path.resolve(path.dirname(defaultConfigPath), "..");
+export function createMaterialServiceOptions(): MaterialServiceOptions {
+  const config = getSoftwareConfig();
+  const resourceRoot = path.resolve(path.dirname(getSoftwareDefaultConfigPath()), "..");
   return {
     database: { busyTimeoutMs: config.database.busyTimeoutMs },
     maxImportBytes: config.materials.maxImportBytes,

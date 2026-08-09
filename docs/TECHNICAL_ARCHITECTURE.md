@@ -62,7 +62,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | UI 状态 | Zustand | v0.2 窗口、面板、选择和临时交互状态 |
 | 工作流投影 | XState | v0.2 Renderer 中展示阶段和任务状态，不作为持久化事实源 |
 | 数据校验 | Zod | IPC、文件格式、模型结构化输出校验 |
-| 配置 | YAML + Zod | 发行默认配置、用户逐项覆盖、应用状态分离和服务参数注入 |
+| 配置 | YAML + Zod | 发行默认配置、用户逐项覆盖、应用状态分离和进程级只读配置快照 |
 | 开发构建 | TypeScript；v0.2 使用 electron-vite | CLI/Core 构建；Main、Preload、Renderer 和 Utility Process 构建 |
 | 安装包 | Node.js 可执行入口；v0.2 使用 electron-builder | v0.1 CLI 分发；v0.2 Windows、macOS、Linux 桌面打包与签名配置 |
 | 数据库 | Node.js 内置 `node:sqlite` | CLI 与桌面共用的项目数据库和个人资料库 |
@@ -171,9 +171,9 @@ Worker 崩溃不得影响 Core；Core 将当前索引任务标记为可重试。
 
 ### 4.7 软件配置组合层
 
-`packages/config` 负责解析随软件发行的 `resources/config/software-default.yaml`、操作系统用户目录的 `config.yaml`，以及独立的 `state.yaml`。有效的用户字段按叶子覆盖发行默认值；错误字段单独回退并产生警告。
+`packages/config` 负责解析随软件发行的 `resources/config/software-default.yaml`、操作系统用户目录的 `config.yaml`，以及独立的 `state.yaml`。有效的用户字段按叶子覆盖发行默认值；错误字段单独回退并产生警告。应用启动时通过 `initializeSoftwareConfig()` 加载一次，并发布进程级只读快照；CLI 命令和 CleoDoc 组合模块使用 `getSoftwareConfig()` 直接读取，不把完整配置对象沿调用链传递。
 
-配置读取只发生在应用组合层。CLI（未来为 Electron Main/Core 启动层）把数据库等待、资料大小、Provider 超时、模型能力、上下文预算、压缩和切片参数注入底层服务。Database、Project、Material、Provider、Agent 和未来 Chunker 不直接访问 YAML 或操作系统配置目录。
+YAML 和操作系统配置目录只由配置包访问。Database、Project、RAG、Document Ingestion、Material、Provider、Agent 和未来 Chunker 等可独立模块不直接依赖 CleoDoc 的全局配置；应用组合层从全局快照读取数据库等待、资料大小、Provider 超时、模型能力、上下文预算、压缩和切片参数，再向底层传递其公共接口真正需要的窄参数或运行对象。这样避免配置对象穿透接口，同时不破坏未来独立 RAG 的包边界。
 
 模型的 `contextWindowTokens` 和 `maxOutputTokens` 由 Provider + Model 能力目录维护。API Key 统一从 `CLEODOC_API_KEY` 读取，不写入 YAML。Thinking、Temperature、生成 `maxTokens` 和当前字符 Token Estimator 暂不配置。完整约束见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
 

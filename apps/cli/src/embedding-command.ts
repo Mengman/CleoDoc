@@ -2,7 +2,10 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 
-import type { SoftwareConfig } from "../../../packages/config/src/index.js";
+import {
+  getSoftwareConfig,
+  getSoftwareDefaultConfigPath,
+} from "../../../packages/config/src/index.js";
 import { AppError } from "../../../packages/contracts/src/index.js";
 import { resolveEmbeddingModelDefinition } from "../../../packages/rag/src/embedding-model-definition.js";
 import type { EmbeddingLanguage } from "../../../packages/rag/src/embedding-types.js";
@@ -14,12 +17,11 @@ interface CommandOutput {
 
 export async function runEmbeddingCommand(
   parsed: ParsedArguments,
-  config: SoftwareConfig,
-  defaultConfigPath: string,
   output: CommandOutput,
 ): Promise<void> {
+  const config = getSoftwareConfig();
   const [subcommand, languageValue, text] = parsed.positionals;
-  const resourceRoot = path.resolve(path.dirname(defaultConfigPath), "..");
+  const resourceRoot = path.resolve(path.dirname(getSoftwareDefaultConfigPath()), "..");
 
   if (subcommand === "model") {
     assertOnlyOptions(parsed, []);

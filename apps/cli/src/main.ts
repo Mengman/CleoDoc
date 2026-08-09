@@ -28,8 +28,10 @@ import {
 } from "../../../packages/contracts/src/index.js";
 import {
   AppStateService,
-  SoftwareConfigService,
-  type SoftwareConfig,
+  getSoftwareConfig,
+  getSoftwareDefaultConfigPath,
+  getSoftwareUserConfigPath,
+  initializeSoftwareConfig,
 } from "../../../packages/config/src/index.js";
 import {
   MaterialService,
@@ -51,9 +53,7 @@ import { runEmbeddingCommand } from "./embedding-command.js";
 import { createMaterialServiceOptions } from "./material-service-options.js";
 import { runIndexCommand, runSearchCommand } from "./rag-command.js";
 
-const softwareConfigService = new SoftwareConfigService();
 const appStateService = new AppStateService();
-let softwareConfig: SoftwareConfig;
 let projectService: ProjectService;
 
 async function main(argumentsList: readonly string[]): Promise<void> {
@@ -100,12 +100,7 @@ async function main(argumentsList: readonly string[]): Promise<void> {
       await runSearchCommand(parsed, ragCommandDependencies());
       return;
     case "embedding":
-      await runEmbeddingCommand(
-        parsed,
-        softwareConfig,
-        softwareConfigService.defaultConfigPath,
-        output,
-      );
+      await runEmbeddingCommand(parsed, output);
       return;
     case "conversation":
       await conversationCommand(parsed);
@@ -119,9 +114,8 @@ async function main(argumentsList: readonly string[]): Promise<void> {
 }
 
 async function loadApplicationConfiguration(): Promise<void> {
-  const loaded = await softwareConfigService.load();
-  softwareConfig = loaded.config;
-  projectService = new ProjectService({ busyTimeoutMs: softwareConfig.database.busyTimeoutMs });
+  const loaded = await initializeSoftwareConfig();
+  projectService = new ProjectService({ busyTimeoutMs: loaded.config.database.busyTimeoutMs });
   for (const warning of loaded.warnings) {
     output.write(`配置警告 [${warning.path}]：${warning.message}\n`);
   }
@@ -171,12 +165,13 @@ async function configCommand(parsed: ParsedArguments): Promise<void> {
   if (parsed.positionals.length !== 0) {
     throw new AppError("VALIDATION_ERROR", "用法：cleo config");
   }
+  const config = getSoftwareConfig();
   const state = await appStateService.read();
-  output.write(`默认配置：${softwareConfigService.defaultConfigPath}\n`);
-  output.write(`用户配置：${softwareConfigService.userConfigPath}\n`);
+  output.write(`默认配置：${getSoftwareDefaultConfigPath()}\n`);
+  output.write(`用户配置：${getSoftwareUserConfigPath()}\n`);
   output.write(`当前项目：${state.currentProject ?? "未设置"}\n`);
-  output.write(`当前 Provider：${softwareConfig.llm.selectedProvider ?? "未设置"}\n`);
-  output.write(`当前模型：${softwareConfig.llm.selectedModel ?? "未设置"}\n`);
+  output.write(`当前 Provider：${config.llm.selectedProvider ?? "未设置"}\n`);
+  output.write(`当前模型：${config.llm.selectedModel ?? "未设置"}\n`);
   output.write(`CLEODOC_API_KEY：${process.env.CLEODOC_API_KEY ? "已设置" : "未设置"}\n`);
   output.write(`OPENAI_BASE_URL：${process.env.OPENAI_BASE_URL ? "已设置" : "使用默认值"}\n`);
   output.write(`OLLAMA_BASE_URL：${process.env.OLLAMA_BASE_URL ? "已设置" : "使用默认值"}\n`);
@@ -289,6 +284,7 @@ async function documentCommand(parsed: ParsedArguments): Promise<void> {
 }
 
 async function materialCommand(parsed: ParsedArguments): Promise<void> {
+  const config = getSoftwareConfig();
   const [subcommand, reference, value] = parsed.positionals;
   assertOnlyOptions(parsed, ["project", "stdin", "title", "source", "tags", "format", "encoding"]);
   const root = await resolveProjectRoot(optionString(parsed, "project"));
@@ -313,7 +309,7 @@ async function materialCommand(parsed: ParsedArguments): Promise<void> {
             throw new AppError("VALIDATION_ERROR", "--encoding 当前只用于文件导入。");
           }
           const result = await materials.addText(
-            await readStandardInput(softwareConfig.materials.maxImportBytes),
+            await readStandardInput(config.materials.maxImportBytes),
             {
               ...(title === undefined ? {} : { title }),
               ...(sourceLabel === undefined ? {} : { sourceLabel }),
@@ -470,22 +466,21 @@ async function chatCommand(parsed: ParsedArguments): Promise<void> {
   if (parsed.positionals.length !== 0) {
     throw new AppError("VALIDATION_ERROR", "chat 不接受位置参数，请使用 --prompt。");
   }
+  const config = getSoftwareConfig();
   const root = await resolveProjectRoot(optionString(parsed, "project"));
   const project = await projectService.open(root);
   const providerId =
-    optionString(parsed, "provider") ?? softwareConfig.llm.selectedProvider ?? "openai-compatible";
+    optionString(parsed, "provider") ?? config.llm.selectedProvider ?? "openai-compatible";
   const provider = providerFromArguments(providerId, parsed);
   const model =
     optionString(parsed, "model") ??
     process.env.CLEODOC_MODEL ??
-    softwareConfig.llm.selectedModel ??
+    config.llm.selectedModel ??
     undefined;
   if (!model) {
     throw new AppError("VALIDATION_ERROR", "请使用 --model 或 CLEODOC_MODEL 指定模型。");
   }
-  const debug = parsed.options.has("debug")
-    ? optionBoolean(parsed, "debug")
-    : softwareConfig.debug.enabled;
+  const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
   const contextBudgetPolicy = resolveContextBudgetPolicy(providerId, model, parsed);
   const chat = await ChatService.open(project.root, chatServiceOptions());
   const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
@@ -1248,7 +1243,8 @@ async function printDocuments(documents: DocumentService): Promise<void> {
 }
 
 function providerFromArguments(providerId: string, parsed: ParsedArguments): ModelProvider {
-  const configuredProvider = softwareConfig.llm.providers[providerId];
+  const config = getSoftwareConfig();
+  const configuredProvider = config.llm.providers[providerId];
   if (configuredProvider === undefined) {
     throw new AppError("VALIDATION_ERROR", `软件配置中没有 Provider：${providerId}`);
   }
@@ -1260,15 +1256,15 @@ function providerFromArguments(providerId: string, parsed: ParsedArguments): Mod
     connectionTimeoutMs:
       optionPositiveInteger(parsed, "connect-timeout-ms") ??
       parsePositiveEnvironmentInteger("CLEODOC_LLM_CONNECT_TIMEOUT_MS") ??
-      softwareConfig.llm.timeouts.connectionMs,
+      config.llm.timeouts.connectionMs,
     streamIdleTimeoutMs:
       optionPositiveInteger(parsed, "stream-idle-timeout-ms") ??
       parsePositiveEnvironmentInteger("CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS") ??
-      softwareConfig.llm.timeouts.streamIdleMs,
+      config.llm.timeouts.streamIdleMs,
     overallTimeoutMs:
       optionPositiveInteger(parsed, "generation-timeout-ms") ??
       parsePositiveEnvironmentInteger("CLEODOC_LLM_OVERALL_TIMEOUT_MS") ??
-      softwareConfig.llm.timeouts.overallMs,
+      config.llm.timeouts.overallMs,
   });
 }
 
@@ -1277,7 +1273,8 @@ function resolveContextBudgetPolicy(
   model: string,
   parsed: ParsedArguments,
 ): ContextBudgetPolicy {
-  const configured = softwareConfig.llm.providers[providerId]?.models[model];
+  const config = getSoftwareConfig();
+  const configured = config.llm.providers[providerId]?.models[model];
   const contextWindowTokens =
     optionPositiveInteger(parsed, "context-window-tokens") ??
     parsePositiveEnvironmentInteger("CLEODOC_MODEL_CONTEXT_TOKENS") ??
@@ -1298,42 +1295,38 @@ function resolveContextBudgetPolicy(
   if (maxOutputTokens > contextWindowTokens) {
     throw new AppError("VALIDATION_ERROR", "模型最大输出长度不能超过上下文窗口长度。");
   }
-  return createContextBudgetPolicy(
-    { contextWindowTokens, maxOutputTokens },
-    softwareConfig.context,
-  );
+  return createContextBudgetPolicy({ contextWindowTokens, maxOutputTokens }, config.context);
 }
 
 function chatServiceOptions() {
-  const selectedProvider = softwareConfig.llm.selectedProvider ?? "openai-compatible";
-  const selectedModel = softwareConfig.llm.selectedModel;
+  const config = getSoftwareConfig();
+  const selectedProvider = config.llm.selectedProvider ?? "openai-compatible";
+  const selectedModel = config.llm.selectedModel;
   const configuredModel =
     selectedModel === null
       ? undefined
-      : softwareConfig.llm.providers[selectedProvider]?.models[selectedModel];
+      : config.llm.providers[selectedProvider]?.models[selectedModel];
   return {
-    database: { busyTimeoutMs: softwareConfig.database.busyTimeoutMs },
-    maxToolRounds: softwareConfig.agent.maxToolRounds,
+    database: { busyTimeoutMs: config.database.busyTimeoutMs },
+    maxToolRounds: config.agent.maxToolRounds,
     ...(configuredModel === undefined
       ? {}
       : {
-          defaultContextBudgetPolicy: createContextBudgetPolicy(
-            configuredModel,
-            softwareConfig.context,
-          ),
+          defaultContextBudgetPolicy: createContextBudgetPolicy(configuredModel, config.context),
         }),
-    compaction: softwareConfig.agent.compaction,
+    compaction: config.agent.compaction,
   };
 }
 
 function materialServiceOptions() {
-  return createMaterialServiceOptions(softwareConfig, softwareConfigService.defaultConfigPath);
+  return createMaterialServiceOptions();
 }
 
 function ragCommandDependencies() {
+  const config = getSoftwareConfig();
   return {
     output,
-    defaultDebug: softwareConfig.debug.enabled,
+    defaultDebug: config.debug.enabled,
     resolveProjectRoot,
     openMaterials: async (projectRoot: string) =>
       await MaterialService.open(projectRoot, materialServiceOptions()),
