@@ -16,6 +16,7 @@ import {
 
 export interface EmbeddingWorkerTaskOptions {
   readonly definition: ResolvedEmbeddingModelDefinition;
+  readonly gpuAcceleration: boolean;
   readonly chunks: readonly EmbeddingChunkInput[];
   readonly chunkBatchSize: number;
   readonly signal?: AbortSignal;
@@ -39,6 +40,7 @@ export async function runEmbeddingWorkerTask(
     worker.postMessage({
       type: "initialize",
       definition: options.definition,
+      gpuAcceleration: options.gpuAcceleration,
       totalChunks: options.chunks.length,
     } satisfies EmbeddingWorkerRequest);
     await waitForResponse(worker, options.signal, options.onProgress, (message) =>

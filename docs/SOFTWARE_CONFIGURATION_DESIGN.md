@@ -42,6 +42,7 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 
 ```yaml
 schemaVersion: 1
+gpuAcceleration: true
 
 llm:
   selectedProvider: openai-compatible
@@ -119,7 +120,9 @@ debug:
   enabled: false
 ```
 
-`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程、llama.cpp Token Batch 或推理设备等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖超时、上下文策略、Agent、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
+顶层 `gpuAcceleration` 是用户可覆盖的 CleoDoc 全局 GPU 加速开关。启用后，所有支持 GPU 的功能都应消费这个统一开关，不能在 RAG、Embedding 或其他子系统中再定义同义配置。当前完整 Embedding Runtime 与 `vocabOnly` Tokenizer 会向 `node-llama-cpp` 传入 `gpu: "auto"` 和 `gpuLayers: "auto"`，由运行库按当前平台、可用预编译绑定和硬件自动选择。关闭时保持 CPU Baseline；Apple Silicon 仍加载发行包可用的 Metal 绑定，但以 `gpuLayers: 0` 禁止模型层卸载。
+
+`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程或 llama.cpp Token Batch 等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖全局 GPU 加速、超时、上下文策略、Agent、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
 
 ## 4. Provider、模型与密钥
 

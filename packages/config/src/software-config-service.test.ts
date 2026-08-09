@@ -29,6 +29,7 @@ describe("SoftwareConfigService", () => {
     });
     expect(result.config.rag.languageDetection.minBlockUnits).toBe(50);
     expect(result.config.rag.embedding.worker.chunkBatchSize).toBe(16);
+    expect(result.config.gpuAcceleration).toBe(true);
     expect(result.config.rag.embedding.models.zh).toMatchObject({
       modelId: "bge-small-zh-v1.5-q8_0",
       maxInputTokens: 512,
@@ -40,7 +41,8 @@ describe("SoftwareConfigService", () => {
     const home = await createHome();
     await writeFile(
       path.join(home, "config.yaml"),
-      `llm:
+      `gpuAcceleration: false
+llm:
   selectedProvider: ollama
   timeouts:
     connectionMs: 90000
@@ -70,6 +72,7 @@ unknownSetting: true
     expect(result.config.debug.enabled).toBe(true);
     expect(result.config.rag.languageDetection.minBlockUnits).toBe(80);
     expect(result.config.rag.embedding.worker.chunkBatchSize).toBe(8);
+    expect(result.config.gpuAcceleration).toBe(false);
     expect(result.config.rag.embedding.models.zh.maxInputTokens).toBe(512);
     expect(result.warnings.map((warning) => warning.path)).toEqual(
       expect.arrayContaining([
@@ -99,6 +102,23 @@ agent:
     expect(result.config.context.softCompactionRatio).toBe(0.75);
     expect(result.config.context.hardCompactionRatio).toBe(0.9);
     expect(result.config.agent.compaction.summaryTargetMinTokens).toBe(512);
+  });
+
+  it("falls an invalid GPU acceleration value back to the packaged default", async () => {
+    const home = await createHome();
+    await writeFile(
+      path.join(home, "config.yaml"),
+      `gpuAcceleration: auto
+`,
+      "utf8",
+    );
+
+    const result = await createService(home).load();
+
+    expect(result.config.gpuAcceleration).toBe(true);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "gpuAcceleration" })]),
+    );
   });
 });
 

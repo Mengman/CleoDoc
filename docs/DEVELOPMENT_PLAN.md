@@ -409,12 +409,12 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；下一步执行 7.9 的完整测试与基准。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；下一步执行 7.9 的完整测试与基准。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
 - 使用 `node-llama-cpp` 加载中文和英文 Q8_0 GGUF。
-- Windows、Linux 和 Intel macOS 使用 CPU 预编译绑定；Apple Silicon 使用发行包提供的 Metal 预编译绑定，但保持 `gpuLayers: 0`，不把模型层卸载到 GPU。
+- 顶层全局配置 `gpuAcceleration` 由所有支持 GPU 的功能共同使用。关闭时保持 CPU Baseline，Apple Silicon 使用发行包提供的 Metal 预编译绑定但保持 `gpuLayers: 0`；开启后，当前 Embedding Runtime 与仅词表 Tokenizer 都使用 llama.cpp 的 `gpu: "auto"` 和 `gpuLayers: "auto"`。
 - 模型实例同时提供 Document/Query Token 统计与 Embedding 推理。
 - Query 指令由发行模型配置提供，只应用于 Query，不写入 Chunk 正文。
 - 输出归一化 `Float32Array`，并提供开发期 `embedding model/test` 命令。

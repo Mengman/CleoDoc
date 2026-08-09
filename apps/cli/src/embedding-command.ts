@@ -26,6 +26,7 @@ export async function runEmbeddingCommand(
     if (parsed.positionals.length !== 1) {
       throw new AppError("VALIDATION_ERROR", "用法：cleo embedding model");
     }
+    output.write(`GPU 加速：${config.gpuAcceleration ? "开启（auto）" : "关闭"}\n`);
     for (const language of ["zh", "en"] as const) {
       const definition = resolveEmbeddingModelDefinition(
         language,
@@ -59,7 +60,9 @@ export async function runEmbeddingCommand(
   const startedAt = performance.now();
   const { NodeLlamaCppEmbeddingRuntime } =
     await import("../../../packages/rag/src/node-llama-cpp-embedding.js");
-  const runtime = await NodeLlamaCppEmbeddingRuntime.open(definition);
+  const runtime = await NodeLlamaCppEmbeddingRuntime.open(definition, {
+    gpuAcceleration: config.gpuAcceleration,
+  });
   try {
     const query = optionBoolean(parsed, "query");
     const result = query ? await runtime.embedQuery(text) : await runtime.embedDocument(text);

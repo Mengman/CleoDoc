@@ -18,6 +18,7 @@ import {
 const positiveInteger = z.number().int().positive();
 const positiveRatio = z.number().positive().max(1);
 const USER_FIELD_SCHEMAS = new Map<string, z.ZodType>([
+  ["gpuAcceleration", z.boolean()],
   ["schemaVersion", z.literal(1)],
   ["llm.selectedProvider", z.string().min(1).nullable()],
   ["llm.selectedModel", z.string().min(1).nullable()],

@@ -37,6 +37,7 @@ const embeddingModelSchema = z
 export const softwareConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
+    gpuAcceleration: z.boolean(),
     llm: z
       .object({
         selectedProvider: z.string().min(1).nullable(),

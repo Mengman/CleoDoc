@@ -17,7 +17,12 @@ const definition: ResolvedEmbeddingModelDefinition = {
 describe("runEmbeddingWorkerTask", () => {
   it("does not start a worker when there are no chunks", async () => {
     await expect(
-      runEmbeddingWorkerTask({ definition, chunks: [], chunkBatchSize: 16 }),
+      runEmbeddingWorkerTask({
+        definition,
+        gpuAcceleration: false,
+        chunks: [],
+        chunkBatchSize: 16,
+      }),
     ).resolves.toEqual({ modelId: "test-model", processedChunks: 0 });
   });
 
@@ -28,6 +33,7 @@ describe("runEmbeddingWorkerTask", () => {
     await expect(
       runEmbeddingWorkerTask({
         definition,
+        gpuAcceleration: false,
         chunks: [{ chunkId: "chunk-1", content: "content" }],
         chunkBatchSize: 16,
         signal: controller.signal,
@@ -37,7 +43,12 @@ describe("runEmbeddingWorkerTask", () => {
 
   it("rejects an invalid task batch size", async () => {
     await expect(
-      runEmbeddingWorkerTask({ definition, chunks: [], chunkBatchSize: 0 }),
+      runEmbeddingWorkerTask({
+        definition,
+        gpuAcceleration: false,
+        chunks: [],
+        chunkBatchSize: 0,
+      }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 });

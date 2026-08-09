@@ -10,6 +10,7 @@ export type EmbeddingWorkerRequest =
   | {
       readonly type: "initialize";
       readonly definition: ResolvedEmbeddingModelDefinition;
+      readonly gpuAcceleration: boolean;
       readonly totalChunks: number;
     }
   | {

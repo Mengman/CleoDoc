@@ -26,7 +26,9 @@ async function handleMessage(message: EmbeddingWorkerRequest): Promise<void> {
     case "initialize":
       totalChunks = message.totalChunks;
       completedChunks = 0;
-      runtime = await NodeLlamaCppEmbeddingRuntime.open(message.definition);
+      runtime = await NodeLlamaCppEmbeddingRuntime.open(message.definition, {
+        gpuAcceleration: message.gpuAcceleration,
+      });
       postMessage({ type: "ready", info: runtime.info });
       return;
     case "embed_batch": {

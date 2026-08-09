@@ -11,7 +11,7 @@ import {
 
 import { AppError } from "../../contracts/src/index.js";
 import { formatEmbeddingInput } from "./embedding-model-definition.js";
-import { resolveEmbeddingLlamaBackend } from "./embedding-platform.js";
+import { resolveEmbeddingLlamaOptions } from "./embedding-platform.js";
 import type {
   EmbeddingInputKind,
   EmbeddingResult,
@@ -39,13 +39,15 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
 
   static async open(
     definition: ResolvedEmbeddingModelDefinition,
+    options: { readonly gpuAcceleration: boolean } = { gpuAcceleration: false },
   ): Promise<NodeLlamaCppEmbeddingRuntime> {
     await assertUsableModelFile(definition);
     let llama: Llama | undefined;
     let model: LlamaModel | undefined;
     try {
+      const llamaOptions = resolveEmbeddingLlamaOptions(options.gpuAcceleration);
       llama = await getLlama({
-        gpu: resolveEmbeddingLlamaBackend(),
+        gpu: llamaOptions.gpu,
         build: "never",
         skipDownload: true,
         progressLogs: false,
@@ -53,7 +55,7 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
       });
       model = await llama.loadModel({
         modelPath: definition.modelPath,
-        gpuLayers: 0,
+        gpuLayers: llamaOptions.gpuLayers,
         useMmap: true,
       });
       if (definition.maxInputTokens > model.trainContextSize) {
@@ -192,13 +194,15 @@ export class NodeLlamaCppEmbeddingTokenizer implements EmbeddingTokenizer {
 
   static async open(
     definition: ResolvedEmbeddingModelDefinition,
+    options: { readonly gpuAcceleration: boolean } = { gpuAcceleration: false },
   ): Promise<NodeLlamaCppEmbeddingTokenizer> {
     await assertUsableModelFile(definition);
     let llama: Llama | undefined;
     let model: LlamaModel | undefined;
     try {
+      const llamaOptions = resolveEmbeddingLlamaOptions(options.gpuAcceleration);
       llama = await getLlama({
-        gpu: resolveEmbeddingLlamaBackend(),
+        gpu: llamaOptions.gpu,
         build: "never",
         skipDownload: true,
         progressLogs: false,
@@ -206,7 +210,7 @@ export class NodeLlamaCppEmbeddingTokenizer implements EmbeddingTokenizer {
       });
       model = await llama.loadModel({
         modelPath: definition.modelPath,
-        gpuLayers: 0,
+        gpuLayers: llamaOptions.gpuLayers,
         useMmap: true,
         vocabOnly: true,
       });

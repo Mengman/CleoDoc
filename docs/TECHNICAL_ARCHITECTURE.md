@@ -67,7 +67,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | 安装包 | Node.js 可执行入口；v0.2 使用 electron-builder | v0.1 CLI 分发；v0.2 Windows、macOS、Linux 桌面打包与签名配置 |
 | 数据库 | Node.js 内置 `node:sqlite` | CLI 与桌面共用的项目数据库和个人资料库 |
 | 全文检索 | SQLite FTS5 trigram | 中文原文和资料检索 |
-| 本地 Embedding | `node-llama-cpp` | 在 Worker 中运行 GGUF Embedding 模型并复用模型 Tokenizer；Apple Silicon 加载 Metal 预编译绑定但保持 `gpuLayers: 0` |
+| 本地 Embedding | `node-llama-cpp` | 在 Worker 中运行 GGUF Embedding 模型并复用模型 Tokenizer；默认 CPU Baseline，可配置由 llama.cpp 自动选择 GPU 后端和模型层卸载 |
 | Git 引擎 | isomorphic-git | 无系统 Git 依赖的版本管理 |
 | 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | 独立基础协议；AI、用户和解析器直接使用，RAG Core 不直接依赖 |
 | 文档解析 | 独立 Document Ingestion 模块 + CDM Schema | TXT/Markdown、临时 CDM、来源定位和纯文本 ChunkDraft |
@@ -541,6 +541,7 @@ interface EmbeddingProvider {
 ```
 
 - 默认实现使用 `node-llama-cpp` 加载 GGUF；同一模型负责 Document/Query Tokenize 和 Embedding，输出在适配层归一化。
+- 顶层软件配置 `gpuAcceleration` 是所有 GPU 能力共用的全局开关。开启后，当前完整 Embedding Runtime 与 `vocabOnly` Tokenizer 都使用 `gpu: "auto"` 和 `gpuLayers: "auto"`；关闭时保持 CPU 模型层推理，Apple Silicon 仅为使用可用预编译二进制而选择 Metal 绑定。后续 GPU 功能必须复用该开关，不增加子系统同义配置。
 - 模型首次使用时由用户确认下载，模型文件进入应用模型缓存。
 - `modelId`、模型名称和 revision 写入 `embedding_models`；维度由向量 BLOB 长度获得，量化、归一化和推理运行参数不复制进模型表。
 - 不同模型生成的向量不得混合查询。
@@ -1003,7 +1004,7 @@ v0.2 在此基础上增加：
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
 - 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
-- 已实现：`packages/rag` 的 `node-llama-cpp` CPU Baseline、本地 GGUF 解析、Document/Query Token 统计、归一化向量输出和开发期 CLI 检查命令。
+- 已实现：`packages/rag` 的 `node-llama-cpp` CPU Baseline、可选 GPU 自动加速、本地 GGUF 解析、Document/Query Token 统计、归一化向量输出和开发期 CLI 检查命令。
 - 已实现：Embedding Worker 的任务分批、模型复用、逐项进度、取消和纯数据向量回传；Worker 不访问 SQLite。
 - 已实现：资料 Chunk/FTS 增量投影，以及按主语言和模型筛选缺失向量、冻结任务 Hash、短事务条件写回和增量重试的 Embedding 编排；过期结果不会覆盖新 Chunk，Embedding 失败不影响 FTS。
 - 已实现：锁定 `sqlite-vec` 0.1.9 的延迟加载和精确余弦 `VectorIndex`；扩展加载后立即关闭任意加载入口，检索会排除其他项目、非 `ready` Source、不同模型及 Hash 失效向量。

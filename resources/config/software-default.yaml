@@ -1,5 +1,8 @@
 schemaVersion: 1
 
+# Global switch for features that can use GPU acceleration.
+gpuAcceleration: true
+
 llm:
   selectedProvider: openai-compatible
   selectedModel: null

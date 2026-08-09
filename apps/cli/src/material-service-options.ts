@@ -22,9 +22,11 @@ export function createMaterialServiceOptions(
     embeddingModels: {
       zh: createEmbeddingModel(
         resolveEmbeddingModelDefinition("zh", config.rag.embedding.models.zh, resourceRoot),
+        config.gpuAcceleration,
       ),
       en: createEmbeddingModel(
         resolveEmbeddingModelDefinition("en", config.rag.embedding.models.en, resourceRoot),
+        config.gpuAcceleration,
       ),
     },
   };
@@ -32,6 +34,7 @@ export function createMaterialServiceOptions(
 
 function createEmbeddingModel(
   definition: ResolvedEmbeddingModelDefinition,
+  gpuAcceleration: boolean,
 ): MaterialEmbeddingModel {
   return {
     modelId: definition.modelId,
@@ -41,17 +44,17 @@ function createEmbeddingModel(
     async openTokenizer() {
       const { NodeLlamaCppEmbeddingTokenizer } =
         await import("../../../packages/rag/src/node-llama-cpp-embedding.js");
-      return await NodeLlamaCppEmbeddingTokenizer.open(definition);
+      return await NodeLlamaCppEmbeddingTokenizer.open(definition, { gpuAcceleration });
     },
     async runEmbeddingTask(options) {
       const { runEmbeddingWorkerTask } =
         await import("../../../packages/rag/src/embedding-worker-task.js");
-      await runEmbeddingWorkerTask({ definition, ...options });
+      await runEmbeddingWorkerTask({ definition, gpuAcceleration, ...options });
     },
     async embedQuery(query) {
       const { NodeLlamaCppEmbeddingRuntime } =
         await import("../../../packages/rag/src/node-llama-cpp-embedding.js");
-      const runtime = await NodeLlamaCppEmbeddingRuntime.open(definition);
+      const runtime = await NodeLlamaCppEmbeddingRuntime.open(definition, { gpuAcceleration });
       try {
         return await runtime.embedQuery(query);
       } finally {

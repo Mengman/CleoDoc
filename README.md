@@ -181,6 +181,12 @@ npm run cleo -- embedding test en "local document retrieval" --query
 
 随软件发行的默认配置位于 `resources/config/software-default.yaml`。首次运行相关命令时，CleoDoc 会在操作系统配置目录创建最小 `config.yaml`；用户可在其中覆盖公开参数，`cleo config` 会显示实际路径。错误的用户字段会单项回退并显示警告。最近打开项目另存于 `state.yaml`，不与用户设置混合。
 
+`gpuAcceleration` 是 CleoDoc 的全局 GPU 加速开关。启用后，所有支持 GPU 加速的功能都应使用它；当前 Embedding 与 Tokenizer 会让 `node-llama-cpp` 自动选择可用 GPU 后端和模型层卸载。在用户 `config.yaml` 中设置：
+
+```yaml
+gpuAcceleration: true
+```
+
 Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需选择 Provider、设置统一的 `CLEODOC_API_KEY`，再选择模型。完整说明见[软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)。
 
 ## 安全约束
