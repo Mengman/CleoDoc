@@ -39,14 +39,15 @@ describe("KnowledgeChunkRepository", () => {
         sqlite
           .prepare(
             `INSERT INTO embedding_models
-             (embedding_model_id, model_name, revision, created_at)
-             VALUES ('model-1', 'test-model', 'v1', '2026-01-01T00:00:00.000Z')`,
+             (model_name, revision, created_at)
+             VALUES ('test-model', 'v1', '2026-01-01T00:00:00.000Z')`,
           )
           .run();
         const insert = sqlite.prepare(
           `INSERT INTO chunk_embeddings
-           (embedding_model_id, chunk_rowid, content_hash, embedding, created_at)
-           VALUES ('model-1', ?, ?, ?, '2026-01-01T00:00:00.000Z')`,
+           (embedding_model_rowid, chunk_rowid, content_hash, embedding, created_at)
+           VALUES ((SELECT embedding_model_rowid FROM embedding_models), ?, ?, ?,
+                   '2026-01-01T00:00:00.000Z')`,
         );
         for (const row of initialRows) {
           insert.run(row.chunk_rowid, row.content_hash, Buffer.alloc(4, 1));

@@ -11,7 +11,8 @@ import { ProjectDatabase } from "./project-database.js";
 
 const temporaryDirectories: string[] = [];
 const SOURCE_HASH = "0".repeat(64);
-const MODEL = { modelId: "model-zh-v1", modelName: "test/zh", revision: "v1" } as const;
+const MODEL_ID = "model-zh-v1";
+const MODEL = { modelName: "test/zh", revision: "v1" } as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -26,7 +27,7 @@ describe("ChunkEmbeddingRepository", () => {
     const { database, chunks } = await createIndexedSource();
     const repository = new ChunkEmbeddingRepository(database);
     try {
-      const pending = repository.listPending("project-1", "zh", MODEL.modelId);
+      const pending = repository.listPending("project-1", "zh", MODEL);
       expect(pending).toMatchObject({ totalChunks: 2 });
       expect(pending.chunks.map((chunk) => chunk.chunkId)).toEqual(
         chunks.map((chunk) => chunk.chunkId),
@@ -39,7 +40,7 @@ describe("ChunkEmbeddingRepository", () => {
         ]),
       ).resolves.toEqual({ writtenCount: 2, discardedCount: 0 });
 
-      expect(repository.listPending("project-1", "zh", MODEL.modelId)).toEqual({
+      expect(repository.listPending("project-1", "zh", MODEL)).toEqual({
         totalChunks: 2,
         chunks: [],
       });
@@ -49,14 +50,26 @@ describe("ChunkEmbeddingRepository", () => {
             sqlite
               .prepare(
                 `SELECT embedding FROM chunk_embeddings
-                 WHERE embedding_model_id = ? ORDER BY chunk_rowid LIMIT 1`,
+                 ORDER BY chunk_rowid LIMIT 1`,
               )
-              .get(MODEL.modelId) as { embedding: Uint8Array }
+              .get() as { embedding: Uint8Array }
           ).embedding,
       );
       const buffer = Buffer.from(bytes);
       expect(buffer.readFloatLE(0)).toBe(1);
       expect(buffer.readFloatLE(4)).toBe(-2.5);
+      expect(
+        database.read(
+          (sqlite) =>
+            sqlite
+              .prepare(`SELECT embedding_model_rowid, model_name, revision FROM embedding_models`)
+              .get() as Record<string, unknown>,
+        ),
+      ).toEqual({
+        embedding_model_rowid: 1,
+        model_name: MODEL.modelName,
+        revision: MODEL.revision,
+      });
     } finally {
       await database.close();
     }
@@ -67,7 +80,7 @@ describe("ChunkEmbeddingRepository", () => {
     const embeddings = new ChunkEmbeddingRepository(database);
     const chunks = new KnowledgeChunkRepository(database);
     try {
-      const snapshot = embeddings.listPending("project-1", "zh", MODEL.modelId).chunks[0]!;
+      const snapshot = embeddings.listPending("project-1", "zh", MODEL).chunks[0]!;
       await chunks.replaceForSource({
         sourceId: "source-1",
         expectedContentHash: SOURCE_HASH,
@@ -86,7 +99,7 @@ describe("ChunkEmbeddingRepository", () => {
         ]),
       ).resolves.toEqual({ writtenCount: 0, discardedCount: 1 });
       expect(countEmbeddings(database)).toBe(0);
-      expect(embeddings.listPending("project-1", "zh", MODEL.modelId).chunks).toHaveLength(2);
+      expect(embeddings.listPending("project-1", "zh", MODEL).chunks).toHaveLength(2);
     } finally {
       await database.close();
     }
@@ -96,14 +109,19 @@ describe("ChunkEmbeddingRepository", () => {
     const { database } = await createIndexedSource();
     const repository = new ChunkEmbeddingRepository(database);
     try {
-      expect(repository.listPending("project-1", "en", "model-en")).toEqual({
+      expect(
+        repository.listPending("project-1", "en", {
+          modelName: "test/en",
+          revision: "v1",
+        }),
+      ).toEqual({
         totalChunks: 0,
         chunks: [],
       });
       await database.write((sqlite) => {
         sqlite.prepare("UPDATE sources SET index_status = 'stale' WHERE id = 'source-1'").run();
       });
-      expect(repository.listPending("project-1", "zh", MODEL.modelId)).toEqual({
+      expect(repository.listPending("project-1", "zh", MODEL)).toEqual({
         totalChunks: 0,
         chunks: [],
       });
@@ -148,7 +166,7 @@ async function createIndexedSource(): Promise<{
 
 function chunkingConfig(): string {
   return JSON.stringify({
-    tokenizerModelId: MODEL.modelId,
+    tokenizerModelId: MODEL_ID,
     tokenizerRevision: MODEL.revision,
     maxInputTokens: 512,
     splitSearchWindowRatio: 0.75,

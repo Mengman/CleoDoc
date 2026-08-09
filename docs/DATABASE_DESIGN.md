@@ -674,20 +674,22 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 
 ```sql
 CREATE TABLE embedding_models (
-  embedding_model_id TEXT PRIMARY KEY,
-  model_name         TEXT NOT NULL,
-  revision           TEXT NOT NULL,
-  created_at         TEXT NOT NULL,
+  embedding_model_rowid INTEGER PRIMARY KEY,
+  model_name              TEXT NOT NULL,
+  revision                TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
   UNIQUE (model_name, revision)
 );
 ```
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
-| `embedding_model_id` | TEXT | PRIMARY KEY | CleoDoc 内部模型标识；同一模型 Revision 复用同一标识。 |
+| `embedding_model_rowid` | INTEGER | PRIMARY KEY | 数据库内部模型行号，只用于高效关联，不具有业务含义。 |
 | `model_name` | TEXT | NOT NULL | 推理框架识别的模型名称。 |
 | `revision` | TEXT | NOT NULL | 模型版本或推理框架提供的 Revision。 |
 | `created_at` | TEXT | NOT NULL | 首次登记时间。 |
+
+`(model_name, revision)` 是模型的自然唯一身份。运行时配置中的 `modelId` 仍可用于 CLI、日志和 Worker 命名，但不写入本表，也不决定数据库中的向量归属。这样既避免人工模型 ID 与名称、Revision 重复，也避免在每条 Chunk 向量及其主键索引中重复保存较长文本。
 
 不保存 `model_hash`、维度、距离算法、归一化方式、推理设备、批次、线程、模型路径或推理运行参数。向量维度可以由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到；距离算法属于检索配置，不属于模型记录。
 
@@ -697,15 +699,15 @@ CREATE TABLE embedding_models (
 
 ```sql
 CREATE TABLE chunk_embeddings (
-  embedding_model_id TEXT NOT NULL,
-  chunk_rowid        INTEGER NOT NULL,
-  content_hash       TEXT NOT NULL,
-  embedding          BLOB NOT NULL
+  embedding_model_rowid INTEGER NOT NULL,
+  chunk_rowid            INTEGER NOT NULL,
+  content_hash           TEXT NOT NULL,
+  embedding              BLOB NOT NULL
     CHECK (length(embedding) > 0 AND length(embedding) % 4 = 0),
-  created_at         TEXT NOT NULL,
-  PRIMARY KEY (embedding_model_id, chunk_rowid),
-  FOREIGN KEY (embedding_model_id)
-    REFERENCES embedding_models(embedding_model_id) ON DELETE CASCADE,
+  created_at             TEXT NOT NULL,
+  PRIMARY KEY (embedding_model_rowid, chunk_rowid),
+  FOREIGN KEY (embedding_model_rowid)
+    REFERENCES embedding_models(embedding_model_rowid) ON DELETE CASCADE,
   FOREIGN KEY (chunk_rowid)
     REFERENCES knowledge_chunks(chunk_rowid) ON DELETE CASCADE
 );
@@ -716,13 +718,13 @@ CREATE INDEX chunk_embeddings_chunk_rowid
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
-| `embedding_model_id` | TEXT | NOT NULL、外键 | 生成该向量的模型。 |
+| `embedding_model_rowid` | INTEGER | NOT NULL、外键 | 生成该向量的模型内部行号。 |
 | `chunk_rowid` | INTEGER | NOT NULL、外键 | 对应 Chunk 的数据库内部整数 ID。 |
 | `content_hash` | TEXT | NOT NULL | 生成向量时使用的 Chunk 内容校验值。 |
 | `embedding` | BLOB | NOT NULL、非空、长度为 4 的倍数 | 无头部的 IEEE 754 Float32 Little-Endian 连续向量。 |
 | `created_at` | TEXT | NOT NULL | 向量生成并写入的时间。 |
 
-当 `chunk_embeddings.content_hash <> knowledge_chunks.content_hash` 时，该向量已经过期，不能参与检索。删除 Chunk 或模型时级联删除相应向量。SQLite BLOB 是可变长度字段，不需要预设维度；同一 `embedding_model_id` 下维度一致由 Embedding Repository 在写入和查询边界校验。
+当 `chunk_embeddings.content_hash <> knowledge_chunks.content_hash` 时，该向量已经过期，不能参与检索。删除 Chunk 或模型时级联删除相应向量。SQLite BLOB 是可变长度字段，不需要预设维度；同一 `embedding_model_rowid` 下维度一致由 Embedding Repository 在写入和查询边界校验。Repository 接受 `model_name + revision`，在短事务中解析或创建内部行号；业务层不得保存或依赖该行号。
 
 ### 12.6 sqlite-vec 的数据库职责（已实现）
 

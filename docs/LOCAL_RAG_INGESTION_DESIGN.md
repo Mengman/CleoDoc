@@ -107,7 +107,7 @@ Chunk 是 FTS、Embedding、混合召回和 LLM 证据包的候选单元。它�
 languages: Array<"zh" | "en">;
 ```
 
-数组第一项是主要语言。资料元数据保存 `languages`，SQLite `sources.languages_json` 保存同一数组的 JSON 投影。`sources` 不保存 `embedding_model_id`；实际生成向量的模型只由 `chunk_embeddings.embedding_model_id` 记录。
+数组第一项是主要语言。资料元数据保存 `languages`，SQLite `sources.languages_json` 保存同一数组的 JSON 投影。`sources` 不保存 Embedding 模型外键；实际生成向量的模型由 `chunk_embeddings.embedding_model_rowid` 关联到 `embedding_models`，业务身份由模型名称与 Revision 确定。
 
 语言检测只读取可能包含连续正文的 CDM `<p>` 和 `<blockquote>` 节点。标题、`<li>`、`<code>`、`<pre>` 和其他结构或样式节点不参与检测；当 `<blockquote>` 包含 `<p>` 时只检测内部段落，避免重复统计。
 
@@ -226,23 +226,23 @@ Embedding 与 Chunk 分离，避免模型升级污染正文和 FTS：
 
 ```sql
 CREATE TABLE embedding_models (
-  embedding_model_id TEXT PRIMARY KEY,
-  model_name         TEXT NOT NULL,
-  revision           TEXT NOT NULL,
-  created_at         TEXT NOT NULL,
+  embedding_model_rowid INTEGER PRIMARY KEY,
+  model_name              TEXT NOT NULL,
+  revision                TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
   UNIQUE (model_name, revision)
 );
 
 CREATE TABLE chunk_embeddings (
-  embedding_model_id TEXT NOT NULL,
-  chunk_rowid        INTEGER NOT NULL,
-  content_hash       TEXT NOT NULL,
-  embedding          BLOB NOT NULL
+  embedding_model_rowid INTEGER NOT NULL,
+  chunk_rowid            INTEGER NOT NULL,
+  content_hash           TEXT NOT NULL,
+  embedding              BLOB NOT NULL
     CHECK (length(embedding) > 0 AND length(embedding) % 4 = 0),
-  created_at         TEXT NOT NULL,
-  PRIMARY KEY (embedding_model_id, chunk_rowid),
-  FOREIGN KEY (embedding_model_id)
-    REFERENCES embedding_models(embedding_model_id) ON DELETE CASCADE,
+  created_at             TEXT NOT NULL,
+  PRIMARY KEY (embedding_model_rowid, chunk_rowid),
+  FOREIGN KEY (embedding_model_rowid)
+    REFERENCES embedding_models(embedding_model_rowid) ON DELETE CASCADE,
   FOREIGN KEY (chunk_rowid)
     REFERENCES knowledge_chunks(chunk_rowid) ON DELETE CASCADE
 );
@@ -251,7 +251,7 @@ CREATE INDEX chunk_embeddings_chunk_rowid
   ON chunk_embeddings(chunk_rowid);
 ```
 
-`embedding_model_id` 标识包含具体 Revision 的模型；同名模型升级后创建新标识，不覆盖旧向量。模型表不保存 `model_hash`、维度、距离算法或推理运行参数。向量维度由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到，同一模型下的维度一致性由 Repository 校验。
+`(model_name, revision)` 是模型的自然唯一身份；同名模型升级后登记新的 Revision，不覆盖旧向量。`embedding_model_rowid` 只是 SQLite 内部整数关联键，不进入配置、CLI、日志或 RAG 公共接口。运行时 `modelId` 可继续用于诊断和 Worker 命名，但不写入模型表。模型表不保存 `model_hash`、维度、距离算法或推理运行参数。向量维度由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到，同一模型行号下的维度一致性由 Repository 校验。
 
 向量由 `node-llama-cpp` 在 Worker 中运行本地 GGUF 模型生成，以无头部的 IEEE 754 Float32 Little-Endian 连续 BLOB 保存，不使用 JSON 数组。v0.1 中文模型为 `BAAI/bge-small-zh-v1.5`，英文模型为 `BAAI/bge-small-en-v1.5`；具体 Revision 由 `embedding_models` 登记。`knowledge_chunks.content_hash` 记录当前 Chunk 纯文本 Hash，`chunk_embeddings.content_hash` 记录生成该向量时的 Hash；两者不一致时向量过期。原始空间约为 `Chunk 数量 × 维度 × 4 字节`，尚未包含 SQLite 页、索引和元数据开销。
 
@@ -262,7 +262,7 @@ CREATE INDEX chunk_embeddings_chunk_rowid
 v0.1 采用可解释、容易验证的精确搜索：
 
 1. SQLite 按当前项目、资料类型、访问范围和 Source 状态过滤候选。
-2. 只选择活动 `embedding_model_id` 且 `chunk_embeddings.content_hash = knowledge_chunks.content_hash` 的向量。
+2. 通过当前模型的 `model_name + revision` 解析内部 `embedding_model_rowid`，只选择该模型且 `chunk_embeddings.content_hash = knowledge_chunks.content_hash` 的向量。
 3. SQLite 使用 `vec_distance_cosine(embedding, vec_f32(?))` 计算精确余弦距离并返回 Top-K，距离越小越相似。
 4. 与 FTS 结果融合后再读取需要展示和发送给模型的正文。
 

@@ -440,8 +440,8 @@ cleo search <query> --scope material
 #### 7.4 Embedding 数据库结构与增量 Chunk Repository
 
 - 将数据库提升到下一 Schema 版本，为 `knowledge_chunks` 增加纯文本 `content_hash`。
-- 新增最小化 `embedding_models`：只保存模型 ID、模型名称、revision 和创建时间。
-- 新增 `chunk_embeddings`：以 `(embedding_model_id, chunk_rowid)` 为主键，保存 Chunk Hash、Float32 Little-Endian BLOB 和创建时间。
+- 新增最小化 `embedding_models`：以整数 `embedding_model_rowid` 作为内部主键，只保存模型名称、revision 和创建时间，以 `(model_name, revision)` 保证业务唯一性。
+- 新增 `chunk_embeddings`：以 `(embedding_model_rowid, chunk_rowid)` 为主键，保存 Chunk Hash、Float32 Little-Endian BLOB 和创建时间。
 - 将当前整组删除再插入的 Chunk 更新改为增量同步；内容和原文范围未变化的 Chunk 保留 `chunk_rowid`，只处理新增、变化和删除项。
 - Chunk 或模型删除时级联删除相应向量；Source 删除后不得留下可查询的 FTS 或 Embedding 孤立数据。
 

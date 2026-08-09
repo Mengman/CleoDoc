@@ -12,8 +12,9 @@ import { ProjectDatabase } from "./project-database.js";
 import { SqliteVectorIndex } from "./sqlite-vector-index.js";
 
 const temporaryDirectories: string[] = [];
-const MODEL_ID = "model-zh-v1";
-const OTHER_MODEL_ID = "model-zh-v2";
+const MODEL_NAME = "test/zh";
+const OTHER_MODEL_NAME = "test/zh-other";
+const MODEL_REVISION = "v1";
 
 afterEach(async () => {
   await Promise.all(
@@ -27,8 +28,8 @@ describe("SqliteVectorIndex", () => {
   it("loads the pinned extension, performs exact cosine search, then disables loading", async () => {
     const database = await createDatabase();
     try {
-      await addVector(database, "target", "project-1", MODEL_ID, [1, 0]);
-      await addVector(database, "near", "project-1", MODEL_ID, [0.8, 0.2]);
+      await addVector(database, "target", "project-1", MODEL_NAME, [1, 0]);
+      await addVector(database, "near", "project-1", MODEL_NAME, [0.8, 0.2]);
       const index = SqliteVectorIndex.open(database);
 
       expect(index.extensionVersion).toBe("v0.1.9");
@@ -45,7 +46,11 @@ describe("SqliteVectorIndex", () => {
 
       const results = await index.search(
         Float32Array.from([1, 0]),
-        { projectId: "project-1", embeddingModelId: MODEL_ID },
+        {
+          projectId: "project-1",
+          embeddingModelName: MODEL_NAME,
+          embeddingModelRevision: MODEL_REVISION,
+        },
         10,
       );
       expect(results.map((result) => result.sourceId)).toEqual(["target", "near"]);
@@ -59,11 +64,11 @@ describe("SqliteVectorIndex", () => {
   it("excludes other projects, stale sources, stale vectors, and other models", async () => {
     const database = await createDatabase();
     try {
-      await addVector(database, "valid", "project-1", MODEL_ID, [0.9, 0.1]);
-      await addVector(database, "other-project", "project-2", MODEL_ID, [1, 0]);
-      await addVector(database, "stale-source", "project-1", MODEL_ID, [1, 0]);
-      await addVector(database, "stale-vector", "project-1", MODEL_ID, [1, 0]);
-      await addVector(database, "other-model", "project-1", OTHER_MODEL_ID, [1, 0]);
+      await addVector(database, "valid", "project-1", MODEL_NAME, [0.9, 0.1]);
+      await addVector(database, "other-project", "project-2", MODEL_NAME, [1, 0]);
+      await addVector(database, "stale-source", "project-1", MODEL_NAME, [1, 0]);
+      await addVector(database, "stale-vector", "project-1", MODEL_NAME, [1, 0]);
+      await addVector(database, "other-model", "project-1", OTHER_MODEL_NAME, [1, 0]);
       await database.write((sqlite) => {
         sqlite.prepare("UPDATE sources SET index_status = 'stale' WHERE id = 'stale-source'").run();
         sqlite
@@ -77,7 +82,11 @@ describe("SqliteVectorIndex", () => {
       const index = SqliteVectorIndex.open(database);
       const results = await index.search(
         Float32Array.from([1, 0]),
-        { projectId: "project-1", embeddingModelId: MODEL_ID },
+        {
+          projectId: "project-1",
+          embeddingModelName: MODEL_NAME,
+          embeddingModelRevision: MODEL_REVISION,
+        },
         10,
       );
       expect(results.map((result) => result.sourceId)).toEqual(["valid"]);
@@ -89,12 +98,16 @@ describe("SqliteVectorIndex", () => {
   it("rejects a query vector with different dimensions", async () => {
     const database = await createDatabase();
     try {
-      await addVector(database, "source", "project-1", MODEL_ID, [1, 0]);
+      await addVector(database, "source", "project-1", MODEL_NAME, [1, 0]);
       const index = SqliteVectorIndex.open(database);
       await expect(
         index.search(
           Float32Array.from([1, 0, 0]),
-          { projectId: "project-1", embeddingModelId: MODEL_ID },
+          {
+            projectId: "project-1",
+            embeddingModelName: MODEL_NAME,
+            embeddingModelRevision: MODEL_REVISION,
+          },
           10,
         ),
       ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
@@ -111,10 +124,10 @@ async function createDatabase(): Promise<ProjectDatabase> {
   await database.write((sqlite) => {
     const insert = sqlite.prepare(
       `INSERT INTO embedding_models
-       (embedding_model_id, model_name, revision, created_at) VALUES (?, ?, 'v1', ?)`,
+       (model_name, revision, created_at) VALUES (?, 'v1', ?)`,
     );
-    insert.run(MODEL_ID, "test/zh", "2026-01-01T00:00:00.000Z");
-    insert.run(OTHER_MODEL_ID, "test/zh-other", "2026-01-01T00:00:00.000Z");
+    insert.run(MODEL_NAME, "2026-01-01T00:00:00.000Z");
+    insert.run(OTHER_MODEL_NAME, "2026-01-01T00:00:00.000Z");
   });
   return database;
 }
@@ -123,7 +136,7 @@ async function addVector(
   database: ProjectDatabase,
   sourceId: string,
   projectId: string,
-  modelId: string,
+  modelName: string,
   vector: readonly number[],
 ): Promise<void> {
   const sourceHash = sourceId.padEnd(64, "0").slice(0, 64);
@@ -160,11 +173,13 @@ async function addVector(
     sqlite
       .prepare(
         `INSERT INTO chunk_embeddings
-         (embedding_model_id, chunk_rowid, content_hash, embedding, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         (embedding_model_rowid, chunk_rowid, content_hash, embedding, created_at)
+         VALUES ((SELECT embedding_model_rowid FROM embedding_models
+                  WHERE model_name = ? AND revision = ?), ?, ?, ?, ?)`,
       )
       .run(
-        modelId,
+        modelName,
+        MODEL_REVISION,
         row.chunk_rowid,
         row.content_hash,
         encodeFloat32LittleEndian(Float32Array.from(vector)),

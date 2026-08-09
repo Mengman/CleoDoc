@@ -132,7 +132,8 @@ export class MaterialIndexer {
       query,
       {
         projectId: this.projectId,
-        embeddingModelId: this.tokenizers.model(language).modelId,
+        embeddingModelName: this.embeddingModels[language].modelName,
+        embeddingModelRevision: this.embeddingModels[language].modelRevision,
       },
       limit,
     );
@@ -167,9 +168,12 @@ export class MaterialIndexer {
     );
     const coverage = new Map(
       (["zh", "en"] as const).flatMap((language) => {
-        const modelId = this.embeddingModels[language].modelId;
+        const model = this.embeddingModels[language];
         return this.embeddingRepository
-          .listCoverage(this.projectId, language, modelId)
+          .listCoverage(this.projectId, language, {
+            modelName: model.modelName,
+            revision: model.modelRevision,
+          })
           .map((item) => [item.sourceId, item] as const);
       }),
     );

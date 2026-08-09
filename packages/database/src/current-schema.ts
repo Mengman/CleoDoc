@@ -46,7 +46,7 @@ export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   END;
 
   CREATE TABLE embedding_models (
-    embedding_model_id TEXT PRIMARY KEY,
+    embedding_model_rowid INTEGER PRIMARY KEY,
     model_name TEXT NOT NULL,
     revision TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -54,15 +54,15 @@ export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   );
 
   CREATE TABLE chunk_embeddings (
-    embedding_model_id TEXT NOT NULL
-      REFERENCES embedding_models(embedding_model_id) ON DELETE CASCADE,
+    embedding_model_rowid INTEGER NOT NULL
+      REFERENCES embedding_models(embedding_model_rowid) ON DELETE CASCADE,
     chunk_rowid INTEGER NOT NULL
       REFERENCES knowledge_chunks(chunk_rowid) ON DELETE CASCADE,
     content_hash TEXT NOT NULL,
     embedding BLOB NOT NULL
       CHECK (length(embedding) > 0 AND length(embedding) % 4 = 0),
     created_at TEXT NOT NULL,
-    PRIMARY KEY (embedding_model_id, chunk_rowid)
+    PRIMARY KEY (embedding_model_rowid, chunk_rowid)
   );
 
   CREATE INDEX chunk_embeddings_chunk_rowid

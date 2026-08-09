@@ -2,7 +2,8 @@ import type { KnowledgeSearchResult } from "./knowledge-chunk.js";
 
 export interface VectorSearchFilter {
   readonly projectId: string;
-  readonly embeddingModelId: string;
+  readonly embeddingModelName: string;
+  readonly embeddingModelRevision: string;
 }
 
 export interface VectorSearchHit extends KnowledgeSearchResult {

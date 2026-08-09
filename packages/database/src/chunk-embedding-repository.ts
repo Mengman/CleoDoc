@@ -4,7 +4,6 @@ import { assertFloat32Vector, encodeFloat32LittleEndian } from "./float32-vector
 import type { ProjectDatabase } from "./project-database.js";
 
 export interface EmbeddingModelIdentity {
-  readonly modelId: string;
   readonly modelName: string;
   readonly revision: string;
 }
@@ -64,7 +63,7 @@ export class ChunkEmbeddingRepository {
   listPending(
     projectId: string,
     language: KnowledgeSourceLanguage,
-    modelId: string,
+    model: EmbeddingModelIdentity,
   ): PendingChunkEmbeddingSet {
     const rows = this.projectDatabase.read(
       (database) =>
@@ -77,14 +76,17 @@ export class ChunkEmbeddingRepository {
                     ce.content_hash AS embedding_content_hash
              FROM knowledge_chunks kc
              JOIN sources s ON s.id = kc.source_id
+             LEFT JOIN embedding_models em
+               ON em.model_name = ? AND em.revision = ?
              LEFT JOIN chunk_embeddings ce
-               ON ce.chunk_rowid = kc.chunk_rowid AND ce.embedding_model_id = ?
+               ON ce.chunk_rowid = kc.chunk_rowid
+              AND ce.embedding_model_rowid = em.embedding_model_rowid
              WHERE s.project_id = ? AND s.source_type = 'material'
                AND s.index_status = 'ready'
                AND json_extract(s.languages_json, '$[0]') = ?
              ORDER BY s.updated_at DESC, kc.ordinal`,
           )
-          .all(modelId, projectId, language) as unknown as CandidateRow[],
+          .all(model.modelName, model.revision, projectId, language) as unknown as CandidateRow[],
     );
 
     const chunks = rows
@@ -101,7 +103,7 @@ export class ChunkEmbeddingRepository {
   listCoverage(
     projectId: string,
     language: KnowledgeSourceLanguage,
-    modelId: string,
+    model: EmbeddingModelIdentity,
   ): readonly SourceEmbeddingCoverage[] {
     return this.projectDatabase.read((database) =>
       database
@@ -111,13 +113,16 @@ export class ChunkEmbeddingRepository {
                     AS embedded_chunks
            FROM sources s
            LEFT JOIN knowledge_chunks kc ON kc.source_id = s.id
+           LEFT JOIN embedding_models em
+             ON em.model_name = ? AND em.revision = ?
            LEFT JOIN chunk_embeddings ce
-             ON ce.chunk_rowid = kc.chunk_rowid AND ce.embedding_model_id = ?
+             ON ce.chunk_rowid = kc.chunk_rowid
+            AND ce.embedding_model_rowid = em.embedding_model_rowid
            WHERE s.project_id = ? AND s.source_type = 'material'
              AND json_extract(s.languages_json, '$[0]') = ?
            GROUP BY s.id`,
         )
-        .all(modelId, projectId, language)
+        .all(model.modelName, model.revision, projectId, language)
         .map((value) => {
           const row = value as Record<string, unknown>;
           return {
@@ -160,14 +165,14 @@ export class ChunkEmbeddingRepository {
       if (valid.length === 0) {
         return { writtenCount: 0, discardedCount: writes.length };
       }
-      ensureModel(database, model);
-      ensureEmbeddingDimensions(database, model.modelId, valid[0]!.write.vector.length);
+      const modelRowid = ensureModel(database, model);
+      ensureEmbeddingDimensions(database, modelRowid, valid[0]!.write.vector.length);
 
       const insert = database.prepare(
         `INSERT INTO chunk_embeddings
-         (embedding_model_id, chunk_rowid, content_hash, embedding, created_at)
+         (embedding_model_rowid, chunk_rowid, content_hash, embedding, created_at)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(embedding_model_id, chunk_rowid) DO UPDATE SET
+         ON CONFLICT(embedding_model_rowid, chunk_rowid) DO UPDATE SET
            content_hash = excluded.content_hash,
            embedding = excluded.embedding,
            created_at = excluded.created_at`,
@@ -175,7 +180,7 @@ export class ChunkEmbeddingRepository {
       const now = new Date().toISOString();
       for (const item of valid) {
         insert.run(
-          model.modelId,
+          modelRowid,
           item.chunkRowid,
           item.write.snapshot.chunkContentHash,
           encodeFloat32LittleEndian(item.write.vector),
@@ -228,46 +233,37 @@ function validateWrites(writes: readonly ChunkEmbeddingWrite[]): void {
   }
 }
 
-function ensureModel(database: DatabaseSync, model: EmbeddingModelIdentity): void {
-  const byId = database
-    .prepare(`SELECT model_name, revision FROM embedding_models WHERE embedding_model_id = ?`)
-    .get(model.modelId) as { model_name: string; revision: string } | undefined;
-  if (byId !== undefined) {
-    if (byId.model_name !== model.modelName || byId.revision !== model.revision) {
-      throw new AppError("CONFIG_ERROR", "Embedding 模型 ID 对应了不同的模型版本。");
-    }
-    return;
-  }
-
-  const byRevision = database
+function ensureModel(database: DatabaseSync, model: EmbeddingModelIdentity): number {
+  const existing = database
     .prepare(
-      `SELECT embedding_model_id FROM embedding_models
+      `SELECT embedding_model_rowid FROM embedding_models
        WHERE model_name = ? AND revision = ?`,
     )
-    .get(model.modelName, model.revision) as { embedding_model_id: string } | undefined;
-  if (byRevision !== undefined) {
-    throw new AppError("CONFIG_ERROR", "同一个 Embedding 模型版本使用了不同的模型 ID。");
+    .get(model.modelName, model.revision) as { embedding_model_rowid: number } | undefined;
+  if (existing !== undefined) {
+    return Number(existing.embedding_model_rowid);
   }
-  database
+  const inserted = database
     .prepare(
       `INSERT INTO embedding_models
-       (embedding_model_id, model_name, revision, created_at)
-       VALUES (?, ?, ?, ?)`,
+       (model_name, revision, created_at)
+       VALUES (?, ?, ?)`,
     )
-    .run(model.modelId, model.modelName, model.revision, new Date().toISOString());
+    .run(model.modelName, model.revision, new Date().toISOString());
+  return Number(inserted.lastInsertRowid);
 }
 
 function ensureEmbeddingDimensions(
   database: DatabaseSync,
-  modelId: string,
+  modelRowid: number,
   dimensions: number,
 ): void {
   const existing = database
     .prepare(
       `SELECT length(embedding) AS byte_length
-       FROM chunk_embeddings WHERE embedding_model_id = ? LIMIT 1`,
+       FROM chunk_embeddings WHERE embedding_model_rowid = ? LIMIT 1`,
     )
-    .get(modelId) as { byte_length: number } | undefined;
+    .get(modelRowid) as { byte_length: number } | undefined;
   if (existing !== undefined && Number(existing.byte_length) !== dimensions * 4) {
     throw new AppError("VALIDATION_ERROR", "Embedding 向量维度与已有模型向量不一致。");
   }

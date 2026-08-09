@@ -39,7 +39,8 @@ export class MaterialEmbeddingIndexer {
   ): Promise<MaterialEmbeddingModelResult> {
     const startedAt = performance.now();
     const model = this.models[language];
-    const pending = this.repository.listPending(this.projectId, language, model.modelId);
+    const modelIdentity = { modelName: model.modelName, revision: model.modelRevision };
+    const pending = this.repository.listPending(this.projectId, language, modelIdentity);
     let writtenChunks = 0;
     let discardedChunks = 0;
     let tokenCount = 0;
@@ -66,7 +67,6 @@ export class MaterialEmbeddingIndexer {
             this.projectId,
             language,
             {
-              modelId: model.modelId,
               modelName: model.modelName,
               revision: model.modelRevision,
             },

@@ -76,11 +76,13 @@ export class SqliteVectorIndex implements VectorIndex {
                     s.title AS source_title, s.source_label,
                     vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?)) AS distance
              FROM chunk_embeddings ce
+             JOIN embedding_models em
+               ON em.embedding_model_rowid = ce.embedding_model_rowid
              JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
              JOIN sources s ON s.id = kc.source_id
              WHERE s.project_id = ? AND s.source_type = 'material'
                AND s.index_status = 'ready'
-               AND ce.embedding_model_id = ?
+               AND em.model_name = ? AND em.revision = ?
                AND ce.content_hash = kc.content_hash
                AND length(ce.embedding) = ?
              ORDER BY distance ASC, s.updated_at DESC, kc.ordinal ASC
@@ -89,7 +91,8 @@ export class SqliteVectorIndex implements VectorIndex {
           .all(
             queryBytes,
             filter.projectId,
-            filter.embeddingModelId,
+            filter.embeddingModelName,
+            filter.embeddingModelRevision,
             expectedDimensions * 4,
             limit,
           ) as unknown as VectorSearchRow[];
@@ -125,20 +128,27 @@ function findExpectedDimensions(
     .prepare(
       `SELECT vec_length(vec_f32(ce.embedding)) AS dimensions
        FROM chunk_embeddings ce
+       JOIN embedding_models em
+         ON em.embedding_model_rowid = ce.embedding_model_rowid
        JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
        JOIN sources s ON s.id = kc.source_id
        WHERE s.project_id = ? AND s.source_type = 'material'
          AND s.index_status = 'ready'
-         AND ce.embedding_model_id = ?
+         AND em.model_name = ? AND em.revision = ?
          AND ce.content_hash = kc.content_hash
        LIMIT 1`,
     )
-    .get(filter.projectId, filter.embeddingModelId) as { dimensions: number } | undefined;
+    .get(filter.projectId, filter.embeddingModelName, filter.embeddingModelRevision) as
+    { dimensions: number } | undefined;
   return row === undefined ? undefined : Number(row.dimensions);
 }
 
 function validateSearch(filter: VectorSearchFilter, limit: number): void {
-  if (filter.projectId.trim() === "" || filter.embeddingModelId.trim() === "") {
+  if (
+    filter.projectId.trim() === "" ||
+    filter.embeddingModelName.trim() === "" ||
+    filter.embeddingModelRevision.trim() === ""
+  ) {
     throw new AppError("VALIDATION_ERROR", "向量检索缺少项目或 Embedding 模型范围。");
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
