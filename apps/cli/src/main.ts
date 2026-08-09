@@ -350,7 +350,7 @@ async function materialCommand(parsed: ParsedArguments): Promise<void> {
         }
         for (const source of list) {
           output.write(
-            `${source.id}\t${source.title}\t${source.format}\t${source.size} bytes\t${source.tags.join(",")}\n`,
+            `${source.id}\t${source.title}\t${source.format}\t${source.languages.join(",")}\t${source.size} bytes\t${source.tags.join(",")}\n`,
           );
         }
         return;
@@ -497,6 +497,7 @@ function printMaterialImported(result: Awaited<ReturnType<MaterialService["addTe
   );
   output.write(`资料 ID：${result.source.id}\n路径：${result.source.relativePath}\n`);
   output.write(`输入编码：${result.inputEncoding}\n`);
+  output.write(`语言：${result.source.languages.join(", ")}\n`);
   if (result.created) {
     output.write(`解析结果：.cleo/derived/documents/${result.source.id}.cdm.xml\n`);
     output.write(`切片结果：.cleo/derived/chunks/${result.source.id}.chunks.json\n`);
@@ -508,6 +509,7 @@ function printMaterialMetadata(source: Awaited<ReturnType<MaterialService["list"
   output.write(`资料：${source.title}\n`);
   output.write(`资料 ID：${source.id}\n`);
   output.write(`格式：${source.format}\n来源：${source.sourceLabel ?? "未指定"}\n`);
+  output.write(`语言：${source.languages.join(", ")}\n`);
   output.write(`标签：${source.tags.length === 0 ? "无" : source.tags.join(", ")}\n`);
   output.write(`路径：${source.relativePath}\n内容哈希：${source.contentHash}\n`);
   output.write(`创建时间：${source.createdAt}\n更新时间：${source.updatedAt}\n`);
@@ -1395,6 +1397,7 @@ function materialServiceOptions() {
     database: { busyTimeoutMs: softwareConfig.database.busyTimeoutMs },
     maxImportBytes: softwareConfig.materials.maxImportBytes,
     chunking: softwareConfig.rag.chunking,
+    languageDetection: softwareConfig.rag.languageDetection,
   };
 }
 

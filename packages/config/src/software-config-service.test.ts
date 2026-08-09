@@ -28,6 +28,7 @@ describe("SoftwareConfigService", () => {
       maxChunkChars: 800,
       splitSearchWindowRatio: 0.75,
     });
+    expect(result.config.rag.languageDetection.minBlockUnits).toBe(50);
     expect(result.config.rag.embedding.models.zh).toMatchObject({
       modelId: "bge-small-zh-v1.5-q8_0",
       maxInputTokens: 512,
@@ -48,6 +49,8 @@ context:
 debug:
   enabled: true
 rag:
+  languageDetection:
+    minBlockUnits: 80
   embedding:
     models:
       zh:
@@ -63,6 +66,7 @@ unknownSetting: true
     expect(result.config.llm.timeouts.connectionMs).toBe(90_000);
     expect(result.config.context.softCompactionRatio).toBe(0.75);
     expect(result.config.debug.enabled).toBe(true);
+    expect(result.config.rag.languageDetection.minBlockUnits).toBe(80);
     expect(result.config.rag.embedding.models.zh.maxInputTokens).toBe(512);
     expect(result.warnings.map((warning) => warning.path)).toEqual(
       expect.arrayContaining(["context.softCompactionRatio", "rag.embedding", "unknownSetting"]),

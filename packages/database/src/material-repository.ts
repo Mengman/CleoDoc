@@ -12,6 +12,7 @@ interface SourceRow {
   source_label: string | null;
   original_file_name: string | null;
   tags_json: string;
+  languages_json: string;
   relative_path: string;
   content_hash: string;
   size: number;
@@ -58,8 +59,9 @@ export class MaterialRepository {
         .prepare(
           `INSERT INTO sources
            (id, project_id, source_type, origin, format, title, source_label,
-            original_file_name, tags_json, relative_path, content_hash, size, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            original_file_name, tags_json, languages_json, relative_path, content_hash, size,
+            created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              project_id = excluded.project_id,
              source_type = excluded.source_type,
@@ -69,6 +71,7 @@ export class MaterialRepository {
              source_label = excluded.source_label,
              original_file_name = excluded.original_file_name,
              tags_json = excluded.tags_json,
+             languages_json = excluded.languages_json,
              relative_path = excluded.relative_path,
              content_hash = excluded.content_hash,
              size = excluded.size,
@@ -97,6 +100,7 @@ export class MaterialRepository {
           source.sourceLabel,
           source.originalFileName,
           JSON.stringify(source.tags),
+          JSON.stringify(source.languages),
           source.relativePath,
           source.contentHash,
           source.size,
@@ -130,8 +134,9 @@ export class MaterialRepository {
       const upsert = database.prepare(
         `INSERT INTO sources
          (id, project_id, source_type, origin, format, title, source_label,
-          original_file_name, tags_json, relative_path, content_hash, size, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          original_file_name, tags_json, languages_json, relative_path, content_hash, size,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            source_type = excluded.source_type,
@@ -141,6 +146,7 @@ export class MaterialRepository {
            source_label = excluded.source_label,
            original_file_name = excluded.original_file_name,
            tags_json = excluded.tags_json,
+           languages_json = excluded.languages_json,
            relative_path = excluded.relative_path,
            content_hash = excluded.content_hash,
            size = excluded.size,
@@ -170,6 +176,7 @@ export class MaterialRepository {
           source.sourceLabel,
           source.originalFileName,
           JSON.stringify(source.tags),
+          JSON.stringify(source.languages),
           source.relativePath,
           source.contentHash,
           source.size,
@@ -182,14 +189,15 @@ export class MaterialRepository {
 }
 
 function mapSource(row: SourceRow): KnowledgeSource {
-  let tags: unknown;
-  try {
-    tags = JSON.parse(row.tags_json) as unknown;
-  } catch (error) {
-    throw new AppError("DATABASE_ERROR", "资料标签投影格式无效。", { cause: error });
-  }
-  if (!Array.isArray(tags) || !tags.every((tag) => typeof tag === "string")) {
-    throw new AppError("DATABASE_ERROR", "资料标签投影格式无效。");
+  const tags = parseStringArray(row.tags_json, "资料标签投影格式无效。");
+  const languages = parseStringArray(row.languages_json, "资料语言投影格式无效。");
+  if (
+    languages.length < 1 ||
+    languages.length > 2 ||
+    !languages.every((language) => language === "zh" || language === "en") ||
+    new Set(languages).size !== languages.length
+  ) {
+    throw new AppError("DATABASE_ERROR", "资料语言投影格式无效。");
   }
   return {
     schemaVersion: 1,
@@ -202,10 +210,24 @@ function mapSource(row: SourceRow): KnowledgeSource {
     sourceLabel: row.source_label,
     originalFileName: row.original_file_name,
     tags,
+    languages: languages as KnowledgeSource["languages"],
     relativePath: row.relative_path,
     contentHash: row.content_hash,
     size: Number(row.size),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function parseStringArray(value: string, message: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new AppError("DATABASE_ERROR", message, { cause: error });
+  }
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) {
+    throw new AppError("DATABASE_ERROR", message);
+  }
+  return parsed;
 }

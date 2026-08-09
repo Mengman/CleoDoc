@@ -16,7 +16,7 @@ import {
   knowledgeSourceSchema,
 } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
-import { chunkDocument, parseDocument } from "@cleodoc/document-ingestion";
+import { chunkDocument, detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import type { ChunkDocumentOptions } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
@@ -43,6 +43,7 @@ export class MaterialService {
     private readonly database: ProjectDatabase,
     private readonly maxImportBytes: number,
     private readonly chunking: ChunkDocumentOptions,
+    private readonly languageDetection: MaterialServiceOptions["languageDetection"],
   ) {
     this.repository = new MaterialRepository(database);
     this.indexer = new MaterialIndexer(projectRoot, projectId, database, chunking);
@@ -61,6 +62,7 @@ export class MaterialService {
       database,
       options.maxImportBytes,
       options.chunking,
+      options.languageDetection,
     );
     try {
       await service.synchronizeProjection();
@@ -255,6 +257,7 @@ export class MaterialService {
       sourceLabel: normalizeOptionalLabel(input.sourceLabel),
       originalFileName: input.originalFileName,
       tags: normalizeTags(input.tags ?? []),
+      languages: detectDocumentLanguages(parsedDocument.cdm, this.languageDetection),
       relativePath,
       contentHash,
       size: Buffer.byteLength(content, "utf8"),

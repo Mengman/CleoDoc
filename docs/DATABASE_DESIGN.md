@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 Schema v9 当前基线
+> 状态：v0.1 Schema v10 当前基线
 > 更新日期：2026-08-09
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -11,7 +11,7 @@
 
 本文严格区分：
 
-- **当前实现**：Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及 v8→v9 前向迁移。
+- **当前实现**：Schema v10 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及 v8→v9→v10、v9→v10 前向迁移。
 - **尚未实现范围**：技术架构中规划但尚未落地的 Embedding、混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
@@ -98,9 +98,9 @@ PRAGMA busy_timeout = 5000;
 
 - 同一个 `ProjectDatabase` 实例内通过 Promise FIFO 队列串行写入。
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
-- 当前数据库基线是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
-- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放旧 DDL。
-- 完整 v8 数据库执行单一 v8→v9 前向迁移，新增 Source 索引状态、`knowledge_chunks` 和资料 FTS；已有聊天和项目指令数据不重写。
+- 当前数据库基线是 Schema v10，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
+- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v10 基线，不重放旧 DDL。
+- 完整 v8 数据库依次执行 v8→v9→v10 前向迁移；完整 v9 数据库执行 v9→v10。v9 新增 Source 索引状态、`knowledge_chunks` 和资料 FTS，v10 新增 Source 语言列表；已有聊天、项目指令、资料正文和 Chunk 数据不重写。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动删除它们。
 - 当前代码不恢复 v1–v8 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
@@ -110,8 +110,8 @@ PRAGMA busy_timeout = 5000;
 
 ## 5. Schema 演进策略
 
-- v9 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
-- 新项目只在 `schema_migrations` 写入一条 v9 记录；完整 v8 项目迁移后保留 v8、v9 两条记录。
+- v10 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
+- 新项目只在 `schema_migrations` 写入一条 v10 记录；完整 v8 项目迁移后保留 v8、v9、v10 三条记录，完整 v9 项目迁移后保留 v9、v10 两条记录。
 - 下一次结构变化必须使用更高且不复用的版本号。正式发布前可以再次压平开发期历史；正式发布后必须保留面向用户数据的前向升级路径。
 - 任何不受支持的数据库都只报告错误，不把完整基线覆盖到已有表上，也不自动删除数据库。
 
@@ -128,7 +128,7 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.2 `schema_migrations`
 
-记录数据库已经达到的 Schema 版本。新数据库只记录 v8；历史上完成升级的数据库可能保留 v1–v8 历史行。
+记录数据库已经达到的 Schema 版本。新数据库只记录 v10；受支持的开发期升级数据库会保留 v8、v9、v10 中实际经历过的历史行。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -216,6 +216,7 @@ UNIQUE(conversation_id, sequence)
 | `source_label` | TEXT | 可空 | 书名、访谈对象、网站等来源说明 |
 | `original_file_name` | TEXT | 可空 | 导入前的原始文件名 |
 | `tags_json` | TEXT | NOT NULL | 标签字符串数组 JSON |
+| `languages_json` | TEXT | NOT NULL、默认 `["zh"]` | 检测出的有序语言列表 JSON；当前允许 `zh`、`en`，第一项是主语言 |
 | `relative_path` | TEXT | NOT NULL、UNIQUE | 资料正文在项目中的相对路径 |
 | `content_hash` | TEXT | NOT NULL、UNIQUE | SHA-256 内容哈希，用于去重和变化检测 |
 | `size` | INTEGER | NOT NULL、非负 | 资料正文 UTF-8 字节数 |
@@ -564,7 +565,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ## 12. RAG 数据库范围
 
-Schema v9 已实现资料 Source 索引状态、纯文本 Chunk 和 External Content FTS。以下能力仍未进入当前 Schema：
+Schema v10 已实现资料 Source 索引状态、语言列表、纯文本 Chunk 和 External Content FTS。以下能力仍未进入当前 Schema：
 
 - 正文 FTS、本地 Embedding、模型版本和索引代次。
 - RetrievalRun、ContextManifest 及证据项。
@@ -589,6 +590,8 @@ Schema v9 已增加：
 | `index_status` | TEXT | NOT NULL | `pending`、`ready`、`stale`、`failed` 四种受控状态。 |
 | `index_error_code` | TEXT | 可空 | 最近一次失败的稳定错误码。 |
 | `indexed_at` | TEXT | 可空 | 当前 Chunk 集合完成切换的时间。 |
+
+Schema v10 新增 `languages_json TEXT NOT NULL DEFAULT '["zh"]'`，保存 Source 的有序语言列表。新导入资料根据 CDM 正文块检测语言；从 v8 或 v9 迁移的既有 Source 默认为 `["zh"]`，不自动重做解析或切片。
 
 当前实现的 `format` 已限制为 `text`、`markdown`。外部文件可以是 UTF-8、GB2312、GBK 或 GB18030，但导入边界会统一转换为 UTF-8 项目副本；输入编码只作为本次导入诊断结果返回，不改变 Source 的长期内容语义，因此 v0.1 不新增 `media_type` 或 `encoding` 字段。
 
@@ -658,7 +661,7 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 
 这里的 External Content 表示 FTS 通过 `chunk_rowid` 读取同一个 SQLite 数据库中的纯文本 Chunk，不表示正文保存在文件系统。FTS 的内部影子表是可重建索引，不是新的业务表。Chunk 与 FTS 的增删改必须由同一个 Repository 短事务维护。
 
-这些 Chunk 与 FTS 能力已经通过 Schema v9 和 v8→v9 前向迁移落地。Embedding 相关字段和表尚未实现，实施时必须提升 Schema 版本。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
+Chunk 与 FTS 能力通过 Schema v9 和 v8→v9 前向迁移落地；Source 语言列表通过 Schema v10 和 v9→v10 前向迁移落地。Embedding 相关字段和表尚未实现，实施时必须再次提升 Schema 版本。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
 
 ### 12.4 `embedding_models`（已确认、未实现）
 

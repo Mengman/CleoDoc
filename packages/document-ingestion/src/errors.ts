@@ -3,7 +3,8 @@ export type DocumentIngestionErrorCode =
   | "INVALID_UTF8"
   | "EMPTY_DOCUMENT"
   | "INVALID_SOURCE_POSITION"
-  | "INVALID_CHUNK_OPTIONS";
+  | "INVALID_CHUNK_OPTIONS"
+  | "INVALID_LANGUAGE_OPTIONS";
 
 export class DocumentIngestionError extends Error {
   readonly code: DocumentIngestionErrorCode;

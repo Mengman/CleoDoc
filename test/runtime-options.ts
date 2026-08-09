@@ -33,4 +33,5 @@ export const TEST_MATERIAL_OPTIONS = {
     maxChunkChars: 800,
     splitSearchWindowRatio: 0.75,
   },
+  languageDetection: { minBlockUnits: 50 },
 } as const;

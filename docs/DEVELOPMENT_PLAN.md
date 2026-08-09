@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–6d 已完成，资料 FTS 可通过 CLI 使用
+> 状态：实施中；v0.1 步骤 1–6d、7.1–7.2 已完成，正在实施本地 Embedding
 > 日期：2026-08-09
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -32,7 +32,7 @@ v0.1 的核心闭环是：
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
 | 1.5 软件 YAML 配置 | 已完成 | 发行默认配置、操作系统用户配置、逐项回退警告、独立 `state.yaml`、Provider/模型能力与运行参数注入 |
-| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v9 基线、v8→v9 前向迁移、版本校验、写入队列和健康检查 |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v10 基线、v8→v9→v10 与 v9→v10 前向迁移、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
@@ -46,7 +46,8 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7–8、9b–10 | 未开始 | Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、模型配置、开发期检查命令和资料语言检测已完成；下一步改造 Token 切片 |
+| 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -234,7 +235,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。Schema v9 保留 v8 已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。Schema v10 保留 v9 已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
 
 工作内容：
 
@@ -262,7 +263,7 @@ cleo material remove <material-id>
 
 数据库设计：[Message](./DATABASE_DESIGN.md#64-messages)、[ModelCall](./DATABASE_DESIGN.md#612-model_calls)、[Generation 映射](./DATABASE_DESIGN.md#613-generation_model_call_mapping)及[CompactionJob 映射](./DATABASE_DESIGN.md#614-compaction_job_model_call_mapping)
 
-实施状态：已完成。Schema v9 保留 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
+实施状态：已完成。Schema v10 保留 v9 的 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
 工作内容：
 
@@ -306,7 +307,7 @@ CLI 交互示意：
 
 数据库设计：[project_instruction_revisions](./DATABASE_DESIGN.md#611-project_instruction_revisions)
 
-实施状态：已完成。Schema v9 保留该 Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
+实施状态：已完成。Schema v10 保留 v9 的该 Repository、ContextBuilder、受控 Tool 及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 
 工作内容：
 
@@ -408,36 +409,101 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。Worker、Token 切片、数据库向量持久化与语义检索尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与 Schema v10 数据库投影。Worker、Token 切片、数据库向量持久化与语义检索尚未实现。
 
-工作内容：
+#### 7.1 GGUF Embedding 基础适配层（已完成）
 
-- 使用 `node-llama-cpp` 在 Worker 中执行本地 GGUF Embedding，并复用模型 Tokenizer。
-- 实现模型下载、缓存、哈希校验和进度。
-- 在 `embedding_models` 中只记录模型 ID、名称和 revision。
-- 为 `knowledge_chunks` 增加 Chunk 内容 Hash，并把当前整组替换改为保留未变化 `chunk_rowid` 的增量更新。
-- 在 `chunk_embeddings` 中以无头部的 IEEE 754 Float32 Little-Endian BLOB 保存向量，并同时保存生成时的 Chunk 内容 Hash。
-- 将项目最低 Node.js 版本提高到支持 `node:sqlite.loadExtension()` 的稳定基线，加载可信 sqlite-vec 扩展后关闭扩展加载入口。
-- 使用 `vec_f32()` 校验写入和 Query 向量，使用 `vec_distance_cosine()` 对元数据预过滤后的候选执行精确余弦检索。
-- 验证同一模型向量维度一致、过期 Hash 不参与查询、模型切换共存、删除级联和扩展加载失败路径。
-- 实现索引代次和模型切换重建。
+- 使用 `node-llama-cpp` 加载中文和英文 Q8_0 GGUF。
+- 模型实例同时提供 Document/Query Token 统计与 Embedding 推理。
+- Query 指令由发行模型配置提供，只应用于 Query，不写入 Chunk 正文。
+- 输出归一化 `Float32Array`，并提供开发期 `embedding model/test` 命令。
+- 当前模型文件随代码仓库供开发验证；正式安装包是否内置模型、是否提供下载与缓存留到发布阶段决定，本步骤不实现模型 Hash 管理。
+
+#### 7.2 资料语言检测（已完成）
+
+- 只检测 CDM 中满足下限的 `<p>` 和 `<blockquote>` 正文块，忽略标题、列表、代码和其他结构节点。
+- 统计汉字字符与英文单词，将按有效内容量排序的 `languages` 写入资料元数据和 `sources.languages_json`。
+- 当前只使用 `languages[0]` 选择中文或英文模型；同一 Source 使用多模型生成多套向量不进入本轮实现。
+
+#### 7.3 使用模型 Tokenizer 改造切片（下一步）
+
+- 向切片器注入 `EmbeddingTokenizer`，不在 Document Ingestion 中直接依赖 `node-llama-cpp`。
+- 删除字符数硬上限 `maxChunkChars`，由主要语言模型的 `maxInputTokens` 决定 Chunk 上限。
+- 保留现有 Baseline 结构算法：小块向上合并，超长块在上限前优先寻找句末、次级标点和空白边界。
+- 每次合并或拆分后重新计算完整候选文本的 Token 数，所有最终 Chunk 必须满足 `countDocumentTokens(content) <= maxInputTokens`。
+- `chunking_config_json` 记录模型 ID、revision、Tokenizer 输入上限和切片参数，使模型或配置变化能够把旧索引标为 `stale`。
+- 当前仍直接更新 `structural-baseline-v1`，不保留字符切片兼容分支，也不升级切片器版本。
+
+验收门：中文、英文和长段落固定样例均不超过各自模型 Token 上限；模型或 Tokenizer 无法加载时停止本次重建，不损坏原始资料及当前可用索引。
+
+#### 7.4 Embedding 数据库结构与增量 Chunk Repository
+
+- 将数据库提升到下一 Schema 版本，为 `knowledge_chunks` 增加纯文本 `content_hash`。
+- 新增最小化 `embedding_models`：只保存模型 ID、模型名称、revision 和创建时间。
+- 新增 `chunk_embeddings`：以 `(embedding_model_id, chunk_rowid)` 为主键，保存 Chunk Hash、Float32 Little-Endian BLOB 和创建时间。
+- 将当前整组删除再插入的 Chunk 更新改为增量同步；内容和原文范围未变化的 Chunk 保留 `chunk_rowid`，只处理新增、变化和删除项。
+- Chunk 或模型删除时级联删除相应向量；Source 删除后不得留下可查询的 FTS 或 Embedding 孤立数据。
+
+验收门：重复重建相同资料不会改变 Chunk Row ID 或重复生成向量；修改局部内容只使对应 Chunk 的旧向量过期。
+
+#### 7.5 Worker 化 Embedding 推理
+
+- 在 Worker Thread 中运行 `node-llama-cpp`，主线程负责调度和数据库短事务。
+- 一次索引任务只加载一次所需模型，批量复用同一模型实例完成 Tokenize 和 Embedding，不为每个 Chunk 重复加载。
+- Worker 返回 Chunk ID、输入 Hash、模型 ID、向量和进度，不持有 SQLite 连接，不在数据库事务中执行模型推理。
+- 支持任务取消、模型加载失败、输入超限和推理失败的稳定错误；失败不得覆盖已有可用 Chunk 与 FTS。
+
+验收门：批量生成期间 CLI 持续收到进度；取消或异常退出后数据库仍可正常打开，原始资料和已有 FTS 不受影响。
+
+#### 7.6 Embedding 编排与安全写回
+
+- 根据 Source 主语言选择模型，只为缺失或 `content_hash` 不匹配的 Chunk 生成向量。
+- 推理前冻结 Source Hash、Chunk Hash 和模型 ID；写回前重新读取并校验，过期结果直接丢弃。
+- 将有效结果在短事务中批量写入 `chunk_embeddings`，Embedding 失败不改变 FTS 的可用状态。
+- 模型 revision、Tokenizer 上限或切片配置变化时，将相关 Source 标为需要重建，不静默混用不同切片结果。
+
+验收门：资料在推理期间被修改时，旧任务不能把过期向量写回；再次执行只补齐缺失或失效向量。
+
+#### 7.7 sqlite-vec 精确向量检索
+
+- 加载 CleoDoc 发行的可信 sqlite-vec 扩展，初始化完成后关闭任意扩展加载入口。
+- 使用 `vec_f32()` 校验数据库向量与 Query 参数，使用 `vec_distance_cosine()` 做精确余弦距离计算。
+- 查询先过滤当前项目、`ready` Source、相同模型 ID 和匹配的 Chunk Hash，再计算距离；不同模型的向量不得直接比较。
+- v0.1 不创建固定维度 `vec0`，不训练 ANN；`VectorIndex` 接口保持可替换。
+
+验收门：中文和英文固定查询分别召回对应资料；过期向量、其他项目向量和不同模型向量不会进入结果。
+
+#### 7.8 CLI、诊断与恢复
+
+- `cleo index embed` 生成或补齐当前项目向量，并展示模型、处理数量、跳过数量、失败数量和进度。
+- `cleo search <query> --semantic` 使用匹配模型生成 Query Embedding，并返回来源、Chunk ID、纯文本片段和距离。
+- `cleo index status` 补充 Embedding 完整度和当前模型信息；Debug 日志只记录模型、耗时、维度、Token 数和错误，不记录完整资料正文或向量内容。
+- Embedding 不可用时给出明确错误，普通 FTS `cleo search` 仍然工作。
+
+#### 7.9 测试与基准
+
+- 单元测试覆盖 Token 上限、自然边界拆分、短块合并、向量编码、Hash 过期和模型隔离。
+- 集成测试覆盖中文/英文资料导入、增量重建、删除级联、Worker 取消、扩展加载失败和重启恢复。
+- 固定小型语料验证语义近义词召回、项目隔离和结果可追溯性。
+- 记录 Q8_0 CPU 模型的加载时间、单 Chunk 延迟、吞吐和数据库查询耗时，作为后续优化 Baseline。
 
 命令：
 
 ```text
 cleo embedding model
 cleo embedding test <zh|en> <text> [--query]
-cleo embedding download
 cleo index embed
 cleo search <query> --semantic
 ```
 
 验收：
 
-- 模型下载完成后可以离线向量化和搜索。
+- 配置的本地模型文件可用时，可以在完全离线状态下完成 Token 切片、向量化和搜索。
 - Embedding 不阻塞 CLI 进度输出。
 - Source 已过期、Chunk 已被替换或输入内容已经变化的 Embedding 结果不会写入。
 - Embedding 失败时 FTS5 仍可使用。
+- 重建相同内容不会重复计算或写入相同模型的有效向量。
+- 向量结果严格隔离当前项目，并能回溯公开 Source、Chunk ID 和原文范围。
 
 ### 步骤 8：混合 RAG
 

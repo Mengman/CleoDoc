@@ -46,6 +46,8 @@ agent:
     resultTargetMultiplier: 4
 
 rag:
+  languageDetection:
+    minBlockUnits: 50
   embedding:
     models:
       zh:

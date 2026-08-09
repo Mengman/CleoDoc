@@ -150,6 +150,41 @@ describe("MaterialService", () => {
     }
   });
 
+  it("detects and persists ordered source languages", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    const english = Array.from({ length: 70 }, (_, index) => `evidence${index}`).join(" ");
+    const chinese =
+      "这是一段用于资料语言检测的中文正文，其中包含足够多的连续汉字，用来确认主要语言排序能够稳定保存。".repeat(
+        3,
+      );
+
+    try {
+      const englishSource = await service.addText(english, { title: "English source" });
+      expect(englishSource.source.languages).toEqual(["en"]);
+
+      const bilingualSource = await service.addText(`${chinese}\n${english}`, {
+        title: "双语资料",
+      });
+      expect(bilingualSource.source.languages).toEqual(["zh", "en"]);
+      expect(
+        (await service.list()).find((source) => source.id === bilingualSource.source.id),
+      ).toEqual(bilingualSource.source);
+      const metadata = JSON.parse(
+        await readFile(
+          path.join(project.root, "sources", "metadata", `${bilingualSource.source.id}.json`),
+          "utf8",
+        ),
+      ) as { languages: string[] };
+      expect(metadata.languages).toEqual(["zh", "en"]);
+    } finally {
+      await service.close();
+    }
+  });
+
   it("adds pasted text, renames it and removes both facts and SQLite projection", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

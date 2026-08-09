@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const KNOWLEDGE_SOURCE_SCHEMA_VERSION = 1 as const;
 
+export const knowledgeSourceLanguageSchema = z.enum(["zh", "en"]);
+
 export const knowledgeSourceSchema = z.object({
   schemaVersion: z.literal(KNOWLEDGE_SOURCE_SCHEMA_VERSION),
   id: z.uuid(),
@@ -13,6 +15,12 @@ export const knowledgeSourceSchema = z.object({
   sourceLabel: z.string().trim().min(1).max(2_000).nullable(),
   originalFileName: z.string().trim().min(1).max(500).nullable(),
   tags: z.array(z.string().trim().min(1).max(100)).max(100),
+  languages: z
+    .array(knowledgeSourceLanguageSchema)
+    .min(1)
+    .max(2)
+    .refine((languages) => new Set(languages).size === languages.length)
+    .default(["zh"]),
   relativePath: z.string().regex(/^materials\/[0-9a-f-]+\.(txt|md)$/),
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().nonnegative(),
@@ -21,6 +29,7 @@ export const knowledgeSourceSchema = z.object({
 });
 
 export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
+export type KnowledgeSourceLanguage = z.infer<typeof knowledgeSourceLanguageSchema>;
 
 export interface MaterialWithContent {
   source: KnowledgeSource;

@@ -1,4 +1,4 @@
-import type { ChunkDocumentOptions } from "@cleodoc/document-ingestion";
+import type { ChunkDocumentOptions, LanguageDetectionOptions } from "@cleodoc/document-ingestion";
 import type { MaterialInputEncoding } from "./text-decoding.js";
 
 interface MaterialMetadataOptions {
@@ -19,4 +19,5 @@ export interface MaterialServiceOptions {
   readonly database: { busyTimeoutMs: number };
   readonly maxImportBytes: number;
   readonly chunking: ChunkDocumentOptions;
+  readonly languageDetection: LanguageDetectionOptions;
 }

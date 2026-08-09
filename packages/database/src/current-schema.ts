@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 9 as const;
+export const CURRENT_SCHEMA_VERSION = 10 as const;
 
 export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   CREATE TABLE knowledge_chunks (
@@ -92,6 +92,7 @@ export const CURRENT_SCHEMA_SQL = `
     source_label TEXT,
     original_file_name TEXT,
     tags_json TEXT NOT NULL,
+    languages_json TEXT NOT NULL DEFAULT '["zh"]',
     relative_path TEXT NOT NULL UNIQUE,
     content_hash TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL CHECK (size >= 0),

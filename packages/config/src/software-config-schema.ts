@@ -80,6 +80,7 @@ export const softwareConfigSchema = z
       .strict(),
     rag: z
       .object({
+        languageDetection: z.object({ minBlockUnits: positiveInteger }).strict(),
         embedding: z
           .object({
             models: z

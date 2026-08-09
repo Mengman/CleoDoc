@@ -41,6 +41,7 @@ const USER_FIELD_SCHEMAS = new Map<string, z.ZodType>([
   ["agent.compaction.resultTargetMultiplier", positiveInteger],
   ["rag.chunking.maxChunkChars", positiveInteger],
   ["rag.chunking.splitSearchWindowRatio", positiveRatio],
+  ["rag.languageDetection.minBlockUnits", positiveInteger],
   ["materials.maxImportBytes", positiveInteger],
   ["database.busyTimeoutMs", positiveInteger],
   ["debug.enabled", z.boolean()],

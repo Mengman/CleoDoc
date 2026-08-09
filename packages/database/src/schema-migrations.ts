@@ -11,3 +11,7 @@ export const SCHEMA_V8_TO_V9_SQL = `
 
   ${KNOWLEDGE_INDEX_SCHEMA_SQL}
 `;
+
+export const SCHEMA_V9_TO_V10_SQL = `
+  ALTER TABLE sources ADD COLUMN languages_json TEXT NOT NULL DEFAULT '["zh"]';
+`;
