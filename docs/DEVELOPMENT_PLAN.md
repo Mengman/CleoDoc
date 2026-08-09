@@ -32,7 +32,7 @@ v0.1 的核心闭环是：
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
 | 1.5 软件 YAML 配置 | 已完成 | 发行默认配置、操作系统用户配置、逐项回退警告、独立 `state.yaml`、Provider/模型能力与运行参数注入 |
-| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v10 基线、v8→v9→v10 与 v9→v10 前向迁移、版本校验、写入队列和健康检查 |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、完整 Schema v9 基线、唯一的 v8→v9 前向迁移、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
@@ -46,7 +46,7 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、资料语言检测和 Tokenizer 驱动切片已完成；下一步实现 Embedding 数据库结构与增量 Chunk Repository |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、语言检测、Tokenizer 切片、Embedding 表结构和增量 Chunk Repository 已完成；下一步实现 Worker 化推理 |
 | 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -235,7 +235,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。Schema v10 保留 v9 已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。当前完整 Schema v9 包含已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
 
 工作内容：
 
@@ -263,7 +263,7 @@ cleo material remove <material-id>
 
 数据库设计：[Message](./DATABASE_DESIGN.md#64-messages)、[ModelCall](./DATABASE_DESIGN.md#612-model_calls)、[Generation 映射](./DATABASE_DESIGN.md#613-generation_model_call_mapping)及[CompactionJob 映射](./DATABASE_DESIGN.md#614-compaction_job_model_call_mapping)
 
-实施状态：已完成。Schema v10 保留 v9 的 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
+实施状态：已完成。当前完整 Schema v9 包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
 工作内容：
 
@@ -307,7 +307,7 @@ CLI 交互示意：
 
 数据库设计：[project_instruction_revisions](./DATABASE_DESIGN.md#611-project_instruction_revisions)
 
-实施状态：已完成。Schema v10 保留 v9 的该 Repository、ContextBuilder、受控 Tool 及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
+实施状态：已完成。当前完整 Schema v9 包含该 Repository、ContextBuilder、受控 Tool 及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 
 工作内容：
 
@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与 Schema v10 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Worker、数据库向量持久化与语义检索尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，但 Worker、向量生成编排与语义检索尚未实现。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -445,6 +445,8 @@ cleo search <query> --scope material
 - Chunk 或模型删除时级联删除相应向量；Source 删除后不得留下可查询的 FTS 或 Embedding 孤立数据。
 
 验收门：重复重建相同资料不会改变 Chunk Row ID 或重复生成向量；修改局部内容只使对应 Chunk 的旧向量过期。
+
+实施状态：已完成。当前完整 Schema v9 包含 `knowledge_chunks.content_hash`、`embedding_models` 和 `chunk_embeddings`。Chunk Repository 已改为增量同步，重复重建保留未变化 Chunk 及其向量，局部变化通过 Hash 不一致使旧向量失效，删除项由外键级联清理。实际向量生成和补齐从步骤 7.5、7.6 开始。
 
 #### 7.5 Worker 化 Embedding 推理
 

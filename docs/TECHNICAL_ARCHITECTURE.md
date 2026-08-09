@@ -311,7 +311,7 @@ erDiagram
 
 ## 7. SQLite 架构
 
-当前 Schema v10 基线已落地的表、字段、索引、两类 External Content FTS、资料语言投影、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
+当前完整 Schema v9 基线已落地的表、字段、索引、两类 External Content FTS、资料语言投影、Embedding 存储表、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
 
 ### 7.1 数据库拓扑
 
@@ -390,7 +390,7 @@ Agent
 
 ### 7.4 Schema 演进、备份和重建
 
-- 当前早期开发阶段以 v8 为当前基线：新库直接创建完整结构，完整 v8 数据库原样打开。v7 及更旧、不带版本但已有业务对象或更高版本的数据库均拒绝且不自动改写。
+- 当前早期开发阶段以完整 v9 为当前基线：新库直接创建完整结构，只保留完整 v8→v9 前向升级。v7 及更旧、不带版本但已有业务对象或高于 v9 的数据库均拒绝且不自动改写。
 - 正式发布后的内容表和运行表执行带备份的前向迁移；索引表允许丢弃后重建。
 - 项目打开时执行轻量 `quick_check`，异常时进入只读恢复模式。
 - 备份必须使用 Backup API 或 `VACUUM INTO`，不能只复制打开中的主数据库文件。
@@ -525,7 +525,7 @@ flowchart LR
 
 临时 CDM 的生命周期在 Document Ingestion 内结束。RAG Core 从 `ChunkDraft` 开始工作，不导入 CDM 包，也不把 CDM 标签、Node ID 或 Markdown 写入 Chunk。实体与事实抽取属于 CleoDoc 的知识能力，可以消费 RAG Chunk，但不能反向成为 RAG Core 的必要依赖。
 
-v0.1 导入资料使用基于块级段落结构的确定性 Baseline Chunker。它只执行两种操作：超过软件配置上限的大块在上限前的自然边界递归拆分；同一标题区域内的小块按原文顺序贪心合并到上一个 Chunk。首版取消最短长度和尾块重平衡，默认最大长度为 `800` 个规范化纯文本 Unicode 字符，默认从上限的 `75%` 位置开始向上限方向选择自然边界。TXT 不猜测标题，所有 `<p>` 在整个文档范围内使用普通合并规则。完整算法以[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)为准。
+v0.1 导入资料使用基于块级段落结构的确定性 Baseline Chunker。它只执行两种操作：超过当前 Embedding 模型输入上限的大块在上限前的自然边界递归拆分；同一标题区域内的小块按原文顺序贪心合并到上一个 Chunk。首版取消最短长度和尾块重平衡，使用模型自身 Tokenizer 计算包含特殊 Token 和输入前缀的最终长度，默认从 Token 上限的 `75%` 位置开始向上限方向选择自然边界。TXT 不猜测标题，所有 `<p>` 在整个文档范围内使用普通合并规则。完整算法以[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)为准。
 
 导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、项目内 UTF-8 资料副本的字节范围和 Chunker 版本；Source 表保存该规范化副本的 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。有效切片配置必须参与索引是否过期的判断，具体持久化字段随下一次 Chunk Schema 评审确定。正文是否采用不同切片参数留待正文检索进入实现范围后通过固定测试集确定，不与当前资料 Baseline 混为同一配置。
 
@@ -737,7 +737,7 @@ interface DocumentDiff {
 
 Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。Tool 的领域边界、Schema、结果、副作用和运行规则统一遵循 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。项目指令现在以 SQLite 追加式 Revision 为事实源，Session 不保存文件路径或文件快照，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
-v0.1 的 Schema v10 保留 v9 的会话、资料 Chunk 与 FTS 结构，并新增 `sources.languages_json` 语言列表投影。会话部分包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+v0.1 的完整 Schema v9 包含既有会话、资料 Chunk、FTS、`sources.languages_json`、Chunk 内容 Hash、Embedding 模型与向量表。会话部分包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
 
 模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩比例/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，当前 Payload 触发点分别约为 391,732 Token 和 476,632 Token；压缩请求安全输入上限 `M` 约为 565,424 Token，最终累计摘要长度建议目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 

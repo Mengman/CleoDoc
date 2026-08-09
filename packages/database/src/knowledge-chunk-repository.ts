@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   KnowledgeChunk,
@@ -34,6 +34,7 @@ interface ChunkRow {
   source_id: string;
   ordinal: number;
   content: string;
+  content_hash: string;
   start_offset: number;
   end_offset: number;
   chunker_version: string;
@@ -73,29 +74,106 @@ export class KnowledgeChunkRepository {
       const existing = database
         .prepare("SELECT * FROM knowledge_chunks WHERE source_id = ? ORDER BY ordinal")
         .all(input.sourceId) as unknown as ExistingChunkRow[];
-      database.prepare("DELETE FROM knowledge_chunks WHERE source_id = ?").run(input.sourceId);
+
+      const drafts = input.chunks.map((chunk) => ({
+        ...chunk,
+        contentHash: hashContent(chunk.content),
+      }));
+      const unmatchedRowids = new Set(existing.map((chunk) => chunk.chunk_rowid));
+      const exactByLocation = new Map(
+        existing.map((chunk) => [existingChunkKey(chunk), chunk] as const),
+      );
+      const byOrdinal = new Map(existing.map((chunk) => [Number(chunk.ordinal), chunk] as const));
+      const assignments = drafts.map((chunk) => {
+        const exact = exactByLocation.get(draftChunkKey(chunk));
+        if (
+          exact !== undefined &&
+          unmatchedRowids.has(exact.chunk_rowid) &&
+          exact.content === chunk.content
+        ) {
+          unmatchedRowids.delete(exact.chunk_rowid);
+          return { chunk, existing: exact, projectionChanged: false };
+        }
+        const positional = byOrdinal.get(chunk.ordinal);
+        if (positional !== undefined && unmatchedRowids.has(positional.chunk_rowid)) {
+          unmatchedRowids.delete(positional.chunk_rowid);
+          return { chunk, existing: positional, projectionChanged: true };
+        }
+        return { chunk, existing: null, projectionChanged: false };
+      });
+
+      const temporaryOrdinalBase =
+        Math.max(input.chunks.length, ...existing.map((chunk) => Number(chunk.ordinal) + 1)) + 1;
+      const stageUnchanged = database.prepare(
+        `UPDATE knowledge_chunks
+         SET ordinal = ?, chunker_version = ?
+         WHERE chunk_rowid = ?`,
+      );
+      const stageChanged = database.prepare(
+        `UPDATE knowledge_chunks
+         SET ordinal = ?, content = ?, content_hash = ?, start_offset = ?, end_offset = ?,
+             chunker_version = ?
+         WHERE chunk_rowid = ?`,
+      );
+      for (const assignment of assignments) {
+        if (assignment.existing === null) continue;
+        const temporaryOrdinal = temporaryOrdinalBase + assignment.chunk.ordinal;
+        if (assignment.projectionChanged) {
+          stageChanged.run(
+            temporaryOrdinal,
+            assignment.chunk.content,
+            assignment.chunk.contentHash,
+            assignment.chunk.startOffset,
+            assignment.chunk.endOffset,
+            input.chunkerVersion,
+            assignment.existing.chunk_rowid,
+          );
+        } else {
+          stageUnchanged.run(
+            temporaryOrdinal,
+            input.chunkerVersion,
+            assignment.existing.chunk_rowid,
+          );
+        }
+      }
+
+      const remove = database.prepare("DELETE FROM knowledge_chunks WHERE chunk_rowid = ?");
+      for (const chunkRowid of unmatchedRowids) remove.run(chunkRowid);
+
+      const finalizeOrdinal = database.prepare(
+        "UPDATE knowledge_chunks SET ordinal = ? WHERE chunk_rowid = ?",
+      );
+      for (const assignment of assignments) {
+        if (assignment.existing !== null) {
+          finalizeOrdinal.run(assignment.chunk.ordinal, assignment.existing.chunk_rowid);
+        }
+      }
 
       const insert = database.prepare(
         `INSERT INTO knowledge_chunks
-         (chunk_id, source_id, ordinal, content, start_offset, end_offset, chunker_version, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (chunk_id, source_id, ordinal, content, content_hash, start_offset, end_offset,
+          chunker_version, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const created: KnowledgeChunk[] = [];
       const now = new Date().toISOString();
-      for (const chunk of input.chunks) {
-        const previous = existing.find((candidate) => sameChunk(candidate, chunk, input));
-        const chunkId = previous?.chunk_id ?? randomUUID();
-        const createdAt = previous?.created_at ?? now;
-        insert.run(
-          chunkId,
-          input.sourceId,
-          chunk.ordinal,
-          chunk.content,
-          chunk.startOffset,
-          chunk.endOffset,
-          input.chunkerVersion,
-          createdAt,
-        );
+      for (const assignment of assignments) {
+        const chunk = assignment.chunk;
+        const chunkId = assignment.existing?.chunk_id ?? randomUUID();
+        const createdAt = assignment.existing?.created_at ?? now;
+        if (assignment.existing === null) {
+          insert.run(
+            chunkId,
+            input.sourceId,
+            chunk.ordinal,
+            chunk.content,
+            chunk.contentHash,
+            chunk.startOffset,
+            chunk.endOffset,
+            input.chunkerVersion,
+            createdAt,
+          );
+        }
         created.push({
           chunkId,
           sourceId: input.sourceId,
@@ -243,18 +321,22 @@ function validateChunks(chunks: readonly KnowledgeChunkWrite[]): void {
   }
 }
 
-function sameChunk(
-  existing: ExistingChunkRow,
-  chunk: KnowledgeChunkWrite,
-  input: ReplaceSourceChunksInput,
-): boolean {
-  return (
-    existing.ordinal === chunk.ordinal &&
-    existing.content === chunk.content &&
-    existing.start_offset === chunk.startOffset &&
-    existing.end_offset === chunk.endOffset &&
-    existing.chunker_version === input.chunkerVersion
-  );
+function existingChunkKey(
+  chunk: Pick<ChunkRow, "content_hash" | "start_offset" | "end_offset">,
+): string {
+  return `${chunk.start_offset}:${chunk.end_offset}:${chunk.content_hash}`;
+}
+
+function draftChunkKey(chunk: {
+  readonly contentHash: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+}): string {
+  return `${chunk.startOffset}:${chunk.endOffset}:${chunk.contentHash}`;
+}
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 function quotedFtsQuery(query: string): string {

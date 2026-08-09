@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v10 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v9 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
@@ -53,11 +53,13 @@ describe("current database schema baseline", () => {
         expect.arrayContaining([
           "compaction_job_model_call_mapping",
           "compaction_jobs",
+          "chunk_embeddings",
           "conversation_message_fts",
           "conversation_sessions",
           "conversations",
           "generation_model_call_mapping",
           "generations",
+          "embedding_models",
           "knowledge_chunk_fts",
           "knowledge_chunks",
           "messages",
@@ -75,6 +77,7 @@ describe("current database schema baseline", () => {
       );
       expect(getColumnNames(database, "conversation_message_fts")).toEqual(["content"]);
       expect(getColumnNames(database, "knowledge_chunk_fts")).toEqual(["content"]);
+      expect(getColumnNames(database, "knowledge_chunks")).toContain("content_hash");
       expect(getColumnNames(database, "sources")).toEqual(
         expect.arrayContaining([
           "parser_version",
@@ -186,7 +189,7 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("migrates a complete v8 database to v10 without rewriting its data or history", async () => {
+  it("migrates a complete v8 database to v9 without rewriting its data or history", async () => {
     const root = await createTemporaryProject("cleodoc-existing-v8-test-");
     const state = path.join(root, ".cleo");
     await mkdir(state, { recursive: true });
@@ -241,52 +244,15 @@ describe("current database schema baseline", () => {
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
         ),
-      ).toEqual([{ version: 8 }, { version: 9 }, { version: 10 }]);
+      ).toEqual([{ version: 8 }, { version: 9 }]);
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("chunk_id");
+      expect(getColumnNames(reopened, "knowledge_chunks")).toContain("content_hash");
       expect(getColumnNames(reopened, "sources")).toContain("index_status");
       expect(
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT index_status FROM sources WHERE id = 'source-1'").get(),
         ),
       ).toEqual({ index_status: "pending" });
-      expect(
-        reopened.read((sqlite) =>
-          sqlite.prepare("SELECT languages_json FROM sources WHERE id = 'source-1'").get(),
-        ),
-      ).toEqual({ languages_json: '["zh"]' });
-    } finally {
-      await reopened.close();
-    }
-  });
-
-  it("migrates a complete v9 database to v10 and defaults existing sources to Chinese", async () => {
-    const root = await createTemporaryProject("cleodoc-existing-v9-test-");
-    const state = path.join(root, ".cleo");
-    await mkdir(state, { recursive: true });
-    const raw = new DatabaseSync(path.join(state, "project.sqlite"));
-    raw.exec(`
-      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      ${v9SchemaSql()}
-      INSERT INTO schema_migrations(version, applied_at)
-      VALUES (9, '2026-01-01T00:00:00.000Z');
-      INSERT INTO sources
-        (id, project_id, source_type, origin, format, title, tags_json, relative_path,
-         content_hash, size, created_at, updated_at)
-      VALUES
-        ('source-1', 'project-1', 'material', 'file', 'markdown', '既有资料', '[]',
-         'materials/00000000-0000-0000-0000-000000000001.md',
-         '0000000000000000000000000000000000000000000000000000000000000000', 10,
-         '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
-    `);
-    raw.close();
-
-    const reopened = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
-    try {
-      expect(
-        reopened.read((sqlite) =>
-          sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
-        ),
-      ).toEqual([{ version: 9 }, { version: 10 }]);
       expect(
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT languages_json FROM sources WHERE id = 'source-1'").get(),
@@ -336,8 +302,8 @@ async function createTemporaryProject(prefix: string): Promise<string> {
 }
 
 function v8SchemaSql(): string {
-  return v9SchemaSql()
-    .replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
+  return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
+    .replace(`    languages_json TEXT NOT NULL DEFAULT '["zh"]',\n`, "")
     .replace(
       `    parser_version TEXT,
     chunker_version TEXT,
@@ -349,10 +315,6 @@ function v8SchemaSql(): string {
 `,
       "",
     );
-}
-
-function v9SchemaSql(): string {
-  return CURRENT_SCHEMA_SQL.replace(`    languages_json TEXT NOT NULL DEFAULT '["zh"]',\n`, "");
 }
 
 function getColumnNames(database: ProjectDatabase, table: string): string[] {

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { AppError } from "../../contracts/src/index.js";
 import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
-import { SCHEMA_V8_TO_V9_SQL, SCHEMA_V9_TO_V10_SQL } from "./schema-migrations.js";
+import { SCHEMA_V8_TO_V9_SQL } from "./schema-migrations.js";
 
 type DatabaseOperation<T> = (database: DatabaseSync) => T;
 
@@ -145,13 +145,8 @@ export class ProjectDatabase {
     }
     if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) return;
 
-    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 10) {
+    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 9) {
       this.applyMigration(SCHEMA_V8_TO_V9_SQL, 9);
-      this.applyMigration(SCHEMA_V9_TO_V10_SQL, 10);
-      return;
-    }
-    if (newestVersion === 9 && CURRENT_SCHEMA_VERSION === 10) {
-      this.applyMigration(SCHEMA_V9_TO_V10_SQL, 10);
       return;
     }
 

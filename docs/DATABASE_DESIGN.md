@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 Schema v10 当前基线
+> 状态：v0.1 Schema v9 当前基线
 > 更新日期：2026-08-09
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -11,8 +11,8 @@
 
 本文严格区分：
 
-- **当前实现**：Schema v10 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及 v8→v9→v10、v9→v10 前向迁移。
-- **尚未实现范围**：技术架构中规划但尚未落地的 Embedding、混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
+- **当前实现**：完整 Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及唯一保留的 v8→v9 前向迁移。
+- **尚未实现范围**：技术架构中规划但尚未落地的 Embedding 任务编排与检索、混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
 
@@ -59,6 +59,8 @@ erDiagram
     messages ||--o| conversation_message_fts : indexed_as
     sources ||--o{ knowledge_chunks : divided_into
     knowledge_chunks ||--o| knowledge_chunk_fts : indexed_as
+    embedding_models ||--o{ chunk_embeddings : generates
+    knowledge_chunks ||--o{ chunk_embeddings : embedded_as
     generations ||--o{ generation_model_call_mapping : contains
     model_calls ||--o| generation_model_call_mapping : mapped_by
     compaction_jobs ||--o{ compaction_job_model_call_mapping : contains
@@ -98,9 +100,9 @@ PRAGMA busy_timeout = 5000;
 
 - 同一个 `ProjectDatabase` 实例内通过 Promise FIFO 队列串行写入。
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
-- 当前数据库基线是 Schema v10，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
-- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v10 基线，不重放旧 DDL。
-- 完整 v8 数据库依次执行 v8→v9→v10 前向迁移；完整 v9 数据库执行 v9→v10。v9 新增 Source 索引状态、`knowledge_chunks` 和资料 FTS，v10 新增 Source 语言列表；已有聊天、项目指令、资料正文和 Chunk 数据不重写。
+- 当前数据库基线是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
+- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放旧 DDL。
+- 完整 v8 数据库执行一次 v8→v9 前向迁移，直接增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动删除它们。
 - 当前代码不恢复 v1–v8 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
@@ -110,8 +112,8 @@ PRAGMA busy_timeout = 5000;
 
 ## 5. Schema 演进策略
 
-- v10 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
-- 新项目只在 `schema_migrations` 写入一条 v10 记录；完整 v8 项目迁移后保留 v8、v9、v10 三条记录，完整 v9 项目迁移后保留 v9、v10 两条记录。
+- v9 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
+- 新项目只在 `schema_migrations` 写入一条 v9 记录；完整 v8 项目迁移后保留 v8、v9 两条记录。
 - 下一次结构变化必须使用更高且不复用的版本号。正式发布前可以再次压平开发期历史；正式发布后必须保留面向用户数据的前向升级路径。
 - 任何不受支持的数据库都只报告错误，不把完整基线覆盖到已有表上，也不自动删除数据库。
 
@@ -128,7 +130,7 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.2 `schema_migrations`
 
-记录数据库已经达到的 Schema 版本。新数据库只记录 v10；受支持的开发期升级数据库会保留 v8、v9、v10 中实际经历过的历史行。
+记录数据库已经达到的 Schema 版本。新数据库只记录 v9；受支持的 v8 项目升级后保留 v8、v9 两条历史行。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -242,7 +244,7 @@ UNIQUE(conversation_id, sequence)
 | `source_id` | TEXT | NOT NULL、外键 | 关联 `sources.id`；删除 Source 时级联删除 |
 | `ordinal` | INTEGER | NOT NULL、非负 | 同一 Source 内从零开始的顺序；与 `source_id` 联合唯一 |
 | `content` | TEXT | NOT NULL、非空 | 不含 CDM、XML 或 Markdown 标记的纯文本 |
-| `content_hash` | TEXT | Embedding 阶段新增、NOT NULL | 当前 Chunk 纯文本的内容校验值，用于判断已有向量是否过期；不同于 `sources.content_hash` |
+| `content_hash` | TEXT | NOT NULL | 当前 Chunk 纯文本的 SHA-256，用于判断已有向量是否过期；不同于 `sources.content_hash` |
 | `start_offset` | INTEGER | NOT NULL、非负 | 项目内 UTF-8 资料副本的起始字节，左闭 |
 | `end_offset` | INTEGER | NOT NULL、`> start_offset` | 项目内 UTF-8 资料副本的结束字节，右开 |
 | `chunker_version` | TEXT | NOT NULL | 生成当前 Chunk 的切片器版本 |
@@ -476,6 +478,7 @@ UNIQUE(compaction_job_id, ordinal)
 | `sources_project_updated` | `project_id, updated_at DESC` | 按更新时间列出项目资料 |
 | `sources_project_content_hash` | `project_id, content_hash` | 按项目和内容哈希查询资料 |
 | `knowledge_chunks_source_rowid` | `source_id, chunk_rowid` | 按 Source 删除、列出 Chunk 并关联 FTS |
+| `chunk_embeddings_chunk_rowid` | `chunk_rowid` | 删除、检查或重建某个 Chunk 的全部模型向量 |
 | `conversation_sessions_one_active` | `conversation_id`，部分唯一索引 | 保证每个 Conversation 最多一个 active/compacting Session |
 
 SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创建与 `UNIQUE(conversation_id, sequence)` 重复的 `messages_conversation_sequence` 普通索引。
@@ -565,22 +568,22 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ## 12. RAG 数据库范围
 
-Schema v10 已实现资料 Source 索引状态、语言列表、纯文本 Chunk 和 External Content FTS。以下能力仍未进入当前 Schema：
+Schema v9 已实现资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS，以及 Embedding 模型和向量存储表。以下能力仍未进入当前 Schema：
 
-- 正文 FTS、本地 Embedding、模型版本和索引代次。
+- 正文 FTS、Embedding 任务/索引代次和本地向量检索。
 - RetrievalRun、ContextManifest 及证据项。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
 - AgentJob、ChangeSet、候选事实和审批。
 - Git Revision、命名版本和 Diff 缓存。
 - 个人资料库及项目显式链接快照。
 
-CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解析、切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)，FTS、Embedding 和混合检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。后续新增 Embedding 等表时仍必须提升 Schema 版本并核对删除语义。
+CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解析、切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)，FTS、Embedding 和混合检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。后续新增任务、检索或审计表时仍必须提升 Schema 版本并核对删除语义。
 
 ### 12.1 复用并扩展现有 `sources`（已实现）
 
 当前 Schema 已有 `sources` 表，字段和现状见 [6.6 `sources`](#66-sources)。RAG 不创建平行的 `knowledge_sources`；公开的 `source` 就是现有 `sources.id`，`sources.content_hash` 继续保存项目内规范化 UTF-8 资料副本的 SHA-256，`sources.size` 继续保存该副本的字节长度。
 
-Schema v9 已增加：
+当前完整 Schema v9 包含：
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -591,13 +594,13 @@ Schema v9 已增加：
 | `index_error_code` | TEXT | 可空 | 最近一次失败的稳定错误码。 |
 | `indexed_at` | TEXT | 可空 | 当前 Chunk 集合完成切换的时间。 |
 
-Schema v10 新增 `languages_json TEXT NOT NULL DEFAULT '["zh"]'`，保存 Source 的有序语言列表。新导入资料根据 CDM 正文块检测语言；从 v8 或 v9 迁移的既有 Source 默认为 `["zh"]`，不自动重做解析或切片。
+`languages_json TEXT NOT NULL DEFAULT '["zh"]'` 保存 Source 的有序语言列表。新导入资料根据 CDM 正文块检测语言；从 v8 迁移的既有 Source 默认为 `["zh"]`，不自动重做解析或切片。
 
 当前实现的 `format` 已限制为 `text`、`markdown`。外部文件可以是 UTF-8、GB2312、GBK 或 GB18030，但导入边界会统一转换为 UTF-8 项目副本；输入编码只作为本次导入诊断结果返回，不改变 Source 的长期内容语义，因此 v0.1 不新增 `media_type` 或 `encoding` 字段。
 
 `sources.content_hash` 是判断原始资料文件是否变化的依据，不重复写入每个 Chunk。资料变更与索引更新必须避免“新 Source Hash 配旧 Chunk”：检测到变化后先将 `index_status` 标记为 `stale`；新解析和全部 Chunk 成功前，旧 Chunk 不能被认为拥有精确有效的位置。Source Hash、Chunk 集合与 FTS 的最终切换顺序必须由同一摄取服务协调。
 
-Embedding 阶段另在 `knowledge_chunks` 增加 `content_hash`。它只校验单个 Chunk 的规范化纯文本，用来与 `chunk_embeddings.content_hash` 直接比较；它与 Source 文件 Hash 的作用不同。
+Schema v9 已在 `knowledge_chunks` 包含 `content_hash`。它只校验单个 Chunk 的规范化纯文本，用来与 `chunk_embeddings.content_hash` 直接比较；它与 Source 文件 Hash 的作用不同。
 
 ### 12.2 `knowledge_chunks`（已实现）
 
@@ -610,7 +613,7 @@ Embedding 阶段另在 `knowledge_chunks` 增加 `content_hash`。它只校验�
 | `source_id` | TEXT | NOT NULL, FOREIGN KEY | 关联现有 `sources.id`。Chunk 引用中的 `source` 必须与该字段一致。 |
 | `ordinal` | INTEGER | NOT NULL | Chunk 在同一 Source 中从零开始的稳定顺序。 |
 | `content` | TEXT | NOT NULL | 去除 CDM/XML 标签和 Markdown 格式后的规范化纯文本；不得拼入标题路径、来源 ID 或内部元数据。 |
-| `content_hash` | TEXT | Embedding 阶段新增、NOT NULL | 当前 Chunk 纯文本的内容校验值；无需读取正文即可判断向量是否过期。 |
+| `content_hash` | TEXT | NOT NULL | 当前 Chunk 纯文本的 SHA-256；无需读取正文即可判断向量是否过期。 |
 | `start_offset` | INTEGER | NOT NULL | 项目内 UTF-8 资料副本字节范围起点，使用左闭右开区间。 |
 | `end_offset` | INTEGER | NOT NULL | 项目内 UTF-8 资料副本字节范围终点，使用左闭右开区间。 |
 | `chunker_version` | TEXT | NOT NULL | 生成该 Chunk 的切片算法版本。 |
@@ -644,7 +647,7 @@ CREATE TABLE knowledge_chunks (
 );
 ```
 
-上面的 `content_hash` 是已确认的目标字段，将随 Embedding Schema 一起实现；当前 v9 数据库和 Chunk Repository 尚未包含该列。实现前必须把当前“整组删除再插入”改为增量更新，保证未变化 Chunk 的 `chunk_rowid` 不变。
+Schema v9 的 Chunk Repository 使用增量同步：先按“内容 Hash + 原文范围”匹配未变化 Chunk，再以相同 ordinal 匹配局部变化项。未变化项保留 `chunk_rowid`、`chunk_id` 和有效向量；局部变化项保留可匹配的 Row ID 并更新 `content_hash`，使旧向量因 Hash 不一致而失效；删除项通过外键级联删除向量。ordinal 调整使用事务内的临时顺序值，避免唯一约束冲突。
 
 ### 12.3 `knowledge_chunk_fts`（已实现）
 
@@ -661,9 +664,9 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 
 这里的 External Content 表示 FTS 通过 `chunk_rowid` 读取同一个 SQLite 数据库中的纯文本 Chunk，不表示正文保存在文件系统。FTS 的内部影子表是可重建索引，不是新的业务表。Chunk 与 FTS 的增删改必须由同一个 Repository 短事务维护。
 
-Chunk 与 FTS 能力通过 Schema v9 和 v8→v9 前向迁移落地；Source 语言列表通过 Schema v10 和 v9→v10 前向迁移落地。Embedding 相关字段和表尚未实现，实施时必须再次提升 Schema 版本。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
+当前完整 Schema v9 同时包含 Chunk、FTS、Source 语言列表、Chunk Hash、Embedding 模型和向量表。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
 
-### 12.4 `embedding_models`（已确认、未实现）
+### 12.4 `embedding_models`（已实现）
 
 只登记某个向量属于哪个模型版本，不复制推理框架已经封装的运行参数：
 
@@ -686,7 +689,7 @@ CREATE TABLE embedding_models (
 
 不保存 `model_hash`、维度、距离算法、归一化方式、推理设备、批次、线程、模型路径或推理运行参数。向量维度可以由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到；距离算法属于检索配置，不属于模型记录。
 
-### 12.5 `chunk_embeddings`（已确认、未实现）
+### 12.5 `chunk_embeddings`（已实现表结构）
 
 一个 Chunk 可以同时保留多个模型生成的向量：
 

@@ -404,7 +404,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和 Schema v10 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查。正式索引任务的 Worker、Embedding 表写入和向量查询仍按下述 v0.1 范围继续实现；CLI 测试命令直接加载模型不代表最终任务进程模型。
+当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和完整 Schema v9 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 已实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；重复切片保留未变化 Row ID 与有效向量，局部变化通过 Hash 不一致使旧向量失效。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查。正式索引任务的 Worker、Embedding 写入编排和向量查询仍按下述 v0.1 范围继续实现；CLI 测试命令直接加载模型不代表最终任务进程模型。
 
 ### v0.1
 

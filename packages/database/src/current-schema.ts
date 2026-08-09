@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 10 as const;
+export const CURRENT_SCHEMA_VERSION = 9 as const;
 
 export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   CREATE TABLE knowledge_chunks (
@@ -7,6 +7,7 @@ export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
     source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
     content TEXT NOT NULL CHECK (length(content) > 0),
+    content_hash TEXT NOT NULL,
     start_offset INTEGER NOT NULL CHECK (start_offset >= 0),
     end_offset INTEGER NOT NULL CHECK (end_offset > start_offset),
     chunker_version TEXT NOT NULL,
@@ -43,6 +44,29 @@ export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
     INSERT INTO knowledge_chunk_fts(rowid, content)
     VALUES (new.chunk_rowid, new.content);
   END;
+
+  CREATE TABLE embedding_models (
+    embedding_model_id TEXT PRIMARY KEY,
+    model_name TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (model_name, revision)
+  );
+
+  CREATE TABLE chunk_embeddings (
+    embedding_model_id TEXT NOT NULL
+      REFERENCES embedding_models(embedding_model_id) ON DELETE CASCADE,
+    chunk_rowid INTEGER NOT NULL
+      REFERENCES knowledge_chunks(chunk_rowid) ON DELETE CASCADE,
+    content_hash TEXT NOT NULL,
+    embedding BLOB NOT NULL
+      CHECK (length(embedding) > 0 AND length(embedding) % 4 = 0),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (embedding_model_id, chunk_rowid)
+  );
+
+  CREATE INDEX chunk_embeddings_chunk_rowid
+    ON chunk_embeddings(chunk_rowid);
 `;
 
 /**

@@ -1,6 +1,6 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 实现状态：Schema v10 保留 v9 的会话压缩结构；`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地，当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
+> 实现状态：完整 Schema v9 包含会话压缩结构；`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地，当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
 > 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
 > 日期：2026-08-03
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
