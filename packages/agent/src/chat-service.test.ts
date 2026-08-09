@@ -15,6 +15,7 @@ import { AppError } from "../../contracts/src/index.js";
 import { FakeModelProvider } from "../../model-providers/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
+import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
@@ -30,8 +31,11 @@ afterEach(async () => {
 describe("ChatService", () => {
   it("persists a streamed generation and only saves it after an explicit call", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"), "雨夜");
-    const chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+      "雨夜",
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new FakeModelProvider("# 第一章\n\n雨落在没有灯的车站。\n");
     const streamed: string[] = [];
     const debugEvents: LlmDebugEvent[] = [];
@@ -85,8 +89,10 @@ describe("ChatService", () => {
 
   it("does not save cancelled or failed generations", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     try {
       await expect(chat.saveGeneration("manuscript/empty.md")).rejects.toMatchObject({
         code: "GENERATION_NOT_FOUND",
@@ -98,8 +104,10 @@ describe("ChatService", () => {
 
   it("persists the conversation id and all prior messages when a turn times out", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     let conversationId: string;
     try {
       const successful = await chat.send({
@@ -128,7 +136,7 @@ describe("ChatService", () => {
       await chat.close();
     }
 
-    const reopened = await ChatService.open(project.root);
+    const reopened = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     try {
       const latest = reopened.getLatestConversation(project.manifest.id, "fake", "stable-model");
       expect(latest?.id).toBe(conversationId!);
@@ -142,8 +150,10 @@ describe("ChatService", () => {
 
   it("executes an approved write tool call and returns the model's final response", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new ToolCallingModelProvider();
     const approvals: string[] = [];
     const reasoningDeltas: string[] = [];
@@ -237,8 +247,10 @@ describe("ChatService", () => {
 
   it("injects an approved database project-instruction revision on the next tool round", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new ProjectInstructionToolProvider();
     try {
       const result = await chat.send({
@@ -265,8 +277,10 @@ describe("ChatService", () => {
 
   it("restores a catalog get load after reopening the project", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    let chat = await ChatService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    let chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new PersistentToolProvider();
     try {
       const first = await chat.send({
@@ -279,7 +293,7 @@ describe("ChatService", () => {
       expect(first.content).toBe("历史搜索工具已经加载。");
 
       await chat.close();
-      chat = await ChatService.open(project.root);
+      chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
 
       const second = await chat.send({
         conversationId: first.conversationId,

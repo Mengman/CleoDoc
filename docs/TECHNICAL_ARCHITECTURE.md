@@ -62,6 +62,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | UI 状态 | Zustand | v0.2 窗口、面板、选择和临时交互状态 |
 | 工作流投影 | XState | v0.2 Renderer 中展示阶段和任务状态，不作为持久化事实源 |
 | 数据校验 | Zod | IPC、文件格式、模型结构化输出校验 |
+| 配置 | YAML + Zod | 发行默认配置、用户逐项覆盖、应用状态分离和服务参数注入 |
 | 开发构建 | TypeScript；v0.2 使用 electron-vite | CLI/Core 构建；Main、Preload、Renderer 和 Utility Process 构建 |
 | 安装包 | Node.js 可执行入口；v0.2 使用 electron-builder | v0.1 CLI 分发；v0.2 Windows、macOS、Linux 桌面打包与签名配置 |
 | 数据库 | Node.js 内置 `node:sqlite` | CLI 与桌面共用的项目数据库和个人资料库 |
@@ -168,6 +169,14 @@ Preload 仅通过 `contextBridge` 暴露白名单 API：
 
 Worker 崩溃不得影响 Core；Core 将当前索引任务标记为可重试。
 
+### 4.7 软件配置组合层
+
+`packages/config` 负责解析随软件发行的 `resources/config/software-default.yaml`、操作系统用户目录的 `config.yaml`，以及独立的 `state.yaml`。有效的用户字段按叶子覆盖发行默认值；错误字段单独回退并产生警告。
+
+配置读取只发生在应用组合层。CLI（未来为 Electron Main/Core 启动层）把数据库等待、资料大小、Provider 超时、模型能力、上下文预算、压缩和切片参数注入底层服务。Database、Project、Material、Provider、Agent 和未来 Chunker 不直接访问 YAML 或操作系统配置目录。
+
+模型的 `contextWindowTokens` 和 `maxOutputTokens` 由 Provider + Model 能力目录维护。API Key 统一从 `CLEODOC_API_KEY` 读取，不写入 YAML。Thinking、Temperature、生成 `maxTokens` 和当前字符 Token Estimator 暂不配置。完整约束见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
+
 ## 5. 代码组织
 
 建议采用 npm workspaces：
@@ -182,6 +191,7 @@ apps/
    └─ src/utility/
 
 packages/
+├─ config/          # 软件 YAML、用户覆盖、应用状态和配置路径
 ├─ contracts/       # 公共类型、Zod Schema、错误码和 IPC contract
 ├─ cdm/             # CDM Schema、XML 解析/序列化、校验、Node ID 和遍历
 ├─ document-ingestion/ # TXT/Markdown、临时 CDM、结构切片和 ChunkDraft
@@ -515,7 +525,7 @@ flowchart LR
 
 临时 CDM 的生命周期在 Document Ingestion 内结束。RAG Core 从 `ChunkDraft` 开始工作，不导入 CDM 包，也不把 CDM 标签、Node ID 或 Markdown 写入 Chunk。实体与事实抽取属于 CleoDoc 的知识能力，可以消费 RAG Chunk，但不能反向成为 RAG Core 的必要依赖。
 
-v0.1 导入资料使用基于块级段落结构的确定性 Baseline Chunker。它只执行两种操作：超过项目配置上限的大块在上限前的自然边界递归拆分；同一标题区域内的小块按原文顺序贪心合并到上一个 Chunk。首版取消最短长度和尾块重平衡，默认最大长度为 `800` 个规范化纯文本 Unicode 字符，默认从上限的 `75%` 位置开始向上限方向选择自然边界。TXT 不猜测标题，所有 `<p>` 在整个文档范围内使用普通合并规则。完整算法以[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)为准。
+v0.1 导入资料使用基于块级段落结构的确定性 Baseline Chunker。它只执行两种操作：超过软件配置上限的大块在上限前的自然边界递归拆分；同一标题区域内的小块按原文顺序贪心合并到上一个 Chunk。首版取消最短长度和尾块重平衡，默认最大长度为 `800` 个规范化纯文本 Unicode 字符，默认从上限的 `75%` 位置开始向上限方向选择自然边界。TXT 不猜测标题，所有 `<p>` 在整个文档范围内使用普通合并规则。完整算法以[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)为准。
 
 导入资料 Chunk 保存公开 `chunk_id`、`source_id`、顺序、纯文本 `content`、项目内 UTF-8 资料副本的字节范围和 Chunker 版本；Source 表保存该规范化副本的 SHA-256。Chunk 不保存临时 CDM、Node ID、Markdown 或标题路径。有效切片配置必须参与索引是否过期的判断，具体持久化字段随下一次 Chunk Schema 评审确定。正文是否采用不同切片参数留待正文检索进入实现范围后通过固定测试集确定，不与当前资料 Baseline 混为同一配置。
 

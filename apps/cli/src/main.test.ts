@@ -26,8 +26,10 @@ describe("CleoDoc CLI", () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       CLEODOC_HOME: path.join(temporaryDirectory, "cli-state"),
-      OPENAI_API_KEY: "test-key",
+      CLEODOC_API_KEY: "test-key",
       CLEODOC_MODEL: "test-model",
+      CLEODOC_MODEL_CONTEXT_TOKENS: "1000000",
+      CLEODOC_MODEL_MAX_OUTPUT_TOKENS: "384000",
     };
 
     const server = createServer((request, response) => {
@@ -113,8 +115,10 @@ describe("CleoDoc CLI", () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       CLEODOC_HOME: path.join(temporaryDirectory, "cli-state"),
-      OPENAI_API_KEY: "test-key",
+      CLEODOC_API_KEY: "test-key",
       CLEODOC_MODEL: "test-model",
+      CLEODOC_MODEL_CONTEXT_TOKENS: "1000000",
+      CLEODOC_MODEL_MAX_OUTPUT_TOKENS: "384000",
     };
     let chatRequestCount = 0;
     const server = createServer((request, response) => {
@@ -189,8 +193,10 @@ describe("CleoDoc CLI", () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       CLEODOC_HOME: path.join(temporaryDirectory, "cli-state"),
-      OPENAI_API_KEY: "test-key",
+      CLEODOC_API_KEY: "test-key",
       CLEODOC_MODEL: "test-model",
+      CLEODOC_MODEL_CONTEXT_TOKENS: "1000000",
+      CLEODOC_MODEL_MAX_OUTPUT_TOKENS: "384000",
     };
     let chatRequestCount = 0;
     const server = createServer((request, response) => {
@@ -251,8 +257,10 @@ describe("CleoDoc CLI", () => {
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
       CLEODOC_HOME: path.join(temporaryDirectory, "cli-state"),
-      OPENAI_API_KEY: "unused-test-key",
+      CLEODOC_API_KEY: "unused-test-key",
       CLEODOC_MODEL: "test-model",
+      CLEODOC_MODEL_CONTEXT_TOKENS: "1000000",
+      CLEODOC_MODEL_MAX_OUTPUT_TOKENS: "384000",
     };
     expect((await runCli(["init", projectDirectory], environment)).exitCode).toBe(0);
 

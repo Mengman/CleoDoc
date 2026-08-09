@@ -24,8 +24,6 @@ import {
 import { decodeMaterialText } from "./text-decoding.js";
 import type { MaterialInputEncoding } from "./text-decoding.js";
 
-const MAX_MATERIAL_BYTES = 10 * 1024 * 1024;
-
 interface MaterialMetadataOptions {
   title?: string;
   sourceLabel?: string;
@@ -47,15 +45,24 @@ export class MaterialService {
     private readonly projectRoot: string,
     private readonly projectId: string,
     private readonly database: ProjectDatabase,
+    private readonly maxImportBytes: number,
   ) {
     this.repository = new MaterialRepository(database);
   }
 
-  static async open(projectRoot: string): Promise<MaterialService> {
-    const project = await new ProjectService().open(projectRoot);
+  static async open(
+    projectRoot: string,
+    options: { database: { busyTimeoutMs: number }; maxImportBytes: number },
+  ): Promise<MaterialService> {
+    const project = await new ProjectService(options.database).open(projectRoot);
     await ensureMaterialDirectories(project.root);
-    const database = await ProjectDatabase.open(project.root);
-    const service = new MaterialService(project.root, project.manifest.id, database);
+    const database = await ProjectDatabase.open(project.root, options.database);
+    const service = new MaterialService(
+      project.root,
+      project.manifest.id,
+      database,
+      options.maxImportBytes,
+    );
     try {
       await service.synchronizeProjection();
       return service;
@@ -80,7 +87,11 @@ export class MaterialService {
       throw new AppError("VALIDATION_ERROR", "只能导入 TXT 或 Markdown 文件。");
     }
     const format = materialFormatFromPath(absoluteInputPath);
-    const decoded = await readMaterialFile(absoluteInputPath, options.encoding);
+    const decoded = await readMaterialFile(
+      absoluteInputPath,
+      options.encoding,
+      this.maxImportBytes,
+    );
     const originalFileName = path.basename(absoluteInputPath);
     return await this.addContent(decoded.content, {
       origin: "file",
@@ -183,7 +194,7 @@ export class MaterialService {
       tags?: readonly string[];
     },
   ): Promise<MaterialImportResult> {
-    assertMaterialContent(content);
+    assertMaterialContent(content, this.maxImportBytes);
     await this.synchronizeProjection();
     const contentHash = hashContent(content);
     const duplicate = this.repository.findByContentHash(contentHash);
@@ -281,7 +292,7 @@ export class MaterialService {
   private async readSourceContent(source: KnowledgeSource): Promise<string> {
     const resolved = await resolveInsideProject(this.projectRoot, source.relativePath);
     try {
-      return await readStoredUtf8Text(resolved.absolutePath);
+      return await readStoredUtf8Text(resolved.absolutePath, this.maxImportBytes);
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
@@ -321,18 +332,22 @@ async function readOptionalFile(filePath: string): Promise<string | null> {
   });
 }
 
-async function readMaterialFile(filePath: string, requestedEncoding?: MaterialInputEncoding) {
+async function readMaterialFile(
+  filePath: string,
+  requestedEncoding: MaterialInputEncoding | undefined,
+  maxImportBytes: number,
+) {
   const content = await readFile(filePath);
-  if (content.byteLength > MAX_MATERIAL_BYTES) {
-    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 10 MiB。");
+  if (content.byteLength > maxImportBytes) {
+    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
   }
   return decodeMaterialText(content, requestedEncoding);
 }
 
-async function readStoredUtf8Text(filePath: string): Promise<string> {
+async function readStoredUtf8Text(filePath: string, maxImportBytes: number): Promise<string> {
   const content = await readFile(filePath);
-  if (content.byteLength > MAX_MATERIAL_BYTES) {
-    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 10 MiB。");
+  if (content.byteLength > maxImportBytes) {
+    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
   }
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(content);
@@ -354,13 +369,13 @@ function materialFormatFromPath(filePath: string): KnowledgeSource["format"] {
   throw new AppError("VALIDATION_ERROR", "步骤 5 仅支持 TXT、MD 和 Markdown 文件。");
 }
 
-function assertMaterialContent(content: string): void {
+function assertMaterialContent(content: string, maxImportBytes: number): void {
   const size = Buffer.byteLength(content, "utf8");
   if (size === 0) {
     throw new AppError("VALIDATION_ERROR", "资料内容不能为空。");
   }
-  if (size > MAX_MATERIAL_BYTES) {
-    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 10 MiB。");
+  if (size > maxImportBytes) {
+    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
   }
 }
 

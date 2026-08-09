@@ -20,6 +20,11 @@ import {
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import {
+  TEST_CHAT_OPTIONS,
+  TEST_CONTEXT_POLICY,
+  TEST_DATABASE_OPTIONS,
+} from "../../../test/runtime-options.js";
+import {
   projectMessagesForCompaction,
   segmentMessagesForCompaction,
 } from "./compaction-service.js";
@@ -27,6 +32,12 @@ import type { LlmDebugEvent } from "./debug-events.js";
 import { ProjectToolCatalog, ProjectToolRuntime } from "./tool/index.js";
 
 const temporaryDirectories: string[] = [];
+const TEST_20K_CONTEXT_POLICY = {
+  ...TEST_CONTEXT_POLICY,
+  contextWindowTokens: 20_000,
+  reservedOutputTokens: 7_680,
+  nextUserInputReserveTokens: 1_000,
+};
 
 afterEach(async () => {
   await Promise.all(
@@ -39,11 +50,13 @@ afterEach(async () => {
 describe("session compaction", () => {
   it("stores a streamed Markdown summary and uses it in the next session", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     await setProjectInstructions(project.root, "数据库项目规则");
     await writeFile(path.join(project.root, "AGENTS.md"), "第一版文件规则", "utf8");
     const provider = new CompactionAwareProvider();
-    const chat = await ChatService.open(project.root);
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
@@ -144,9 +157,11 @@ describe("session compaction", () => {
 
   it("keeps the old session active and logs an empty assembled result before validation", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const provider = new EmptyCompactionProvider();
-    const chat = await ChatService.open(project.root);
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
@@ -196,10 +211,12 @@ describe("session compaction", () => {
 
   it("chains inherited summaries across consecutive compactions and injects only the current one", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     await setProjectInstructions(project.root, "连续压缩项目规则");
     const provider = new CumulativeCompactionProvider();
-    const chat = await ChatService.open(project.root);
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
 
     try {
       const first = await chat.send({
@@ -288,9 +305,11 @@ describe("session compaction", () => {
 
   it("uses map-reduce Markdown compaction when one request cannot hold the session", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const provider = new HierarchicalCompactionProvider();
-    const chat = await ChatService.open(project.root);
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
@@ -305,7 +324,7 @@ describe("session compaction", () => {
         conversationId: first.conversationId,
         provider,
         model: "scripted",
-        contextWindowTokens: 20_000,
+        contextBudgetPolicy: TEST_20K_CONTEXT_POLICY,
         signal: new AbortController().signal,
         onDebugEvent: (event) => debugEvents.push(event),
       });
@@ -405,7 +424,7 @@ describe("session compaction", () => {
       }),
     ];
 
-    const segments = segmentMessagesForCompaction(messages, 1_600, 512);
+    const segments = segmentMessagesForCompaction(messages, 1_600, 512, 0.8, 0.6);
     const segmentBySequence = new Map<number, number>();
     segments.forEach((segment, segmentIndex) => {
       for (const message of segment) segmentBySequence.set(message.sequence, segmentIndex);
@@ -428,6 +447,8 @@ describe("session compaction", () => {
       [storedMessage({ sequence: 1, role: "user", content })],
       1_000,
       512,
+      0.8,
+      0.6,
     );
     const fragments = segments.flatMap((segment) => segment.map((message) => message.content));
 
@@ -459,7 +480,7 @@ describe("session compaction", () => {
       ),
     ];
 
-    expect(() => segmentMessagesForCompaction(messages, 2_000, 512)).toThrowError(
+    expect(() => segmentMessagesForCompaction(messages, 2_000, 512, 0.8, 0.6)).toThrowError(
       expect.objectContaining({
         code: "PROVIDER_CONTEXT_LIMIT",
         message: expect.stringContaining("Tool Call"),
@@ -486,8 +507,10 @@ describe("session compaction", () => {
 
   it("projects tool results through each Tool contract without leaking retrieved content", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const database = await ProjectDatabase.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     const catalog = ProjectToolCatalog.create({
       documents: new DocumentService(project.root),
       history: new SessionRepository(database),
@@ -891,7 +914,7 @@ async function createTemporaryDirectory(): Promise<string> {
 }
 
 async function setProjectInstructions(projectRoot: string, content: string): Promise<void> {
-  const database = await ProjectDatabase.open(projectRoot);
+  const database = await ProjectDatabase.open(projectRoot, TEST_DATABASE_OPTIONS);
   try {
     await new ProjectInstructionRepository(database).set(content, 0);
   } finally {

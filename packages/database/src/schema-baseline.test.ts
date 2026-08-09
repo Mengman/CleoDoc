@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ConversationRepository } from "./conversation-repository.js";
 import { CURRENT_SCHEMA_VERSION } from "./current-schema.js";
 import { ProjectDatabase } from "./project-database.js";
+import { TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 import { SessionRepository } from "./session-repository.js";
 
 const temporaryDirectories: string[] = [];
@@ -23,7 +24,7 @@ afterEach(async () => {
 describe("current database schema baseline", () => {
   it("creates the complete v8 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
-    const database = await ProjectDatabase.open(root);
+    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
       expect(
         database.read(
@@ -162,7 +163,7 @@ describe("current database schema baseline", () => {
 
   it("opens an existing fully-upgraded v8 database without rewriting its data or history", async () => {
     const root = await createTemporaryProject("cleodoc-existing-v8-test-");
-    const database = await ProjectDatabase.open(root);
+    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     const conversations = new ConversationRepository(database);
     const conversation = await conversations.createConversation({
       projectId: "project-1",
@@ -192,7 +193,7 @@ describe("current database schema baseline", () => {
     }
     raw.close();
 
-    const reopened = await ProjectDatabase.open(root);
+    const reopened = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
       expect(new ConversationRepository(reopened).getConversation(conversation.id)).toMatchObject({
         id: conversation.id,
@@ -234,7 +235,7 @@ describe("current database schema baseline", () => {
     `);
     raw.close();
 
-    await expect(ProjectDatabase.open(root)).rejects.toMatchObject({
+    await expect(ProjectDatabase.open(root, TEST_DATABASE_OPTIONS)).rejects.toMatchObject({
       code: "DATABASE_ERROR",
       message: expect.stringContaining("v7"),
     });

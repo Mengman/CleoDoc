@@ -5,30 +5,34 @@ import type {
   ModelToolDefinition,
 } from "../../contracts/src/index.js";
 
-export const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
-export const DEFAULT_MAX_OUTPUT_TOKENS = 384_000;
-export const DEFAULT_NEXT_USER_INPUT_RESERVE_TOKENS = 32_768;
-export const DEFAULT_SAFETY_MARGIN_RATIO = 0.05;
-export const DEFAULT_SOFT_COMPACTION_RATIO = 0.75;
-export const DEFAULT_HARD_COMPACTION_RATIO = 0.9;
+export interface ModelContextCapabilities {
+  contextWindowTokens: number;
+  maxOutputTokens: number;
+}
+
+export interface ContextBudgetSettings {
+  nextUserInputReserveTokens: number;
+  nextUserInputReserveRatio: number;
+  safetyMarginRatio: number;
+  softCompactionRatio: number;
+  hardCompactionRatio: number;
+}
 
 export function createContextBudgetPolicy(
-  contextWindowTokens = DEFAULT_CONTEXT_WINDOW_TOKENS,
+  capabilities: ModelContextCapabilities,
+  settings: ContextBudgetSettings,
 ): ContextBudgetPolicy {
-  const reservedOutputTokens = Math.min(
-    DEFAULT_MAX_OUTPUT_TOKENS,
-    Math.floor(contextWindowTokens * 0.384),
-  );
+  const { contextWindowTokens, maxOutputTokens: reservedOutputTokens } = capabilities;
   return {
     contextWindowTokens,
     reservedOutputTokens,
     nextUserInputReserveTokens: Math.min(
-      DEFAULT_NEXT_USER_INPUT_RESERVE_TOKENS,
-      Math.floor(contextWindowTokens * 0.05),
+      settings.nextUserInputReserveTokens,
+      Math.floor(contextWindowTokens * settings.nextUserInputReserveRatio),
     ),
-    safetyMarginRatio: DEFAULT_SAFETY_MARGIN_RATIO,
-    softCompactionRatio: DEFAULT_SOFT_COMPACTION_RATIO,
-    hardCompactionRatio: DEFAULT_HARD_COMPACTION_RATIO,
+    safetyMarginRatio: settings.safetyMarginRatio,
+    softCompactionRatio: settings.softCompactionRatio,
+    hardCompactionRatio: settings.hardCompactionRatio,
   };
 }
 

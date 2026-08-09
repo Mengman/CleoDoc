@@ -1,4 +1,9 @@
-import type { ModelEvent, ModelRequest, ModelUsage } from "../../contracts/src/index.js";
+import type {
+  ContextBudgetPolicy,
+  ModelEvent,
+  ModelRequest,
+  ModelUsage,
+} from "../../contracts/src/index.js";
 import type { ModelProvider } from "../../contracts/src/index.js";
 import type { LlmDebugHandler } from "./debug-events.js";
 import type { ToolApprovalHandler } from "./tool/index.js";
@@ -20,7 +25,7 @@ export interface SendMessageInput {
   signal: AbortSignal;
   onEvent?: (event: ModelEvent) => void;
   approveToolCall?: ToolApprovalHandler;
-  contextWindowTokens?: number;
+  contextBudgetPolicy?: ContextBudgetPolicy;
   onDebugEvent?: LlmDebugHandler;
 }
 

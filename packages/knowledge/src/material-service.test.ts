@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { MaterialService } from "./material-service.js";
+import { TEST_DATABASE_OPTIONS, TEST_MATERIAL_OPTIONS } from "../../../test/runtime-options.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -21,10 +22,12 @@ afterEach(async () => {
 describe("MaterialService", () => {
   it("imports TXT and Markdown into portable facts and rejects duplicate content", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const inputPath = path.join(directory, "民国铁路.md");
     await writeFile(inputPath, "# 铁路资料\n\n夜间列车使用煤油灯。\n", "utf8");
-    const service = await MaterialService.open(project.root);
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
 
     try {
       const imported = await service.addFile(inputPath, {
@@ -76,13 +79,15 @@ describe("MaterialService", () => {
 
   it("detects GB2312-compatible files and stores a normalized UTF-8 project copy", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const inputPath = path.join(directory, "旧城资料.md");
     await writeFile(
       inputPath,
       Buffer.from("2320d6d0cec4d7cac1cf0a0abec9b3c7b3b5d5bea1a30a", "hex"),
     );
-    const service = await MaterialService.open(project.root);
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
 
     try {
       const imported = await service.addFile(inputPath);
@@ -101,8 +106,10 @@ describe("MaterialService", () => {
 
   it("adds pasted text, renames it and removes both facts and SQLite projection", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const service = await MaterialService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
     let materialId: string;
     let relativePath: string;
 
@@ -137,7 +144,7 @@ describe("MaterialService", () => {
       await service.close();
     }
 
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     try {
       expect(new MaterialRepository(database).get(materialId)).toBeNull();
     } finally {
@@ -147,17 +154,19 @@ describe("MaterialService", () => {
 
   it("rebuilds a missing SQLite projection from metadata files", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const service = await MaterialService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
     const added = await service.addText("用于重建投影的资料。", { title: "投影测试" });
     await service.close();
 
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     await new MaterialRepository(database).remove(added.source.id);
     expect(new MaterialRepository(database).get(added.source.id)).toBeNull();
     await database.close();
 
-    const reopened = await MaterialService.open(project.root);
+    const reopened = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
     try {
       expect(await reopened.list()).toEqual([added.source]);
     } finally {
@@ -167,8 +176,10 @@ describe("MaterialService", () => {
 
   it("rejects unsupported and non-UTF-8 files", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
-    const service = await MaterialService.open(project.root);
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
     try {
       const pdfPath = path.join(directory, "source.pdf");
       await writeFile(pdfPath, "not a pdf", "utf8");
@@ -186,10 +197,14 @@ describe("MaterialService", () => {
 
   it("keeps identical materials isolated between projects", async () => {
     const directory = await createTemporaryDirectory();
-    const projectA = await new ProjectService().create(path.join(directory, "a.cleo"));
-    const projectB = await new ProjectService().create(path.join(directory, "b.cleo"));
-    const serviceA = await MaterialService.open(projectA.root);
-    const serviceB = await MaterialService.open(projectB.root);
+    const projectA = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "a.cleo"),
+    );
+    const projectB = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "b.cleo"),
+    );
+    const serviceA = await MaterialService.open(projectA.root, TEST_MATERIAL_OPTIONS);
+    const serviceB = await MaterialService.open(projectB.root, TEST_MATERIAL_OPTIONS);
     try {
       const addedA = await serviceA.addText("两个项目都需要的年代资料。", { title: "年代" });
       const addedB = await serviceB.addText("两个项目都需要的年代资料。", { title: "年代" });

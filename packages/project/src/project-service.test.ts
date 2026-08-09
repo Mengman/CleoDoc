@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AppError } from "../../contracts/src/index.js";
 import { DocumentService } from "./document-service.js";
 import { ProjectService } from "./project-service.js";
+import { TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -21,7 +22,7 @@ afterEach(async () => {
 describe("ProjectService and DocumentService", () => {
   it("creates a portable project with a healthy SQLite database", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
       "测试小说",
     );
@@ -29,7 +30,7 @@ describe("ProjectService and DocumentService", () => {
     const manifest = JSON.parse(
       await readFile(path.join(project.root, "cleo.project.json"), "utf8"),
     ) as { name: string };
-    const status = await new ProjectService().status(project.root);
+    const status = await new ProjectService(TEST_DATABASE_OPTIONS).status(project.root);
 
     expect(manifest.name).toBe("测试小说");
     expect(status.database).toBe("ok");
@@ -38,7 +39,9 @@ describe("ProjectService and DocumentService", () => {
 
   it("saves, reads, lists and deletes Markdown documents", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const documents = new DocumentService(project.root);
 
     const saved = await documents.save("manuscript/chapter-001.md", "# 第一章\n\n雨夜。\n");
@@ -66,7 +69,9 @@ describe("ProjectService and DocumentService", () => {
 
   it("rejects paths outside manuscript and project", async () => {
     const directory = await createTemporaryDirectory();
-    const project = await new ProjectService().create(path.join(directory, "novel.cleo"));
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
     const documents = new DocumentService(project.root);
 
     for (const unsafePath of ["../escape.md", "manuscript/../../escape.md", "C:\\escape.md"]) {

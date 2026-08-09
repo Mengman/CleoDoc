@@ -13,6 +13,7 @@ import {
 } from "../../../database/src/index.js";
 import { DocumentService, ProjectService } from "../../../project/src/index.js";
 import { ProjectToolCatalog, ProjectToolRuntime, type ToolApprovalHandler } from "./index.js";
+import { TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -111,7 +112,7 @@ describe("ProjectToolRuntime", () => {
 
   it("does not expose or execute catalog tools until the catalog get action loads them", async () => {
     const project = await createProject();
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     const repository = new ProjectInstructionRepository(database);
     const tools = createRuntime(project, { projectInstructions: repository });
     try {
@@ -217,7 +218,7 @@ describe("ProjectToolRuntime", () => {
 
   it("keeps dynamic catalog loads isolated between conversations sharing one catalog", async () => {
     const project = await createProject();
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     const catalog = ProjectToolCatalog.create({
       documents: new DocumentService(project.root),
       projectInstructions: new ProjectInstructionRepository(database),
@@ -248,7 +249,7 @@ describe("ProjectToolRuntime", () => {
 
   it("searches closed history first and reads one immutable message by messageId", async () => {
     const project = await createProject();
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     const conversations = new ConversationRepository(database);
     const sessions = new SessionRepository(database);
     const conversation = await conversations.createConversation({
@@ -395,7 +396,7 @@ async function executeTool(
 async function createProject() {
   const directory = await mkdtemp(path.join(tmpdir(), "cleodoc-tools-test-"));
   temporaryDirectories.push(directory);
-  return await new ProjectService().create(path.join(directory, "novel.cleo"));
+  return await new ProjectService(TEST_DATABASE_OPTIONS).create(path.join(directory, "novel.cleo"));
 }
 
 function createRuntime(

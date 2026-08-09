@@ -211,23 +211,19 @@ Markdown 内嵌 HTML 只能接受 CDM 白名单允许的文本语义。脚本、
 
 Chunk 长度使用规范化纯文本 `content` 的 Unicode 字符数量，包含标点和保留下来的空白，不包含 CDM/XML 标签或 Markdown 格式符号。它是切片长度，不等同于文稿统计中的“字数”。
 
-Baseline 的项目级参数为：
+Baseline 的软件级参数为：
 
-```json
-{
-  "rag": {
-    "chunking": {
-      "maxChunkChars": 800,
-      "splitSearchWindowRatio": 0.75
-    }
-  }
-}
+```yaml
+rag:
+  chunking:
+    maxChunkChars: 800
+    splitSearchWindowRatio: 0.75
 ```
 
 - `maxChunkChars` 是任何最终 Chunk 都不能超过的硬上限，默认值为 `800`。
 - `splitSearchWindowRatio` 定义在上限前多大的范围内优先寻找自然切分点，默认值为 `0.75`。
 - 不定义 `minChunkChars`，章节末尾允许保留无法继续合并的短 Chunk。
-- 这些参数由项目用户配置解析后注入 Chunker，不能作为散落在切片实现中的固定数值。配置项缺失或无效时使用代码集中定义的默认值，并向用户报告回退警告。
+- 这些参数由软件 YAML 配置解析后注入 Chunker，不能作为散落在切片实现中的固定数值。发行默认值统一保存在 `resources/config/software-default.yaml`；用户配置项缺失或无效时回退对应的发行默认值，并向用户报告警告。
 - Chunker 实现版本不是用户参数，仍由代码维护，用于判断已有 Chunk 是否需要重建。
 
 当 `maxChunkChars = 800`、`splitSearchWindowRatio = 0.75` 时，拆分器优先在当前剩余文字的第 `600`—`800` 个字符之间寻找边界。实际生效的配置必须参与索引版本判断；原始资料未变化但切片参数变化时，现有 Chunk 也应被识别为需要重建。

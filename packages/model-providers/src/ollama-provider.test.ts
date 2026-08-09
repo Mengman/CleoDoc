@@ -3,11 +3,18 @@ import { describe, expect, it } from "vitest";
 import type { ModelProtocolEvent } from "../../contracts/src/index.js";
 import { OllamaProvider } from "./ollama-provider.js";
 
+const TEST_PROVIDER_TIMEOUTS = {
+  connectionTimeoutMs: 60_000,
+  streamIdleTimeoutMs: 120_000,
+  overallTimeoutMs: 1_200_000,
+} as const;
+
 describe("OllamaProvider", () => {
   it("serializes assistant tool calls and names their tool results", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const protocolEvents: ModelProtocolEvent[] = [];
     const provider = new OllamaProvider({
+      ...TEST_PROVIDER_TIMEOUTS,
       baseUrl: "http://ollama.test",
       fetchImplementation: async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;

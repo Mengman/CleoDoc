@@ -4,6 +4,7 @@ import type {
   ConversationSummary,
   ConversationSession,
   ContextBudgetStatus,
+  ContextBudgetPolicy,
   CompactionEvent,
   ModelProvider,
   ModelRequest,
@@ -33,19 +34,19 @@ import {
   type SendMessageInput,
 } from "./chat-request.js";
 import { CompactionService } from "./compaction-service.js";
-import {
-  ContextBudgetService,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  createContextBudgetPolicy,
-  estimateTokens,
-} from "./context-budget.js";
+import { ContextBudgetService, estimateTokens } from "./context-budget.js";
 import { ContextBuilder } from "./context-builder.js";
 import { emitLlmDebugEvent, type LlmDebugHandler } from "./debug-events.js";
 
 export { DEFAULT_SYSTEM_PROMPT } from "./chat-request.js";
 export type { SendMessageInput } from "./chat-request.js";
 
-const MAX_TOOL_ROUNDS = 8;
+export interface ChatServiceOptions {
+  database: { busyTimeoutMs: number };
+  maxToolRounds: number;
+  defaultContextBudgetPolicy?: ContextBudgetPolicy;
+  compaction: ConstructorParameters<typeof CompactionService>[2];
+}
 
 export class ChatService {
   private readonly repository: ConversationRepository;
@@ -61,6 +62,7 @@ export class ChatService {
   private constructor(
     private readonly projectRoot: string,
     private readonly database: ProjectDatabase,
+    private readonly options: ChatServiceOptions,
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
@@ -74,8 +76,12 @@ export class ChatService {
     });
   }
 
-  static async open(projectRoot: string): Promise<ChatService> {
-    const service = new ChatService(projectRoot, await ProjectDatabase.open(projectRoot));
+  static async open(projectRoot: string, options: ChatServiceOptions): Promise<ChatService> {
+    const service = new ChatService(
+      projectRoot,
+      await ProjectDatabase.open(projectRoot, options.database),
+      options,
+    );
     await service.sessions.recoverInterruptedJobs();
     await service.modelCalls.recoverInterruptedCalls();
     return service;
@@ -124,7 +130,7 @@ export class ChatService {
     const tools = this.getToolRuntime(conversation);
 
     try {
-      for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+      for (let round = 0; round < this.options.maxToolRounds; round += 1) {
         const toolInfo = tools.toolInfo;
         const messages = this.contextBuilder.build(
           session,
@@ -297,7 +303,7 @@ export class ChatService {
         });
         const status = this.getContextStatus(
           conversation.id,
-          input.contextWindowTokens,
+          this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
           tools.toolInfo.definitions,
           "",
         );
@@ -314,7 +320,10 @@ export class ChatService {
           usage: usage ?? null,
         };
       }
-      throw new AppError("PROVIDER_UNAVAILABLE", `模型连续调用工具超过 ${MAX_TOOL_ROUNDS} 轮。`);
+      throw new AppError(
+        "PROVIDER_UNAVAILABLE",
+        `模型连续调用工具超过 ${this.options.maxToolRounds} 轮。`,
+      );
     } catch (error) {
       const appError = asAppError(error);
       await this.repository.finishGeneration({
@@ -394,7 +403,7 @@ export class ChatService {
 
   getContextStatus(
     conversationId: string,
-    contextWindowTokens?: number,
+    contextBudgetPolicy?: ContextBudgetPolicy,
     toolDefinitions?: readonly ModelToolDefinition[],
     draft = "",
   ): ContextBudgetStatus {
@@ -412,7 +421,7 @@ export class ChatService {
     return this.budgetService.estimate(
       messages,
       toolDefinitions ?? defaultTools?.definitions ?? [],
-      createContextBudgetPolicy(contextWindowTokens),
+      this.resolveContextBudgetPolicy(contextBudgetPolicy),
       draft,
     );
   }
@@ -421,7 +430,7 @@ export class ChatService {
     conversationId: string;
     provider: ModelProvider;
     model: string;
-    contextWindowTokens?: number;
+    contextBudgetPolicy?: ContextBudgetPolicy;
     trigger?: "automatic" | "manual";
     signal: AbortSignal;
     onEvent?: (event: CompactionEvent) => void;
@@ -436,14 +445,17 @@ export class ChatService {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可压缩或压缩已在进行中。");
     }
     const tools = this.getToolRuntime(conversation);
-    return new CompactionService(this.sessions, this.modelCalls, (messages) =>
-      tools.projectToolEventsForCompaction(messages),
+    return new CompactionService(
+      this.sessions,
+      this.modelCalls,
+      this.options.compaction,
+      (messages) => tools.projectToolEventsForCompaction(messages),
     ).compact({
       conversationId: input.conversationId,
       session,
       provider: input.provider,
       model: input.model,
-      contextWindowTokens: input.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+      contextBudgetPolicy: this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
       trigger: input.trigger ?? "manual",
       signal: input.signal,
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
@@ -500,6 +512,14 @@ export class ChatService {
     );
     this.toolRuntimes.set(conversation.id, runtime);
     return runtime;
+  }
+
+  private resolveContextBudgetPolicy(policy: ContextBudgetPolicy | undefined): ContextBudgetPolicy {
+    const resolved = policy ?? this.options.defaultContextBudgetPolicy;
+    if (resolved === undefined) {
+      throw new AppError("VALIDATION_ERROR", "当前模型缺少上下文能力配置。");
+    }
+    return resolved;
   }
 
   private assertConversation(conversationId: string) {

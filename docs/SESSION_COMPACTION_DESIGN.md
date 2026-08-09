@@ -135,7 +135,7 @@ interface ChatInputController {
   + 预留的下一条用户输入
 ```
 
-模型上下文窗口必须来自显式模型配置或用户配置，不根据模型名称进行不可靠猜测。
+模型上下文窗口和最大输出长度必须来自软件维护的 Provider + Model 能力配置；CLI 临时覆盖只用于未知模型调试，不根据模型名称进行不可靠猜测。
 
 ### 4.2 统一术语与默认配置
 
@@ -176,26 +176,26 @@ R = E / L
 
 ```ts
 interface ContextBudgetPolicy {
-  contextWindowTokens: number; // 当前默认 1,000,000
-  reservedOutputTokens: number; // 1M 默认 384,000
-  nextUserInputReserveTokens: number; // 1M 默认 32,768
-  safetyMarginRatio: number; // 默认 0.05
-  softCompactionRatio: number; // 默认 0.75
-  hardCompactionRatio: number; // 默认 0.90
+  contextWindowTokens: number; // 来自当前 Provider + Model 能力配置
+  reservedOutputTokens: number; // 等于该模型的 maxOutputTokens
+  nextUserInputReserveTokens: number; // 由软件配置的固定上限和比例共同计算
+  safetyMarginRatio: number; // 发行默认 0.05
+  softCompactionRatio: number; // 发行默认 0.75
+  hardCompactionRatio: number; // 发行默认 0.90
 }
 ```
 
-为了让显式指定的小上下文窗口仍可用于测试和兼容模型，固定上限按窗口比例缩放：
+模型能力和策略参数来自软件 YAML。为了让小上下文窗口仍可用于测试和兼容模型，下一次用户输入预留的固定上限按窗口比例缩放：
 
 ```ts
-reservedOutputTokens = Math.min(384_000, Math.floor(contextWindowTokens * 0.384));
+reservedOutputTokens = modelCapabilities.maxOutputTokens;
 nextUserInputReserveTokens = Math.min(
-  32_768,
-  Math.floor(contextWindowTokens * 0.05),
+  contextConfig.nextUserInputReserveTokens,
+  Math.floor(contextWindowTokens * contextConfig.nextUserInputReserveRatio),
 );
 ```
 
-因此 1M 窗口使用完整的 384K/32,768 预留；小窗口不会因预留量本身超过窗口而失效。
+因此当前 DeepSeek V4 Flash 的 1M/384K 能力配置使用 384K 输出预留；发行策略产生 32,768 的下一次输入预留。`reservedOutputTokens` 不再按照窗口比例猜测。未来接入模型 Tokenizer 后，`nextUserInputReserveTokens` 将改为完全按上下文窗口比例计算，固定上限会被删除。
 
 完整回合保存后，如果预算比率 `R` 达到软压缩比例 75%，标记 `softLimitReached` 并立即启动压缩。如果 `R` 达到硬阻塞比例 90%，标记 `hardLimitReached`；此时如果压缩失败，不允许继续提交新消息。
 
@@ -326,10 +326,15 @@ const compactionModelOptions = {
 
 ```ts
 const summaryTargetTokens = Math.max(
-  512,
-  Math.min(8_000, Math.floor(contextWindowTokens * 0.01)),
+  compactionConfig.summaryTargetMinTokens,
+  Math.min(
+    compactionConfig.summaryTargetMaxTokens,
+    Math.floor(contextWindowTokens * compactionConfig.summaryTargetRatio),
+  ),
 );
 ```
+
+分段摘要上限、分段 Payload 目标比例、语义切分搜索比例和压缩结果本地安全长度也来自 `agent.compaction` 软件配置。Temperature 仍是压缩模型调用的 Provider 语义，不进入当前公共 YAML。
 
 ### 5.2 正常累计压缩
 

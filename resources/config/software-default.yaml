@@ -1,0 +1,60 @@
+schemaVersion: 1
+
+llm:
+  selectedProvider: openai-compatible
+  selectedModel: null
+
+  providers:
+    openai-compatible:
+      displayName: OpenAI-compatible
+      baseUrl: https://api.openai.com/v1
+      models:
+        deepseek-v4-flash:
+          displayName: DeepSeek V4 Flash
+          contextWindowTokens: 1000000
+          maxOutputTokens: 384000
+
+    ollama:
+      displayName: Ollama
+      baseUrl: http://127.0.0.1:11434
+      models: {}
+
+  timeouts:
+    connectionMs: 60000
+    streamIdleMs: 120000
+    overallMs: 1200000
+
+context:
+  # TODO: Tokenizer 适配完成后，删除固定预留并只按上下文窗口比例计算。
+  nextUserInputReserveTokens: 32768
+  nextUserInputReserveRatio: 0.05
+  safetyMarginRatio: 0.05
+  softCompactionRatio: 0.75
+  hardCompactionRatio: 0.9
+
+agent:
+  maxToolRounds: 8
+  compaction:
+    summaryTargetRatio: 0.01
+    summaryTargetMinTokens: 512
+    summaryTargetMaxTokens: 8000
+    segmentSummaryMaxTokens: 2000
+    segmentPayloadTargetRatio: 0.8
+    splitSearchWindowRatio: 0.6
+    resultMinLimitTokens: 2048
+    resultMaxLimitTokens: 32000
+    resultTargetMultiplier: 4
+
+rag:
+  chunking:
+    maxChunkChars: 800
+    splitSearchWindowRatio: 0.75
+
+materials:
+  maxImportBytes: 10485760
+
+database:
+  busyTimeoutMs: 5000
+
+debug:
+  enabled: false

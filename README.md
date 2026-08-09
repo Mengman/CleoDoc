@@ -52,7 +52,7 @@ my-novel.cleo/
 PowerShell 当前窗口中设置 Key（CLI 不会保存它）：
 
 ```powershell
-$env:OPENAI_API_KEY="你的 API Key"
+$env:CLEODOC_API_KEY="你的 API Key"
 $env:CLEODOC_MODEL="你要使用的模型 ID"
 ```
 
@@ -66,7 +66,7 @@ $env:OPENAI_BASE_URL="https://your-provider.example/v1"
 
 ```powershell
 $env:OPENAI_BASE_URL="https://api.deepseek.com"
-$env:OPENAI_API_KEY="你的 DeepSeek API Key"
+$env:CLEODOC_API_KEY="你的 DeepSeek API Key"
 $env:CLEODOC_MODEL="deepseek-chat"
 ```
 
@@ -107,7 +107,7 @@ npm run cleo -- chat
 
 进入交互式聊天时会显示最近 5 条记录。输入 `/resume 1` 可以恢复列表中的第 1 条；输入 `/history` 会打开更多历史记录，在真实终端中使用上下键选择、按 Enter 恢复、按 `q` 返回聊天。使用 `/new` 开始新对话。
 
-长对话达到默认 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。模型上下文窗口默认 1,000,000 Token，并预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量；因此约在当前 Payload 392K Token 时自动压缩，在 477K Token 时阻止继续提交。可通过 `--context-window-tokens` 或 `CLEODOC_MODEL_CONTEXT_TOKENS` 明确覆盖上下文窗口，小窗口下固定预留会按比例缩放。
+长对话达到发行配置的 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。上下文窗口和最大输出长度来自当前 Provider + Model 能力配置；以 1M/384K 模型为例，发行策略预留 32,768 Token 下一次用户输入和 5% 安全余量，约在当前 Payload 392K Token 时自动压缩，在 477K Token 时阻止继续提交。未知模型可用 `--context-window-tokens` 与 `--max-output-tokens` 临时提供能力信息。
 
 项目指令以 SQLite Revision 为唯一事实源，不读取作品项目目录中的 `AGENTS.md`。使用 `/instructions` 查看当前指令，`/instructions history` 查看历史，`/instructions restore <revision>` 经确认后恢复旧内容。模型也可以通过受控 Tool 读取、追加、局部替换或全量替换项目指令；写入必须经过用户批准。
 
@@ -169,12 +169,18 @@ npm run cleo -- material remove <material-id>
 
 导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示本次识别的输入编码。导入成功后，开发期可检查的临时 CDM XML 写入 `.cleo/derived/documents/<资料 ID>.cdm.xml`；它是可删除、可重建的派生物，不是资料事实源。SQLite 中的 `sources` 表是可重建投影；打开资料服务时会根据元数据校准。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。
 
+## 软件配置
+
+随软件发行的默认配置位于 `resources/config/software-default.yaml`。首次运行相关命令时，CleoDoc 会在操作系统配置目录创建最小 `config.yaml`；用户可在其中覆盖公开参数，`cleo config` 会显示实际路径。错误的用户字段会单项回退并显示警告。最近打开项目另存于 `state.yaml`，不与用户设置混合。
+
+Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需选择 Provider、设置统一的 `CLEODOC_API_KEY`，再选择模型。完整说明见[软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)。
+
 ## 安全约束
 
 - API Key 仅从环境变量读取，不写入配置、项目、日志或 Git。
 - 生成结果只有在用户执行保存命令，或在交互模式明确批准 LLM 的 `write_project_document` Tool Call 后，才写入正文。
 - 所有正文路径限定在项目的 `manuscript/` 内，并拒绝路径穿越和符号链接。
-- LLM 只能通过受控工具列出、分段读取和写入当前项目文档；工具参数经过 Schema 校验，循环最多执行 8 轮。
+- LLM 只能通过受控工具列出、分段读取和写入当前项目文档；工具参数经过 Schema 校验，循环轮数使用软件配置。
 - 文档使用临时文件、同步和原子替换保存；SQLite 失败不会覆盖已保存 Markdown。
 - 资料原文和元数据是事实源；SQLite 资料投影可以从项目文件重建。
 

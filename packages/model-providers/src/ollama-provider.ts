@@ -11,11 +11,9 @@ import { AppError } from "../../contracts/src/index.js";
 import {
   mapProviderFailure,
   ProviderStreamTimeoutController,
-  resolveProviderStreamTimeouts,
   throwForProviderResponse,
   withTimeout,
   type ProviderStreamTimeoutOptions,
-  type ProviderStreamTimeoutOverrides,
 } from "./http-errors.js";
 import { emitProtocolEvent, redactHeaders } from "./protocol-debug.js";
 
@@ -50,8 +48,8 @@ const chatChunkSchema = z
   })
   .passthrough();
 
-export interface OllamaProviderOptions extends ProviderStreamTimeoutOverrides {
-  baseUrl?: string;
+export interface OllamaProviderOptions extends ProviderStreamTimeoutOptions {
+  baseUrl: string;
   fetchImplementation?: typeof fetch;
 }
 
@@ -62,9 +60,13 @@ export class OllamaProvider implements ModelProvider {
   private readonly streamTimeouts: ProviderStreamTimeoutOptions;
   private readonly fetchImplementation: typeof fetch;
 
-  constructor(options: OllamaProviderOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "");
-    this.streamTimeouts = resolveProviderStreamTimeouts(options);
+  constructor(options: OllamaProviderOptions) {
+    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.streamTimeouts = {
+      connectionTimeoutMs: options.connectionTimeoutMs,
+      streamIdleTimeoutMs: options.streamIdleTimeoutMs,
+      overallTimeoutMs: options.overallTimeoutMs,
+    };
     this.fetchImplementation = options.fetchImplementation ?? fetch;
   }
 

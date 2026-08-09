@@ -8,35 +8,6 @@ export interface ProviderStreamTimeoutOptions {
   overallTimeoutMs: number;
 }
 
-export interface ProviderStreamTimeoutOverrides {
-  connectionTimeoutMs?: number;
-  streamIdleTimeoutMs?: number;
-  overallTimeoutMs?: number;
-  /** @deprecated Use overallTimeoutMs. */
-  timeoutMs?: number;
-}
-
-export const DEFAULT_PROVIDER_STREAM_TIMEOUTS: ProviderStreamTimeoutOptions = {
-  connectionTimeoutMs: 60_000,
-  streamIdleTimeoutMs: 120_000,
-  overallTimeoutMs: 20 * 60_000,
-};
-
-export function resolveProviderStreamTimeouts(
-  overrides: ProviderStreamTimeoutOverrides,
-): ProviderStreamTimeoutOptions {
-  return {
-    connectionTimeoutMs:
-      overrides.connectionTimeoutMs ?? DEFAULT_PROVIDER_STREAM_TIMEOUTS.connectionTimeoutMs,
-    streamIdleTimeoutMs:
-      overrides.streamIdleTimeoutMs ?? DEFAULT_PROVIDER_STREAM_TIMEOUTS.streamIdleTimeoutMs,
-    overallTimeoutMs:
-      overrides.overallTimeoutMs ??
-      overrides.timeoutMs ??
-      DEFAULT_PROVIDER_STREAM_TIMEOUTS.overallTimeoutMs,
-  };
-}
-
 export async function throwForProviderResponse(
   response: Response,
   onResponseBody?: (body: string) => void,

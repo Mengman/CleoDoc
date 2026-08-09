@@ -1,0 +1,96 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { SoftwareConfigService } from "./software-config-service.js";
+
+const temporaryDirectories: string[] = [];
+const defaultConfigPath = path.resolve("resources/config/software-default.yaml");
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
+
+describe("SoftwareConfigService", () => {
+  it("loads packaged YAML when the user file is absent", async () => {
+    const home = await createHome();
+    const result = await createService(home).load();
+
+    expect(result.warnings).toEqual([]);
+    expect(result.config.llm.timeouts.connectionMs).toBe(60_000);
+    expect(result.config.rag.chunking).toEqual({
+      maxChunkChars: 800,
+      splitSearchWindowRatio: 0.75,
+    });
+    expect(await readFile(path.join(home, "config.yaml"), "utf8")).toContain("schemaVersion: 1");
+  });
+
+  it("overrides valid leaves and falls invalid or unknown leaves back to defaults", async () => {
+    const home = await createHome();
+    await writeFile(
+      path.join(home, "config.yaml"),
+      `llm:
+  selectedProvider: ollama
+  timeouts:
+    connectionMs: 90000
+context:
+  softCompactionRatio: invalid
+debug:
+  enabled: true
+unknownSetting: true
+`,
+      "utf8",
+    );
+
+    const result = await createService(home).load();
+
+    expect(result.config.llm.selectedProvider).toBe("ollama");
+    expect(result.config.llm.timeouts.connectionMs).toBe(90_000);
+    expect(result.config.context.softCompactionRatio).toBe(0.75);
+    expect(result.config.debug.enabled).toBe(true);
+    expect(result.warnings.map((warning) => warning.path)).toEqual(
+      expect.arrayContaining(["context.softCompactionRatio", "unknownSetting"]),
+    );
+  });
+
+  it("repairs invalid relationships after applying otherwise valid leaves", async () => {
+    const home = await createHome();
+    await writeFile(
+      path.join(home, "config.yaml"),
+      `context:
+  softCompactionRatio: 0.95
+  hardCompactionRatio: 0.9
+agent:
+  compaction:
+    summaryTargetMinTokens: 9000
+`,
+      "utf8",
+    );
+
+    const result = await createService(home).load();
+
+    expect(result.config.context.softCompactionRatio).toBe(0.75);
+    expect(result.config.context.hardCompactionRatio).toBe(0.9);
+    expect(result.config.agent.compaction.summaryTargetMinTokens).toBe(512);
+  });
+});
+
+async function createHome(): Promise<string> {
+  const directory = await mkdtemp(path.join(tmpdir(), "cleodoc-config-"));
+  temporaryDirectories.push(directory);
+  await mkdir(directory, { recursive: true });
+  return directory;
+}
+
+function createService(home: string): SoftwareConfigService {
+  return new SoftwareConfigService({
+    environment: { CLEODOC_HOME: home },
+    defaultConfigPath,
+  });
+}

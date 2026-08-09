@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { createContextBudgetPolicy, DEFAULT_CONTEXT_WINDOW_TOKENS } from "./context-budget.js";
+import { createContextBudgetPolicy } from "./context-budget.js";
+
+const settings = {
+  nextUserInputReserveTokens: 32_768,
+  nextUserInputReserveRatio: 0.05,
+  safetyMarginRatio: 0.05,
+  softCompactionRatio: 0.75,
+  hardCompactionRatio: 0.9,
+};
 
 describe("context budget defaults", () => {
-  it("uses a one-million-token context window by default", () => {
-    expect(DEFAULT_CONTEXT_WINDOW_TOKENS).toBe(1_000_000);
-    expect(createContextBudgetPolicy()).toMatchObject({
+  it("uses the injected model capabilities and context settings", () => {
+    expect(
+      createContextBudgetPolicy(
+        { contextWindowTokens: 1_000_000, maxOutputTokens: 384_000 },
+        settings,
+      ),
+    ).toMatchObject({
       contextWindowTokens: 1_000_000,
       reservedOutputTokens: 384_000,
       nextUserInputReserveTokens: 32_768,
@@ -16,7 +28,10 @@ describe("context budget defaults", () => {
   });
 
   it("derives the reviewed soft and hard thresholds for a one-million-token model", () => {
-    const policy = createContextBudgetPolicy();
+    const policy = createContextBudgetPolicy(
+      { contextWindowTokens: 1_000_000, maxOutputTokens: 384_000 },
+      settings,
+    );
     const effectiveLimit =
       policy.contextWindowTokens -
       policy.reservedOutputTokens -
@@ -34,7 +49,9 @@ describe("context budget defaults", () => {
   });
 
   it("scales fixed reserves for explicitly configured small context windows", () => {
-    expect(createContextBudgetPolicy(20_000)).toEqual({
+    expect(
+      createContextBudgetPolicy({ contextWindowTokens: 20_000, maxOutputTokens: 7_680 }, settings),
+    ).toEqual({
       contextWindowTokens: 20_000,
       reservedOutputTokens: 7_680,
       nextUserInputReserveTokens: 1_000,

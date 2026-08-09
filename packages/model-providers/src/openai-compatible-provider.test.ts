@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { ModelProtocolEvent } from "../../contracts/src/index.js";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider.js";
 
+const TEST_PROVIDER_CONFIG = {
+  apiKey: "test-key",
+  connectionTimeoutMs: 60_000,
+  streamIdleTimeoutMs: 120_000,
+  overallTimeoutMs: 1_200_000,
+} as const;
+
 describe("OpenAICompatibleProvider", () => {
   it("validates configuration and parses streamed text and usage", async () => {
     const fetchImplementation: typeof fetch = async (input) => {
@@ -19,6 +26,7 @@ describe("OpenAICompatibleProvider", () => {
       return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
     };
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       fetchImplementation,
     });
@@ -45,6 +53,7 @@ describe("OpenAICompatibleProvider", () => {
 
   it("classifies authentication errors without exposing credentials", async () => {
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       apiKey: "secret-value",
       baseUrl: "https://example.test/v1",
       fetchImplementation: async () => new Response("unauthorized", { status: 401 }),
@@ -58,6 +67,7 @@ describe("OpenAICompatibleProvider", () => {
   it("emits the raw request and streamed response while redacting credentials", async () => {
     const protocolEvents: ModelProtocolEvent[] = [];
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       apiKey: "secret-value",
       baseUrl: "https://example.test/v1",
       fetchImplementation: async () =>
@@ -124,6 +134,7 @@ describe("OpenAICompatibleProvider", () => {
 
   it("reports JSON parsing details for an invalid streamed response", async () => {
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       fetchImplementation: async () =>
         new Response("data: {not-json}\n\ndata: [DONE]\n\n", {
@@ -151,6 +162,7 @@ describe("OpenAICompatibleProvider", () => {
         .join("") + "data: [DONE]\n\n";
     const networkChunks = [sse.slice(0, 19), sse.slice(19, 71), sse.slice(71, 139), sse.slice(139)];
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       fetchImplementation: async () => new Response(streamFromStrings(networkChunks)),
     });
@@ -166,6 +178,7 @@ describe("OpenAICompatibleProvider", () => {
   it("parses tool calls and serializes tool-call history for the next round", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       fetchImplementation: async (_input, init) => {
         requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -241,6 +254,7 @@ describe("OpenAICompatibleProvider", () => {
 
   it("does not treat the connection timeout as a total streaming deadline", async () => {
     const provider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       connectionTimeoutMs: 20,
       streamIdleTimeoutMs: 70,
@@ -264,6 +278,7 @@ describe("OpenAICompatibleProvider", () => {
 
   it("distinguishes connection, stream-idle and overall generation timeouts", async () => {
     const connectionProvider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       connectionTimeoutMs: 25,
       streamIdleTimeoutMs: 200,
@@ -276,6 +291,7 @@ describe("OpenAICompatibleProvider", () => {
     });
 
     const idleProvider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       connectionTimeoutMs: 100,
       streamIdleTimeoutMs: 30,
@@ -293,6 +309,7 @@ describe("OpenAICompatibleProvider", () => {
     });
 
     const overallProvider = new OpenAICompatibleProvider({
+      ...TEST_PROVIDER_CONFIG,
       baseUrl: "https://example.test/v1",
       connectionTimeoutMs: 100,
       streamIdleTimeoutMs: 50,

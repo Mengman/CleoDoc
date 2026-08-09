@@ -12,11 +12,9 @@ import { AppError } from "../../contracts/src/index.js";
 import {
   mapProviderFailure,
   ProviderStreamTimeoutController,
-  resolveProviderStreamTimeouts,
   throwForProviderResponse,
   withTimeout,
   type ProviderStreamTimeoutOptions,
-  type ProviderStreamTimeoutOverrides,
 } from "./http-errors.js";
 import { emitProtocolEvent, redactHeaders } from "./protocol-debug.js";
 
@@ -73,9 +71,9 @@ const streamChunkSchema = z
   })
   .passthrough();
 
-export interface OpenAICompatibleProviderOptions extends ProviderStreamTimeoutOverrides {
+export interface OpenAICompatibleProviderOptions extends ProviderStreamTimeoutOptions {
   apiKey?: string;
-  baseUrl?: string;
+  baseUrl: string;
   fetchImplementation?: typeof fetch;
 }
 
@@ -87,13 +85,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
   private readonly streamTimeouts: ProviderStreamTimeoutOptions;
   private readonly fetchImplementation: typeof fetch;
 
-  constructor(options: OpenAICompatibleProviderOptions = {}) {
+  constructor(options: OpenAICompatibleProviderOptions) {
     this.apiKey = options.apiKey;
-    this.baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-    this.streamTimeouts = resolveProviderStreamTimeouts(options);
+    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.streamTimeouts = {
+      connectionTimeoutMs: options.connectionTimeoutMs,
+      streamIdleTimeoutMs: options.streamIdleTimeoutMs,
+      overallTimeoutMs: options.overallTimeoutMs,
+    };
     this.fetchImplementation = options.fetchImplementation ?? fetch;
-    if (this.baseUrl === "https://api.openai.com/v1" && !this.apiKey) {
-      throw new AppError("PROVIDER_AUTH_ERROR", "未设置 OPENAI_API_KEY。");
+    if (!this.apiKey) {
+      throw new AppError("PROVIDER_AUTH_ERROR", "未设置 CLEODOC_API_KEY。");
     }
   }
 

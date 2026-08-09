@@ -9,6 +9,7 @@
 - [CleoDoc Document Model（CDM）设计](./docs/CDM_DOCUMENT_FORMAT_DESIGN.md)
 - [资料解析与切片设计](./docs/DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)
 - [本地 RAG 与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
+- [软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)
 
 修改架构、版本范围或数据语义时，必须同步更新相关文档，不能只修改代码或本文件。发现文档冲突时，不要自行扩大范围；先遵循已经明确的版本边界，并向用户说明冲突。
 
@@ -70,6 +71,7 @@ GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中�
 apps/cli             v0.1 命令入口
 apps/desktop         v0.2 Electron 应用
 packages/contracts   公共类型、Schema、错误码
+packages/config      软件 YAML、用户覆盖、应用状态和配置路径
 packages/cdm         CDM 协议、严格 XML、Schema、Node ID 和遍历
 packages/document-ingestion TXT/Markdown、临时 CDM、结构切片和 ChunkDraft
 packages/project     项目格式和安全文件读写

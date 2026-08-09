@@ -13,12 +13,19 @@ export class ProjectDatabase {
   private writeTail: Promise<void> = Promise.resolve();
   private closed = false;
 
-  private constructor(filePath: string, database: DatabaseSync) {
+  private constructor(
+    filePath: string,
+    database: DatabaseSync,
+    private readonly busyTimeoutMs: number,
+  ) {
     this.filePath = filePath;
     this.database = database;
   }
 
-  static async open(projectRoot: string): Promise<ProjectDatabase> {
+  static async open(
+    projectRoot: string,
+    options: { busyTimeoutMs: number },
+  ): Promise<ProjectDatabase> {
     const stateDirectory = path.join(projectRoot, ".cleo");
     await mkdir(stateDirectory, { recursive: true });
     const filePath = path.join(stateDirectory, "project.sqlite");
@@ -26,7 +33,7 @@ export class ProjectDatabase {
     let database: DatabaseSync | undefined;
     try {
       database = new DatabaseSync(filePath);
-      const instance = new ProjectDatabase(filePath, database);
+      const instance = new ProjectDatabase(filePath, database, options.busyTimeoutMs);
       instance.configure();
       instance.initializeSchema();
       return instance;
@@ -113,7 +120,7 @@ export class ProjectDatabase {
     this.database.exec("PRAGMA foreign_keys = ON");
     this.database.exec("PRAGMA journal_mode = WAL");
     this.database.exec("PRAGMA synchronous = FULL");
-    this.database.exec("PRAGMA busy_timeout = 5000");
+    this.database.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`);
   }
 
   private initializeSchema(): void {

@@ -31,6 +31,7 @@ v0.1 的核心闭环是：
 | 步骤 | 状态 | 已交付 |
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
+| 1.5 软件 YAML 配置 | 已完成 | 发行默认配置、操作系统用户配置、逐项回退警告、独立 `state.yaml`、Provider/模型能力与运行参数注入 |
 | 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v8 基线、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |

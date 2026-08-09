@@ -16,6 +16,8 @@ export interface OpenProject {
 }
 
 export class ProjectService {
+  constructor(private readonly databaseOptions: { busyTimeoutMs: number }) {}
+
   async create(directory: string, name?: string): Promise<OpenProject> {
     const root = path.resolve(directory);
     await mkdir(root, { recursive: true });
@@ -52,7 +54,7 @@ export class ProjectService {
     ]);
     await writeJsonAtomic(manifestPath, manifest);
 
-    const database = await ProjectDatabase.open(canonicalRoot);
+    const database = await ProjectDatabase.open(canonicalRoot, this.databaseOptions);
     await database.close();
     return { root: canonicalRoot, manifest };
   }
@@ -81,7 +83,7 @@ export class ProjectService {
 
   async status(directory: string): Promise<ProjectStatus> {
     const project = await this.open(directory);
-    const database = await ProjectDatabase.open(project.root);
+    const database = await ProjectDatabase.open(project.root, this.databaseOptions);
     const healthy = database.quickCheck();
     await database.close();
     const documents = await new DocumentService(project.root).list();

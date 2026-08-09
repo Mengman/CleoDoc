@@ -1,6 +1,7 @@
 import type {
   CompactionEvent,
   ConversationSession,
+  ContextBudgetPolicy,
   ModelProtocolDebugHandler,
   ModelProvider,
   ModelUsage,
@@ -13,13 +14,22 @@ import type {
   ModelCallRepository,
   SessionRepository,
 } from "../../database/src/index.js";
-import { createContextBudgetPolicy, estimateTokens } from "./context-budget.js";
+import { estimateTokens } from "./context-budget.js";
 import { emitLlmDebugEvent, type LlmDebugHandler, type LlmDebugOperation } from "./debug-events.js";
 
 export const COMPACTION_PROMPT_VERSION = "session-compaction-v7";
 
-const SEGMENT_PAYLOAD_TARGET_RATIO = 0.8;
-const SEMANTIC_SPLIT_SEARCH_RATIO = 0.6;
+export interface CompactionSettings {
+  summaryTargetRatio: number;
+  summaryTargetMinTokens: number;
+  summaryTargetMaxTokens: number;
+  segmentSummaryMaxTokens: number;
+  segmentPayloadTargetRatio: number;
+  splitSearchWindowRatio: number;
+  resultMinLimitTokens: number;
+  resultMaxLimitTokens: number;
+  resultTargetMultiplier: number;
+}
 
 const COMPACTION_SYSTEM_PROMPT = `你是 CleoDoc 的会话上下文压缩器，不是小说主笔，也不是用户对话参与者。
 你的任务是把一个已经完成的创作会话压缩为可供后续 Session 继续工作的 Markdown 会话摘要。
@@ -56,7 +66,7 @@ export interface CompactInput {
   session: ConversationSession;
   provider: ModelProvider;
   model: string;
-  contextWindowTokens: number;
+  contextBudgetPolicy: ContextBudgetPolicy;
   trigger: SessionTrigger;
   signal: AbortSignal;
   onEvent?: (event: CompactionEvent) => void;
@@ -81,6 +91,7 @@ export class CompactionService {
   constructor(
     private readonly sessions: SessionRepository,
     private readonly modelCalls: ModelCallRepository,
+    private readonly settings: CompactionSettings,
     private readonly projectToolEvents: ToolEventProjector = genericToolEventsForCompaction,
   ) {}
 
@@ -94,12 +105,15 @@ export class CompactionService {
 
     const previous = this.sessions.getInheritedSummary(input.session);
     const previousSummary = previous?.summary ?? null;
+    const budgetPolicy = input.contextBudgetPolicy;
     const targetTokens = Math.max(
-      512,
-      Math.min(8_000, Math.floor(input.contextWindowTokens * 0.01)),
+      this.settings.summaryTargetMinTokens,
+      Math.min(
+        this.settings.summaryTargetMaxTokens,
+        Math.floor(budgetPolicy.contextWindowTokens * this.settings.summaryTargetRatio),
+      ),
     );
-    const budgetPolicy = createContextBudgetPolicy(input.contextWindowTokens);
-    const segmentTargetTokens = Math.min(targetTokens, 2_000);
+    const segmentTargetTokens = Math.min(targetTokens, this.settings.segmentSummaryMaxTokens);
     const jobId = await this.sessions.beginCompaction({
       session: input.session,
       trigger: input.trigger,
@@ -110,13 +124,13 @@ export class CompactionService {
       previousSummaryId: previous?.id ?? null,
       orchestrationConfig: {
         algorithmVersion: "session-compaction-v8-turn-segmentation",
-        contextWindowTokens: input.contextWindowTokens,
+        contextWindowTokens: budgetPolicy.contextWindowTokens,
         reservedOutputTokens: budgetPolicy.reservedOutputTokens,
         nextUserInputReserveTokens: budgetPolicy.nextUserInputReserveTokens,
         safetyMarginRatio: budgetPolicy.safetyMarginRatio,
         summaryTargetTokens: targetTokens,
         segmentTargetTokens,
-        segmentPayloadTargetRatio: SEGMENT_PAYLOAD_TARGET_RATIO,
+        segmentPayloadTargetRatio: this.settings.segmentPayloadTargetRatio,
       },
     });
     emitCompactionEvent(input.onEvent, {
@@ -233,7 +247,7 @@ export class CompactionService {
           emitCompactionEvent(input.onEvent, { type: "compaction-validating", jobId });
         }
 
-        return validateSummary(collected, summaryTargetTokens);
+        return validateSummary(collected, summaryTargetTokens, this.settings);
       } catch (error) {
         const appError = asAppError(error);
         if (!callFinished) {
@@ -261,9 +275,9 @@ export class CompactionService {
     try {
       const payload = buildPayload(targetTokens, previousSummary, messages, this.projectToolEvents);
       const maximumPayloadTokens = Math.floor(
-        input.contextWindowTokens -
+        budgetPolicy.contextWindowTokens -
           budgetPolicy.reservedOutputTokens -
-          Math.floor(input.contextWindowTokens * budgetPolicy.safetyMarginRatio) -
+          Math.floor(budgetPolicy.contextWindowTokens * budgetPolicy.safetyMarginRatio) -
           estimateTokens(COMPACTION_SYSTEM_PROMPT),
       );
       if (maximumPayloadTokens < 1) {
@@ -281,6 +295,8 @@ export class CompactionService {
           messages,
           maximumPayloadTokens,
           segmentTargetTokens,
+          this.settings.segmentPayloadTargetRatio,
+          this.settings.splitSearchWindowRatio,
           this.projectToolEvents,
         );
         const segmentSummaries: string[] = [];
@@ -370,6 +386,8 @@ export function segmentMessagesForCompaction(
   messages: readonly StoredMessage[],
   maximumPayloadTokens: number,
   segmentTargetTokens: number,
+  segmentPayloadTargetRatio: number,
+  splitSearchWindowRatio: number,
   projectToolEvents: ToolEventProjector = genericToolEventsForCompaction,
 ): StoredMessage[][] {
   if (!Number.isFinite(maximumPayloadTokens) || maximumPayloadTokens < 1) {
@@ -380,10 +398,16 @@ export function segmentMessagesForCompaction(
   }
 
   const hardLimit = Math.floor(maximumPayloadTokens);
-  const targetLimit = Math.max(1, Math.floor(hardLimit * SEGMENT_PAYLOAD_TARGET_RATIO));
+  const targetLimit = Math.max(1, Math.floor(hardLimit * segmentPayloadTargetRatio));
   const turns = groupMessagesByUserTurn(messages);
   const units = turns.flatMap((turn) =>
-    splitOversizedTurn(turn, hardLimit, segmentTargetTokens, projectToolEvents),
+    splitOversizedTurn(
+      turn,
+      hardLimit,
+      segmentTargetTokens,
+      projectToolEvents,
+      splitSearchWindowRatio,
+    ),
   );
   const segments: StoredMessage[][] = [];
   let current: StoredMessage[] = [];
@@ -446,6 +470,7 @@ function splitOversizedTurn(
   hardLimit: number,
   segmentTargetTokens: number,
   projectToolEvents: ToolEventProjector,
+  splitSearchWindowRatio: number,
 ): StoredMessage[][] {
   if (estimateSegmentPayloadTokens(turn, segmentTargetTokens, projectToolEvents) <= hardLimit) {
     return [[...turn]];
@@ -459,7 +484,13 @@ function splitOversizedTurn(
     const first = unit[0];
     if (first === undefined) return [];
     if (unit.length === 1 && isSplittableTextMessage(first)) {
-      return splitTextMessage(first, hardLimit, segmentTargetTokens, projectToolEvents);
+      return splitTextMessage(
+        first,
+        hardLimit,
+        segmentTargetTokens,
+        projectToolEvents,
+        splitSearchWindowRatio,
+      );
     }
 
     if (first.role === "assistant" && first.toolCalls !== undefined) {
@@ -480,6 +511,7 @@ function splitOversizedTurn(
               hardLimit,
               segmentTargetTokens,
               projectToolEvents,
+              splitSearchWindowRatio,
             );
       return [...contentUnits, toolProtocolUnit];
     }
@@ -528,6 +560,7 @@ function splitTextMessage(
   hardLimit: number,
   segmentTargetTokens: number,
   projectToolEvents: ToolEventProjector,
+  splitSearchWindowRatio: number,
 ): StoredMessage[][] {
   if (message.content === "") {
     throw new AppError("PROVIDER_CONTEXT_LIMIT", "压缩模型上下文过小，无法容纳分段 Prompt。");
@@ -565,7 +598,13 @@ function splitTextMessage(
       );
     }
 
-    const splitIndex = findSemanticSplitIndex(message.content, boundaries, startIndex, best);
+    const splitIndex = findSemanticSplitIndex(
+      message.content,
+      boundaries,
+      startIndex,
+      best,
+      splitSearchWindowRatio,
+    );
     result.push([
       {
         ...message,
@@ -593,10 +632,11 @@ function findSemanticSplitIndex(
   boundaries: readonly number[],
   startIndex: number,
   maximumIndex: number,
+  splitSearchWindowRatio: number,
 ): number {
   if (maximumIndex >= boundaries.length - 1) return maximumIndex;
   const minimumIndex =
-    startIndex + Math.floor((maximumIndex - startIndex) * SEMANTIC_SPLIT_SEARCH_RATIO);
+    startIndex + Math.floor((maximumIndex - startIndex) * splitSearchWindowRatio);
 
   for (let index = maximumIndex; index > minimumIndex; index -= 1) {
     const character = content.slice(boundaries[index - 1], boundaries[index]);
@@ -698,7 +738,11 @@ async function collect(
   return { output, finishReason, toolCallCount };
 }
 
-function validateSummary(collected: CollectedSummary, summaryTargetTokens: number): string {
+function validateSummary(
+  collected: CollectedSummary,
+  summaryTargetTokens: number,
+  settings: CompactionSettings,
+): string {
   if (collected.toolCallCount > 0) {
     throw new AppError("COMPACTION_TOOL_CALL_NOT_ALLOWED", "压缩模型不得调用工具。", {
       details: { toolCallCount: collected.toolCallCount },
@@ -721,7 +765,10 @@ function validateSummary(collected: CollectedSummary, summaryTargetTokens: numbe
   }
 
   const summaryTokens = estimateTokens(summary);
-  const maximumSummaryTokens = Math.max(2_048, Math.min(32_000, summaryTargetTokens * 4));
+  const maximumSummaryTokens = Math.max(
+    settings.resultMinLimitTokens,
+    Math.min(settings.resultMaxLimitTokens, summaryTargetTokens * settings.resultTargetMultiplier),
+  );
   if (summaryTokens > maximumSummaryTokens) {
     throw new AppError("COMPACTION_SUMMARY_TOO_LARGE", "压缩结果超过本地安全长度限制。", {
       details: { summaryTokens, maximumSummaryTokens, summaryTargetTokens },

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ProjectDatabase } from "./project-database.js";
+import { TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 import { ProjectInstructionRepository } from "./project-instruction-repository.js";
 
 const temporaryDirectories: string[] = [];
@@ -21,7 +22,7 @@ describe("ProjectInstructionRepository", () => {
   it("creates complete revisions for set, append, replacement, and restore", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cleodoc-instructions-test-"));
     temporaryDirectories.push(root);
-    const database = await ProjectDatabase.open(root);
+    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     const repository = new ProjectInstructionRepository(database);
     try {
       expect(repository.getCurrent()).toBeNull();
@@ -47,7 +48,7 @@ describe("ProjectInstructionRepository", () => {
   it("rejects stale revisions without changing current content", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cleodoc-instructions-conflict-test-"));
     temporaryDirectories.push(root);
-    const database = await ProjectDatabase.open(root);
+    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     const repository = new ProjectInstructionRepository(database);
     try {
       const first = await repository.set("初始规则", 0);
