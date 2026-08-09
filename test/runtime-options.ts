@@ -26,12 +26,32 @@ export const TEST_CHAT_OPTIONS = {
   },
 } as const;
 
-export const TEST_MATERIAL_OPTIONS = {
-  database: TEST_DATABASE_OPTIONS,
-  maxImportBytes: 10 * 1024 * 1024,
-  chunking: {
-    maxChunkChars: 800,
-    splitSearchWindowRatio: 0.75,
-  },
-  languageDetection: { minBlockUnits: 50 },
-} as const;
+export function createTestMaterialOptions(
+  options: { maxInputTokens?: number; modelRevision?: string } = {},
+) {
+  const maxInputTokens = options.maxInputTokens ?? 800;
+  const modelRevision = options.modelRevision ?? "test-v1";
+  const tokenizerModel = (language: "zh" | "en") => ({
+    modelId: `test-${language}-tokenizer`,
+    modelRevision,
+    maxInputTokens,
+    async openTokenizer() {
+      return {
+        modelId: `test-${language}-tokenizer`,
+        modelRevision,
+        maxInputTokens,
+        countDocumentTokens: (content: string) => Array.from(content).length,
+        async dispose() {},
+      };
+    },
+  });
+  return {
+    database: TEST_DATABASE_OPTIONS,
+    maxImportBytes: 10 * 1024 * 1024,
+    chunking: { splitSearchWindowRatio: 0.75 },
+    languageDetection: { minBlockUnits: 50 },
+    tokenizerModels: { zh: tokenizerModel("zh"), en: tokenizerModel("en") },
+  };
+}
+
+export const TEST_MATERIAL_OPTIONS = createTestMaterialOptions();

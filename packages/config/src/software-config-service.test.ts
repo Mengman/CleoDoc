@@ -25,7 +25,6 @@ describe("SoftwareConfigService", () => {
     expect(result.warnings).toEqual([]);
     expect(result.config.llm.timeouts.connectionMs).toBe(60_000);
     expect(result.config.rag.chunking).toEqual({
-      maxChunkChars: 800,
       splitSearchWindowRatio: 0.75,
     });
     expect(result.config.rag.languageDetection.minBlockUnits).toBe(50);

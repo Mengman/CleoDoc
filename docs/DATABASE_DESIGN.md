@@ -222,7 +222,7 @@ UNIQUE(conversation_id, sequence)
 | `size` | INTEGER | NOT NULL、非负 | 资料正文 UTF-8 字节数 |
 | `parser_version` | TEXT | 可空 | 当前 Chunk 集合使用的解析器版本；尚未索引时为空 |
 | `chunker_version` | TEXT | 可空 | 当前 Chunk 集合使用的切片器版本 |
-| `chunking_config_json` | TEXT | 可空 | 当前 Chunk 集合使用的有效切片配置；用于发现配置变化 |
+| `chunking_config_json` | TEXT | 可空 | 当前 Chunk 集合使用的模型 ID、revision、Token 上限和切分比例；用于发现配置变化 |
 | `index_status` | TEXT | NOT NULL、CHECK | `pending`、`ready`、`stale` 或 `failed` |
 | `index_error_code` | TEXT | 可空 | 最近一次索引失败的稳定错误码 |
 | `indexed_at` | TEXT | 可空 | 当前 Chunk 集合完成切换的时间 |
@@ -586,7 +586,7 @@ Schema v9 已增加：
 |---|---|---|---|
 | `parser_version` | TEXT | 可空 | 最近一次成功生成当前 Chunk 集合的解析器版本；尚未索引时为空。 |
 | `chunker_version` | TEXT | 可空 | 最近一次成功生成当前 Chunk 集合的切片器版本。 |
-| `chunking_config_json` | TEXT | 可空 | 实际切片配置 JSON；与当前配置不同时索引转为 `stale`。 |
+| `chunking_config_json` | TEXT | 可空 | 实际模型 ID、revision、Token 上限和切分比例 JSON；任一项变化时索引转为 `stale`。 |
 | `index_status` | TEXT | NOT NULL | `pending`、`ready`、`stale`、`failed` 四种受控状态。 |
 | `index_error_code` | TEXT | 可空 | 最近一次失败的稳定错误码。 |
 | `indexed_at` | TEXT | 可空 | 当前 Chunk 集合完成切换的时间。 |

@@ -1,4 +1,5 @@
 import { DocumentIngestionError } from "./errors.js";
+import type { ChunkTokenizer } from "./chunk-types.js";
 import type { SourceRange } from "./types.js";
 
 export type TextSplitMode = "sentence" | "line" | "character";
@@ -31,22 +32,32 @@ export function countCharacters(content: string): number {
   return Array.from(content).length;
 }
 
-export function splitText(
+export function splitTextByTokens(
   content: string,
-  maxChunkChars: number,
+  tokenizer: ChunkTokenizer,
   splitSearchWindowRatio: number,
   mode: TextSplitMode,
 ): TextSlice[] {
   const characters = Array.from(content);
-  if (characters.length <= maxChunkChars) {
+  if (tokenizer.countDocumentTokens(content) <= tokenizer.maxInputTokens) {
     return [{ content, startCharacter: 0, endCharacter: characters.length }];
   }
 
   const slices: TextSlice[] = [];
   let start = 0;
-  while (characters.length - start > maxChunkChars) {
-    const minimum = start + Math.max(1, Math.floor(maxChunkChars * splitSearchWindowRatio));
-    const maximum = start + maxChunkChars;
+  while (start < characters.length) {
+    const remaining = characters.slice(start).join("");
+    if (tokenizer.countDocumentTokens(remaining) <= tokenizer.maxInputTokens) {
+      slices.push({
+        content: remaining,
+        startCharacter: start,
+        endCharacter: characters.length,
+      });
+      break;
+    }
+    const maximum = findMaximumTokenEnd(characters, start, tokenizer.maxInputTokens, tokenizer);
+    const targetTokens = Math.max(1, Math.floor(tokenizer.maxInputTokens * splitSearchWindowRatio));
+    const minimum = findMaximumTokenEnd(characters, start, targetTokens, tokenizer);
     const end = chooseBoundary(characters, minimum, maximum, mode);
     slices.push({
       content: characters.slice(start, end).join(""),
@@ -55,14 +66,30 @@ export function splitText(
     });
     start = end;
   }
-  if (start < characters.length) {
-    slices.push({
-      content: characters.slice(start).join(""),
-      startCharacter: start,
-      endCharacter: characters.length,
-    });
-  }
   return slices;
+}
+
+function findMaximumTokenEnd(
+  characters: readonly string[],
+  start: number,
+  tokenLimit: number,
+  tokenizer: ChunkTokenizer,
+): number {
+  let lower = start + 1;
+  let upper = characters.length;
+  if (tokenizer.countDocumentTokens(characters.slice(start, lower).join("")) > tokenLimit) {
+    throw new DocumentIngestionError(
+      "INVALID_CHUNK_OPTIONS",
+      `单个字符已超过模型 ${tokenizer.modelId} 的输入上限。`,
+    );
+  }
+  while (lower < upper) {
+    const candidate = Math.ceil((lower + upper) / 2);
+    const count = tokenizer.countDocumentTokens(characters.slice(start, candidate).join(""));
+    if (count <= tokenLimit) lower = candidate;
+    else upper = candidate - 1;
+  }
+  return lower;
 }
 
 export function locateTextSlices(

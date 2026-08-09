@@ -1,11 +1,12 @@
 import type { CdmChild, CdmElement } from "@cleodoc/cdm";
 
 import { DocumentIngestionError } from "./errors.js";
-import { countCharacters, locateTextSlices, splitText } from "./chunk-text.js";
+import { countCharacters, locateTextSlices, splitTextByTokens } from "./chunk-text.js";
 import type {
   ChunkDocumentInput,
   ChunkDocumentOptions,
   ChunkDraft,
+  ChunkTokenizer,
   ChunkedDocument,
 } from "./chunk-types.js";
 import type { SourceRange } from "./types.js";
@@ -20,9 +21,10 @@ interface Fragment extends SourceRange {
 
 export function chunkDocument(
   input: ChunkDocumentInput,
+  tokenizer: ChunkTokenizer,
   options: ChunkDocumentOptions,
 ): ChunkedDocument {
-  assertOptions(options);
+  assertOptions(options, tokenizer);
   if (Buffer.byteLength(input.sourceContent, "utf8") !== input.parsedDocument.sourceByteLength) {
     throw new DocumentIngestionError(
       "INVALID_SOURCE_POSITION",
@@ -51,19 +53,26 @@ export function chunkDocument(
     if (heading && !previousWasHeading) {
       section += 1;
     }
-    fragments.push(...splitElement(child, section, input.sourceContent, ranges, options));
+    fragments.push(
+      ...splitElement(child, section, input.sourceContent, ranges, tokenizer, options),
+    );
     previousWasHeading = heading;
     if (!heading) {
       previousWasHeading = false;
     }
   }
 
-  const chunks = mergeFragments(fragments, options.maxChunkChars);
+  const chunks = mergeFragments(fragments, tokenizer);
   return {
     chunkerVersion: DOCUMENT_CHUNKER_VERSION,
     parserVersion: input.parsedDocument.parserVersion,
     sourceByteLength: input.parsedDocument.sourceByteLength,
-    config: { ...options },
+    config: {
+      tokenizerModelId: tokenizer.modelId,
+      tokenizerRevision: tokenizer.modelRevision,
+      maxInputTokens: tokenizer.maxInputTokens,
+      ...options,
+    },
     chunks,
   };
 }
@@ -73,24 +82,28 @@ function splitElement(
   section: number,
   sourceContent: string,
   ranges: ReadonlyMap<string, SourceRange>,
+  tokenizer: ChunkTokenizer,
   options: ChunkDocumentOptions,
 ): Fragment[] {
   const whole = createFragment(element, section, ranges);
-  if (countCharacters(whole.content) <= options.maxChunkChars) {
-    return whole.content === "" ? [] : [whole];
+  if (whole.content.trim() === "") {
+    return [];
+  }
+  if (fits(whole.content, tokenizer)) {
+    return [whole];
   }
 
   if (element.name === "ol" || element.name === "ul") {
-    return splitChildren(element, ["li"], section, sourceContent, ranges, options);
+    return splitChildren(element, ["li"], section, sourceContent, ranges, tokenizer, options);
   }
   if (element.name === "blockquote") {
-    return splitChildren(element, undefined, section, sourceContent, ranges, options);
+    return splitChildren(element, undefined, section, sourceContent, ranges, tokenizer, options);
   }
   if (element.name === "table") {
-    return splitChildren(element, ["tr"], section, sourceContent, ranges, options);
+    return splitChildren(element, ["tr"], section, sourceContent, ranges, tokenizer, options);
   }
   const mode = element.name === "pre" ? "line" : isHeading(element.name) ? "character" : "sentence";
-  return splitFragment(whole, sourceContent, options, mode);
+  return splitFragment(whole, sourceContent, tokenizer, options, mode);
 }
 
 function splitChildren(
@@ -99,6 +112,7 @@ function splitChildren(
   section: number,
   sourceContent: string,
   ranges: ReadonlyMap<string, SourceRange>,
+  tokenizer: ChunkTokenizer,
   options: ChunkDocumentOptions,
 ): Fragment[] {
   const children = parent.children.filter(
@@ -111,12 +125,20 @@ function splitChildren(
     if (fragment.content === "") {
       continue;
     }
-    if (countCharacters(fragment.content) <= options.maxChunkChars) {
+    if (fits(fragment.content, tokenizer)) {
       result.push(fragment);
       continue;
     }
     if (parent.name === "table" && child.name === "tr") {
-      const cells = splitChildren(child, ["th", "td"], section, sourceContent, ranges, options);
+      const cells = splitChildren(
+        child,
+        ["th", "td"],
+        section,
+        sourceContent,
+        ranges,
+        tokenizer,
+        options,
+      );
       result.push(...cells);
       continue;
     }
@@ -124,6 +146,7 @@ function splitChildren(
       ...splitFragment(
         fragment,
         sourceContent,
+        tokenizer,
         options,
         parent.name === "pre" ? "line" : "sentence",
       ),
@@ -135,12 +158,13 @@ function splitChildren(
 function splitFragment(
   fragment: Fragment,
   sourceContent: string,
+  tokenizer: ChunkTokenizer,
   options: ChunkDocumentOptions,
   mode: "sentence" | "line" | "character",
 ): Fragment[] {
-  const slices = splitText(
+  const slices = splitTextByTokens(
     fragment.content,
-    options.maxChunkChars,
+    tokenizer,
     options.splitSearchWindowRatio,
     mode,
   );
@@ -154,14 +178,14 @@ function splitFragment(
   }));
 }
 
-function mergeFragments(fragments: readonly Fragment[], maxChunkChars: number): ChunkDraft[] {
+function mergeFragments(fragments: readonly Fragment[], tokenizer: ChunkTokenizer): ChunkDraft[] {
   const merged: Fragment[] = [];
   for (const fragment of fragments) {
     const previous = merged.at(-1);
     if (
       previous !== undefined &&
       previous.section === fragment.section &&
-      countCharacters(`${previous.content}\n\n${fragment.content}`) <= maxChunkChars
+      fits(`${previous.content}\n\n${fragment.content}`, tokenizer)
     ) {
       merged[merged.length - 1] = {
         content: `${previous.content}\n\n${fragment.content}`,
@@ -178,6 +202,7 @@ function mergeFragments(fragments: readonly Fragment[], maxChunkChars: number): 
     ordinal,
     content: fragment.content,
     characterCount: countCharacters(fragment.content),
+    tokenCount: tokenizer.countDocumentTokens(fragment.content),
     startOffset: fragment.startOffset,
     endOffset: fragment.endOffset,
     blockTypes: fragment.blockTypes,
@@ -246,10 +271,16 @@ function isHeading(name: string): boolean {
   return /^h[1-6]$/u.test(name);
 }
 
-function assertOptions(options: ChunkDocumentOptions): void {
+function fits(content: string, tokenizer: ChunkTokenizer): boolean {
+  return tokenizer.countDocumentTokens(content) <= tokenizer.maxInputTokens;
+}
+
+function assertOptions(options: ChunkDocumentOptions, tokenizer: ChunkTokenizer): void {
   if (
-    !Number.isInteger(options.maxChunkChars) ||
-    options.maxChunkChars < 1 ||
+    tokenizer.modelId.trim() === "" ||
+    tokenizer.modelRevision.trim() === "" ||
+    !Number.isInteger(tokenizer.maxInputTokens) ||
+    tokenizer.maxInputTokens < 1 ||
     !Number.isFinite(options.splitSearchWindowRatio) ||
     options.splitSearchWindowRatio <= 0 ||
     options.splitSearchWindowRatio > 1

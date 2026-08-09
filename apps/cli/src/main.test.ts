@@ -106,7 +106,7 @@ describe("CleoDoc CLI", () => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
-  }, 10_000);
+  }, 30_000);
 
   it("keeps interactive chat alive after timeout and exposes the persisted history", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-timeout-test-"));
@@ -184,7 +184,7 @@ describe("CleoDoc CLI", () => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
-  });
+  }, 30_000);
 
   it("confirms an LLM tool call before writing a summarized document", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-tool-test-"));
@@ -248,7 +248,7 @@ describe("CleoDoc CLI", () => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
-  });
+  }, 30_000);
 
   it("shows database-native project instructions and their history in interactive chat", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-instructions-test-"));
@@ -272,7 +272,7 @@ describe("CleoDoc CLI", () => {
     expect(chat.exitCode, JSON.stringify(chat)).toBe(0);
     expect(chat.stdout).toContain("当前项目尚未设置项目指令（Revision 0）");
     expect(chat.stdout).toContain("项目指令没有历史 Revision");
-  });
+  }, 30_000);
 
   it("manages file and pasted materials through the CLI without duplicating content", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-material-test-"));
@@ -362,7 +362,7 @@ describe("CleoDoc CLI", () => {
     await expect(runCli(["material", "show", materialId!], environment)).resolves.toMatchObject({
       exitCode: 3,
     });
-  }, 10_000);
+  }, 60_000);
 });
 
 async function runCli(

@@ -17,10 +17,15 @@ export interface ResolvedEmbeddingModelDefinition extends EmbeddingModelDefiniti
 
 export interface EmbeddingTokenizer {
   readonly modelId: string;
+  readonly modelRevision: string;
   readonly maxInputTokens: number;
 
   countDocumentTokens(content: string): number;
   countQueryTokens(query: string): number;
+}
+
+export interface DisposableEmbeddingTokenizer extends EmbeddingTokenizer {
+  dispose(): Promise<void>;
 }
 
 export interface EmbeddingResult {

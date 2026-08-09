@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–6d、7.1–7.2 已完成，正在实施本地 Embedding
+> 状态：实施中；v0.1 步骤 1–6d、7.1–7.3 已完成，正在实施本地 Embedding
 > 日期：2026-08-09
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -46,7 +46,7 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、模型配置、开发期检查命令和资料语言检测已完成；下一步改造 Token 切片 |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、资料语言检测和 Tokenizer 驱动切片已完成；下一步实现 Embedding 数据库结构与增量 Chunk Repository |
 | 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与 Schema v10 数据库投影。Worker、Token 切片、数据库向量持久化与语义检索尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与 Schema v10 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Worker、数据库向量持久化与语义检索尚未实现。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -425,7 +425,7 @@ cleo search <query> --scope material
 - 统计汉字字符与英文单词，将按有效内容量排序的 `languages` 写入资料元数据和 `sources.languages_json`。
 - 当前只使用 `languages[0]` 选择中文或英文模型；同一 Source 使用多模型生成多套向量不进入本轮实现。
 
-#### 7.3 使用模型 Tokenizer 改造切片（下一步）
+#### 7.3 使用模型 Tokenizer 改造切片（已完成）
 
 - 向切片器注入 `EmbeddingTokenizer`，不在 Document Ingestion 中直接依赖 `node-llama-cpp`。
 - 删除字符数硬上限 `maxChunkChars`，由主要语言模型的 `maxInputTokens` 决定 Chunk 上限。

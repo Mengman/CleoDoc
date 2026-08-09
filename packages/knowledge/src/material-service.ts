@@ -16,8 +16,7 @@ import {
   knowledgeSourceSchema,
 } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
-import { chunkDocument, detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
-import type { ChunkDocumentOptions } from "@cleodoc/document-ingestion";
+import { detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
   resolveInsideProject,
@@ -42,11 +41,12 @@ export class MaterialService {
     private readonly projectId: string,
     private readonly database: ProjectDatabase,
     private readonly maxImportBytes: number,
-    private readonly chunking: ChunkDocumentOptions,
     private readonly languageDetection: MaterialServiceOptions["languageDetection"],
+    chunking: MaterialServiceOptions["chunking"],
+    tokenizerModels: MaterialServiceOptions["tokenizerModels"],
   ) {
     this.repository = new MaterialRepository(database);
-    this.indexer = new MaterialIndexer(projectRoot, projectId, database, chunking);
+    this.indexer = new MaterialIndexer(projectRoot, projectId, database, chunking, tokenizerModels);
   }
 
   static async open(
@@ -61,12 +61,13 @@ export class MaterialService {
       project.manifest.id,
       database,
       options.maxImportBytes,
-      options.chunking,
       options.languageDetection,
+      options.chunking,
+      options.tokenizerModels,
     );
     try {
       await service.synchronizeProjection();
-      await service.indexer.markOutdated();
+      await service.indexer.markOutdated(service.repository.list());
       return service;
     } catch (error) {
       await database.close();
@@ -155,13 +156,13 @@ export class MaterialService {
 
   async search(query: string, limit = 10): Promise<KnowledgeSearchResult[]> {
     await this.synchronizeProjection();
-    await this.indexer.markOutdated();
+    await this.indexer.markOutdated(this.repository.list());
     return this.indexer.search(query, limit);
   }
 
   async getIndexStatus(): Promise<KnowledgeSourceIndexStatus[]> {
     await this.synchronizeProjection();
-    await this.indexer.markOutdated();
+    await this.indexer.markOutdated(this.repository.list());
     return this.indexer.listStatus();
   }
 
@@ -214,7 +215,11 @@ export class MaterialService {
   }
 
   async close(): Promise<void> {
-    await this.database.close();
+    try {
+      await this.indexer.close();
+    } finally {
+      await this.database.close();
+    }
   }
 
   private async addContent(
@@ -238,10 +243,8 @@ export class MaterialService {
     }
 
     const parsedDocument = parseDocument({ format: input.format, content });
-    const chunkedDocument = chunkDocument(
-      { parsedDocument, sourceContent: content },
-      this.chunking,
-    );
+    const languages = detectDocumentLanguages(parsedDocument.cdm, this.languageDetection);
+    const chunkedDocument = await this.indexer.chunk(languages[0]!, parsedDocument, content);
     const id = randomUUID();
     const extension = input.format === "markdown" ? "md" : "txt";
     const relativePath = `materials/${id}.${extension}`;
@@ -257,7 +260,7 @@ export class MaterialService {
       sourceLabel: normalizeOptionalLabel(input.sourceLabel),
       originalFileName: input.originalFileName,
       tags: normalizeTags(input.tags ?? []),
-      languages: detectDocumentLanguages(parsedDocument.cdm, this.languageDetection),
+      languages,
       relativePath,
       contentHash,
       size: Buffer.byteLength(content, "utf8"),

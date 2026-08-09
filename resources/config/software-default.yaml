@@ -65,7 +65,6 @@ rag:
         maxInputTokens: 512
         queryPrefix: "Represent this sentence for searching relevant passages: "
   chunking:
-    maxChunkChars: 800
     splitSearchWindowRatio: 0.75
 
 materials:

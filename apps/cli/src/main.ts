@@ -48,6 +48,7 @@ import {
 import { helpText } from "./help.js";
 import { LlmDebugFileLogger } from "./debug-log.js";
 import { runEmbeddingCommand } from "./embedding-command.js";
+import { createMaterialServiceOptions } from "./material-service-options.js";
 
 const softwareConfigService = new SoftwareConfigService();
 const appStateService = new AppStateService();
@@ -1393,12 +1394,7 @@ function chatServiceOptions() {
 }
 
 function materialServiceOptions() {
-  return {
-    database: { busyTimeoutMs: softwareConfig.database.busyTimeoutMs },
-    maxImportBytes: softwareConfig.materials.maxImportBytes,
-    chunking: softwareConfig.rag.chunking,
-    languageDetection: softwareConfig.rag.languageDetection,
-  };
+  return createMaterialServiceOptions(softwareConfig, softwareConfigService.defaultConfigPath);
 }
 
 function optionPositiveInteger(parsed: ParsedArguments, name: string): number | undefined {

@@ -74,7 +74,7 @@ flowchart TD
 
 ## 4. 解析与 Chunk 输入边界
 
-资料解析先生成临时 CDM 和规范化纯文本；资料导入在保存 Source 元数据前根据 CDM 正文块完成语言检测，Embedding 模型选择和 Token 长度校验发生在后续 RAG 索引阶段。切片实现仍位于 Document Ingestion，但只依赖注入的 Tokenizer 接口，不直接依赖 `node-llama-cpp`。最终写入 RAG 的 Chunk 类型为：
+资料解析先生成临时 CDM 和规范化纯文本；资料导入在保存 Source 元数据前根据 CDM 正文块完成语言检测，根据主语言选择 Embedding 模型，并用该模型 Tokenizer 完成 Token 长度校验和切片。切片实现仍位于 Document Ingestion，但只依赖注入的 Tokenizer 接口，不直接依赖 `node-llama-cpp`。最终写入 RAG 的 Chunk 类型为：
 
 ```ts
 interface KnowledgeChunk {
@@ -137,6 +137,7 @@ Embedding 模型使用 GGUF 格式并由 `node-llama-cpp` 加载。同一个 GGU
 ```ts
 interface EmbeddingTokenizer {
   readonly modelId: string;
+  readonly modelRevision: string;
   readonly maxInputTokens: number;
 
   countDocumentTokens(content: string): number;
@@ -403,7 +404,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和 Schema v10 的 `sources.languages_json`。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查。正式索引任务的 Worker、Token 切片、Embedding 表写入和向量查询仍按下述 v0.1 范围继续实现；CLI 测试命令直接加载模型不代表最终任务进程模型。
+当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和 Schema v10 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。`cleo embedding model` 和 `cleo embedding test` 用于开发期检查。正式索引任务的 Worker、Embedding 表写入和向量查询仍按下述 v0.1 范围继续实现；CLI 测试命令直接加载模型不代表最终任务进程模型。
 
 ### v0.1
 

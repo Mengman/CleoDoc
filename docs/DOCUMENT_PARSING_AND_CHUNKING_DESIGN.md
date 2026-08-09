@@ -1,6 +1,6 @@
 # CleoDoc 资料解析与切片设计
 
-状态：TXT/Markdown 解析、Baseline 切片、Chunk 入库和资料 FTS 已实现
+状态：TXT/Markdown 解析、主语言模型 Tokenizer 驱动的 Baseline 切片、Chunk 入库和资料 FTS 已实现
 
 更新日期：2026-08-09
 
@@ -22,7 +22,8 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 → BOM / 严格 UTF-8 / GB18030 顺序检测并解码
 → 统一写为项目内 UTF-8 资料副本并计算 Hash
 → 解析为临时 CDM
-→ 依据 CDM 结构选择切片边界
+→ 检测正文语言并选择主语言 Embedding 模型
+→ 使用模型 Tokenizer 上限和 CDM 结构选择切片边界
 → 提取纯文本与原文字节范围
 → 开发期写入单一临时切片 JSON 供检查
 → Chunk 与 External Content FTS 写入 SQLite
@@ -223,24 +224,23 @@ Markdown 内嵌 HTML 只能接受 CDM 白名单允许的文本语义。脚本、
 
 ### 8.1 长度定义与配置
 
-Chunk 长度使用规范化纯文本 `content` 的 Unicode 字符数量，包含标点和保留下来的空白，不包含 CDM/XML 标签或 Markdown 格式符号。它是切片长度，不等同于文稿统计中的“字数”。
+Chunk 的硬上限使用当前 Source 主语言 Embedding 模型的 Document Token 数，不再使用 Unicode 字符数量。Tokenizer 的输入是规范化纯文本 `content`，包含标点和保留下来的空白，不包含 CDM/XML 标签或 Markdown 格式符号；特殊 Token 由模型适配层统一计入。
 
 Baseline 的软件级参数为：
 
 ```yaml
 rag:
   chunking:
-    maxChunkChars: 800
     splitSearchWindowRatio: 0.75
 ```
 
-- `maxChunkChars` 是任何最终 Chunk 都不能超过的硬上限，默认值为 `800`。
+- `maxInputTokens` 来自 CleoDoc 发行的 Embedding 模型能力配置，不是用户切片参数；任何最终 Chunk 都不能超过当前模型的该上限。
 - `splitSearchWindowRatio` 定义在上限前多大的范围内优先寻找自然切分点，默认值为 `0.75`。
 - 不定义 `minChunkChars`，章节末尾允许保留无法继续合并的短 Chunk。
-- 这些参数由软件 YAML 配置解析后注入 Chunker，不能作为散落在切片实现中的固定数值。发行默认值统一保存在 `resources/config/software-default.yaml`；用户配置项缺失或无效时回退对应的发行默认值，并向用户报告警告。
+- 模型 ID、revision、`maxInputTokens` 和 `splitSearchWindowRatio` 一起写入 `chunking_config_json`。其中切片比例由软件 YAML 注入；模型能力由 CleoDoc 发行配置提供，普通用户不能改写。
 - Chunker 实现版本不是用户参数，仍由代码维护，用于判断已有 Chunk 是否需要重建。
 
-当 `maxChunkChars = 800`、`splitSearchWindowRatio = 0.75` 时，拆分器优先在当前剩余文字的第 `600`—`800` 个字符之间寻找边界。实际生效的配置必须参与索引版本判断；原始资料未变化但切片参数变化时，现有 Chunk 也应被识别为需要重建。
+拆分器先用 Tokenizer 找到不超过模型输入上限的最远字符位置，再找出约等于上限 75% Token 的起始搜索位置，只在两者之间选择自然边界。实际模型、revision、输入上限或比例变化时，即使原始资料未变化，现有 Chunk 也会被识别为需要重建。
 
 ### 8.2 块级单元
 
@@ -275,13 +275,13 @@ TXT 解析器不根据编号、文字长度或内容猜测标题。TXT 中每个
 
 ### 8.4 小块向前合并
 
-同一合并区域内的片段按原文顺序执行确定性的贪心合并。对每个片段只判断：将它追加到当前 Chunk 后，规范化纯文本长度是否仍不超过 `maxChunkChars`。
+同一合并区域内的片段按原文顺序执行确定性的贪心合并。对每个片段只判断：将它追加到当前 Chunk 后，完整规范化纯文本的 Document Token 数是否仍不超过当前模型上限。必须重新 Tokenize 合并结果，不能把两个片段的 Token 数直接相加。
 
 ```text
-同一合并区域，并且合并后长度 <= maxChunkChars
+同一合并区域，并且 countDocumentTokens(合并文本) <= maxInputTokens
 → 追加到当前 Chunk
 
-跨越标题边界，或者合并后长度 > maxChunkChars
+跨越标题边界，或者合并后 Token 数 > maxInputTokens
 → 提交当前 Chunk，并以该片段创建新 Chunk
 ```
 
@@ -291,10 +291,10 @@ TXT 解析器不根据编号、文字长度或内容猜测标题。TXT 中每个
 
 ### 8.5 大块向前寻找切分点
 
-对超过 `maxChunkChars` 的块 `C`，拆分器在上限附近选择切分位置，把它拆成 `A + B`：
+对超过 `maxInputTokens` 的块 `C`，拆分器在上限附近选择切分位置，把它拆成 `A + B`：
 
 ```text
-length(A) <= maxChunkChars
+countDocumentTokens(A) <= maxInputTokens
 C = A + B
 ```
 
@@ -303,7 +303,8 @@ C = A + B
 候选搜索范围为：
 
 ```text
-[floor(maxChunkChars × splitSearchWindowRatio), maxChunkChars]
+[不超过 floor(maxInputTokens × splitSearchWindowRatio) 的最远位置,
+ 不超过 maxInputTokens 的最远位置]
 ```
 
 在该范围内先按边界语义优先级选择，再在同一优先级内选择最接近上限的候选。普通自然语言段落的优先级为：
@@ -367,7 +368,8 @@ C = A + B
 - 不把原文中不连续的两个范围拼成同一个 Chunk。
 - 不复制上级标题或生成原文不存在的上下文标题。
 - 相同输入、解析器版本、Chunker 版本和有效配置必须产生相同的 Chunk 内容、顺序及边界。
-- 每个最终 Chunk 都必须满足 `length <= maxChunkChars`。
+- 每个最终 Chunk 都必须满足 `countDocumentTokens(content) <= maxInputTokens`。
+- 开发期切片预览同时保存 `characterCount` 与当前模型的 `tokenCount`；`knowledge_chunks` 不保存通用 Token 数，因为该值依赖具体模型。
 - 合并后的 `start_offset` 取第一个片段的起点，`end_offset` 取最后一个片段的终点，两者之间必须是原始资料中的连续范围。
 - 规范化纯文本可以删除范围内的 Markdown 标记和纯样式，但不能增添被宣称为原文的生成文字。
 

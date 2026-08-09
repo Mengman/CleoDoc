@@ -93,7 +93,6 @@ export const softwareConfigSchema = z
           .strict(),
         chunking: z
           .object({
-            maxChunkChars: positiveInteger,
             splitSearchWindowRatio: positiveRatio,
           })
           .strict(),

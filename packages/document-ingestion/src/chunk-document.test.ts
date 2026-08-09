@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chunkDocument, parseDocument } from "./index.js";
+import { chunkDocument, parseDocument, type ChunkTokenizer } from "./index.js";
 
 describe("document chunking baseline", () => {
   it("greedily merges short TXT paragraphs into the previous chunk", () => {
@@ -11,6 +11,7 @@ describe("document chunking baseline", () => {
     expect(result.chunks[0]).toMatchObject({
       ordinal: 0,
       characterCount: 6,
+      tokenCount: 6,
       startOffset: 0,
       endOffset: Buffer.byteLength("甲乙\n丙丁", "utf8"),
       blockTypes: ["p"],
@@ -73,23 +74,94 @@ describe("document chunking baseline", () => {
         parsedDocument: parseDocument({ format: "markdown", content: sourceContent }),
         sourceContent,
       },
-      { maxChunkChars: 12, splitSearchWindowRatio: 0.75 },
+      characterTokenizer(12),
+      { splitSearchWindowRatio: 0.75 },
     );
     const second = chunkDocument(
       {
         parsedDocument: parseDocument({ format: "markdown", content: sourceContent }),
         sourceContent,
       },
-      { maxChunkChars: 12, splitSearchWindowRatio: 0.75 },
+      characterTokenizer(12),
+      { splitSearchWindowRatio: 0.75 },
     );
 
     expect(first).toEqual(second);
   });
+
+  it("uses tokenizer counts instead of character counts for the hard limit", () => {
+    const sourceContent = "alpha beta gamma delta epsilon zeta eta theta";
+    const tokenizer: ChunkTokenizer = {
+      modelId: "word-tokenizer",
+      modelRevision: "test-v1",
+      maxInputTokens: 5,
+      countDocumentTokens: (content) => content.trim().split(/\s+/u).filter(Boolean).length,
+    };
+    const result = chunkDocument(
+      {
+        parsedDocument: parseDocument({ format: "text", content: sourceContent }),
+        sourceContent,
+      },
+      tokenizer,
+      { splitSearchWindowRatio: 0.75 },
+    );
+
+    expect(result.config).toEqual({
+      tokenizerModelId: "word-tokenizer",
+      tokenizerRevision: "test-v1",
+      maxInputTokens: 5,
+      splitSearchWindowRatio: 0.75,
+    });
+    expect(result.chunks.map((item) => item.content)).toEqual([
+      "alpha beta gamma delta epsilon ",
+      "zeta eta theta",
+    ]);
+    expect(result.chunks.map((item) => item.tokenCount)).toEqual([5, 3]);
+    expect(result.chunks[0]!.characterCount).toBeGreaterThan(5);
+  });
+
+  it("skips blocks without visible text before calling the tokenizer", () => {
+    const sourceContent = "![](cover.png)\n\n有效正文";
+    const tokenizer: ChunkTokenizer = {
+      modelId: "strict-tokenizer",
+      modelRevision: "test-v1",
+      maxInputTokens: 50,
+      countDocumentTokens: (content) => {
+        if (content.trim() === "") throw new Error("Tokenizer must not receive empty input");
+        return Array.from(content).length;
+      },
+    };
+
+    const result = chunkDocument(
+      {
+        parsedDocument: parseDocument({ format: "markdown", content: sourceContent }),
+        sourceContent,
+      },
+      tokenizer,
+      { splitSearchWindowRatio: 0.75 },
+    );
+
+    expect(result.chunks.map((item) => item.content)).toEqual(["有效正文"]);
+    expect(result.chunks[0]).toMatchObject({
+      startOffset: Buffer.byteLength("![](cover.png)\n\n", "utf8"),
+      endOffset: Buffer.byteLength(sourceContent, "utf8"),
+    });
+  });
 });
 
-function chunk(sourceContent: string, format: "text" | "markdown", maxChunkChars: number) {
+function chunk(sourceContent: string, format: "text" | "markdown", maxInputTokens: number) {
   return chunkDocument(
     { parsedDocument: parseDocument({ format, content: sourceContent }), sourceContent },
-    { maxChunkChars, splitSearchWindowRatio: 0.75 },
+    characterTokenizer(maxInputTokens),
+    { splitSearchWindowRatio: 0.75 },
   );
+}
+
+function characterTokenizer(maxInputTokens: number): ChunkTokenizer {
+  return {
+    modelId: "character-tokenizer",
+    modelRevision: "test-v1",
+    maxInputTokens,
+    countDocumentTokens: (content) => Array.from(content).length,
+  };
 }

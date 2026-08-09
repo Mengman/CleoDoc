@@ -24,6 +24,11 @@ export interface ReplaceSourceChunksInput {
   readonly chunks: readonly KnowledgeChunkWrite[];
 }
 
+export interface SourceIndexExpectation {
+  readonly sourceId: string;
+  readonly chunkingConfigJson: string;
+}
+
 interface ChunkRow {
   chunk_id: string;
   source_id: string;
@@ -186,17 +191,23 @@ export class KnowledgeChunkRepository {
   async markOutdated(
     parserVersion: string,
     chunkerVersion: string,
-    chunkingConfigJson: string,
+    expectations: readonly SourceIndexExpectation[],
   ): Promise<void> {
-    await this.projectDatabase.write((database) => {
-      database
-        .prepare(
-          `UPDATE sources SET index_status = 'stale'
-           WHERE source_type = 'material' AND index_status = 'ready'
-             AND (parser_version IS NOT ? OR chunker_version IS NOT ?
-                  OR chunking_config_json IS NOT ?)`,
-        )
-        .run(parserVersion, chunkerVersion, chunkingConfigJson);
+    await this.projectDatabase.transaction((database) => {
+      const update = database.prepare(
+        `UPDATE sources SET index_status = 'stale'
+         WHERE id = ? AND source_type = 'material' AND index_status = 'ready'
+           AND (parser_version IS NOT ? OR chunker_version IS NOT ?
+                OR chunking_config_json IS NOT ?)`,
+      );
+      for (const expectation of expectations) {
+        update.run(
+          expectation.sourceId,
+          parserVersion,
+          chunkerVersion,
+          expectation.chunkingConfigJson,
+        );
+      }
     });
   }
 

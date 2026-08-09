@@ -21,6 +21,7 @@ import type {
 
 export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
   readonly modelId: string;
+  readonly modelRevision: string;
   readonly maxInputTokens: number;
   private disposed = false;
 
@@ -31,6 +32,7 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
     private readonly context: LlamaEmbeddingContext,
   ) {
     this.modelId = definition.modelId;
+    this.modelRevision = definition.revision;
     this.maxInputTokens = definition.maxInputTokens;
   }
 
@@ -168,6 +170,82 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
         details: { modelId: this.modelId },
       });
     }
+  }
+}
+
+export class NodeLlamaCppEmbeddingTokenizer implements EmbeddingTokenizer {
+  readonly modelId: string;
+  readonly modelRevision: string;
+  readonly maxInputTokens: number;
+  private disposed = false;
+
+  private constructor(
+    private readonly definition: ResolvedEmbeddingModelDefinition,
+    private readonly llama: Llama,
+    private readonly model: LlamaModel,
+  ) {
+    this.modelId = definition.modelId;
+    this.modelRevision = definition.revision;
+    this.maxInputTokens = definition.maxInputTokens;
+  }
+
+  static async open(
+    definition: ResolvedEmbeddingModelDefinition,
+  ): Promise<NodeLlamaCppEmbeddingTokenizer> {
+    await assertUsableModelFile(definition);
+    let llama: Llama | undefined;
+    let model: LlamaModel | undefined;
+    try {
+      llama = await getLlama({
+        gpu: false,
+        build: "never",
+        skipDownload: true,
+        progressLogs: false,
+        logger: () => undefined,
+      });
+      model = await llama.loadModel({
+        modelPath: definition.modelPath,
+        gpuLayers: 0,
+        useMmap: true,
+        vocabOnly: true,
+      });
+      return new NodeLlamaCppEmbeddingTokenizer(definition, llama, model);
+    } catch (error) {
+      await model?.dispose().catch(() => undefined);
+      await llama?.dispose().catch(() => undefined);
+      if (error instanceof AppError) throw error;
+      throw new AppError("EMBEDDING_MODEL_LOAD_FAILED", "无法加载 Embedding Tokenizer。", {
+        cause: error,
+        details: { modelId: definition.modelId },
+      });
+    }
+  }
+
+  countDocumentTokens(content: string): number {
+    return this.countInputTokens("document", content);
+  }
+
+  countQueryTokens(query: string): number {
+    return this.countInputTokens("query", query);
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    try {
+      await this.model.dispose();
+    } finally {
+      await this.llama.dispose();
+    }
+  }
+
+  private countInputTokens(kind: EmbeddingInputKind, content: string): number {
+    if (this.disposed) {
+      throw new AppError("EMBEDDING_MODEL_LOAD_FAILED", "Embedding Tokenizer 已经关闭。", {
+        details: { modelId: this.modelId },
+      });
+    }
+    return countEvaluationTokens(this.model, formatEmbeddingInput(this.definition, kind, content));
   }
 }
 

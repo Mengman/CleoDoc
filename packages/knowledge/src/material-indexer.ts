@@ -1,6 +1,7 @@
 import type {
   KnowledgeSearchResult,
   KnowledgeSource,
+  KnowledgeSourceLanguage,
   KnowledgeSourceIndexStatus,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
@@ -17,6 +18,8 @@ import type {
   ParsedDocument,
 } from "@cleodoc/document-ingestion";
 import { resolveInsideProject, writeJsonAtomic } from "../../project/src/index.js";
+import { MaterialTokenizerPool } from "./material-tokenizers.js";
+import type { MaterialTokenizerModel } from "./material-types.js";
 
 export interface MaterialIndexRebuildFailure {
   readonly sourceId: string;
@@ -32,24 +35,37 @@ export interface MaterialIndexRebuildResult {
 
 export class MaterialIndexer {
   private readonly repository: KnowledgeChunkRepository;
-  private readonly chunkingConfigJson: string;
+  private readonly tokenizers: MaterialTokenizerPool;
 
   constructor(
     private readonly projectRoot: string,
     private readonly projectId: string,
     database: ProjectDatabase,
     private readonly chunking: ChunkDocumentOptions,
+    tokenizerModels: Readonly<Record<KnowledgeSourceLanguage, MaterialTokenizerModel>>,
   ) {
     this.repository = new KnowledgeChunkRepository(database);
-    this.chunkingConfigJson = JSON.stringify(chunking);
+    this.tokenizers = new MaterialTokenizerPool(tokenizerModels);
   }
 
-  async markOutdated(): Promise<void> {
+  async markOutdated(sources: readonly KnowledgeSource[]): Promise<void> {
     await this.repository.markOutdated(
       DOCUMENT_PARSER_VERSION,
       DOCUMENT_CHUNKER_VERSION,
-      this.chunkingConfigJson,
+      sources.map((source) => ({
+        sourceId: source.id,
+        chunkingConfigJson: JSON.stringify(this.configFor(source.languages[0]!)),
+      })),
     );
+  }
+
+  async chunk(
+    language: KnowledgeSourceLanguage,
+    parsedDocument: ParsedDocument,
+    sourceContent: string,
+  ): Promise<ChunkedDocument> {
+    const tokenizer = await this.tokenizers.get(language);
+    return chunkDocument({ parsedDocument, sourceContent }, tokenizer, this.chunking);
   }
 
   async replace(
@@ -63,7 +79,7 @@ export class MaterialIndexer {
       expectedContentHash: source.contentHash,
       parserVersion: parsedDocument.parserVersion,
       chunkerVersion: chunkedDocument.chunkerVersion,
-      chunkingConfigJson: this.chunkingConfigJson,
+      chunkingConfigJson: JSON.stringify(chunkedDocument.config),
       chunks: chunkedDocument.chunks,
     });
   }
@@ -93,10 +109,7 @@ export class MaterialIndexer {
       try {
         const content = await readContent(source);
         const parsedDocument = parseDocument({ format: source.format, content });
-        const chunkedDocument = chunkDocument(
-          { parsedDocument, sourceContent: content },
-          this.chunking,
-        );
+        const chunkedDocument = await this.chunk(source.languages[0]!, parsedDocument, content);
         await this.replace(source, parsedDocument, chunkedDocument);
         indexedCount += 1;
       } catch (error) {
@@ -115,6 +128,20 @@ export class MaterialIndexer {
 
   async rebuildFts(): Promise<void> {
     await this.repository.rebuildFts();
+  }
+
+  async close(): Promise<void> {
+    await this.tokenizers.close();
+  }
+
+  private configFor(language: KnowledgeSourceLanguage): ChunkedDocument["config"] {
+    const model = this.tokenizers.model(language);
+    return {
+      tokenizerModelId: model.modelId,
+      tokenizerRevision: model.modelRevision,
+      maxInputTokens: model.maxInputTokens,
+      ...this.chunking,
+    };
   }
 
   private async writePreview(

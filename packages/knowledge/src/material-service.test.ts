@@ -7,7 +7,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
 import { ProjectService } from "../../project/src/index.js";
 import { MaterialService } from "./material-service.js";
-import { TEST_DATABASE_OPTIONS, TEST_MATERIAL_OPTIONS } from "../../../test/runtime-options.js";
+import {
+  createTestMaterialOptions,
+  TEST_DATABASE_OPTIONS,
+  TEST_MATERIAL_OPTIONS,
+} from "../../../test/runtime-options.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -77,16 +81,34 @@ describe("MaterialService", () => {
         sourceId: string;
         sourceHash: string;
         chunkerVersion: string;
-        chunks: Array<{ content: string; startOffset: number; endOffset: number }>;
+        config: {
+          tokenizerModelId: string;
+          tokenizerRevision: string;
+          maxInputTokens: number;
+          splitSearchWindowRatio: number;
+        };
+        chunks: Array<{
+          content: string;
+          tokenCount: number;
+          startOffset: number;
+          endOffset: number;
+        }>;
       };
       expect(chunkPreview).toMatchObject({
         sourceId: imported.source.id,
         sourceHash: imported.source.contentHash,
         chunkerVersion: "structural-baseline-v1",
+        config: {
+          tokenizerModelId: "test-zh-tokenizer",
+          tokenizerRevision: "test-v1",
+          maxInputTokens: 800,
+          splitSearchWindowRatio: 0.75,
+        },
       });
       expect(chunkPreview.chunks).toEqual([
         expect.objectContaining({
           content: "铁路资料\n\n夜间列车使用煤油灯。",
+          tokenCount: expect.any(Number),
           startOffset: 0,
           endOffset: Buffer.byteLength("# 铁路资料\n\n夜间列车使用煤油灯。", "utf8"),
         }),
@@ -165,6 +187,19 @@ describe("MaterialService", () => {
     try {
       const englishSource = await service.addText(english, { title: "English source" });
       expect(englishSource.source.languages).toEqual(["en"]);
+      const englishPreview = JSON.parse(
+        await readFile(
+          path.join(
+            project.root,
+            ".cleo",
+            "derived",
+            "chunks",
+            `${englishSource.source.id}.chunks.json`,
+          ),
+          "utf8",
+        ),
+      ) as { config: { tokenizerModelId: string } };
+      expect(englishPreview.config.tokenizerModelId).toBe("test-en-tokenizer");
 
       const bilingualSource = await service.addText(`${chinese}\n${english}`, {
         title: "双语资料",
@@ -267,10 +302,10 @@ describe("MaterialService", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const service = await MaterialService.open(project.root, {
-      ...TEST_MATERIAL_OPTIONS,
-      chunking: { maxChunkChars: 12, splitSearchWindowRatio: 0.75 },
-    });
+    const service = await MaterialService.open(
+      project.root,
+      createTestMaterialOptions({ maxInputTokens: 12 }),
+    );
     try {
       await service.addText("第一条线索藏在钟楼。第二条线索来自旧车票。", {
         title: "案件线索",
@@ -292,7 +327,7 @@ describe("MaterialService", () => {
     }
   });
 
-  it("marks an index stale when the configured chunking algorithm inputs change", async () => {
+  it("marks an index stale when the tokenizer revision changes", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
@@ -301,10 +336,10 @@ describe("MaterialService", () => {
     await initial.addText("城门在午夜关闭，守卫会记录所有出入者。", { title: "城门记录" });
     await initial.close();
 
-    const changed = await MaterialService.open(project.root, {
-      ...TEST_MATERIAL_OPTIONS,
-      chunking: { maxChunkChars: 400, splitSearchWindowRatio: 0.75 },
-    });
+    const changed = await MaterialService.open(
+      project.root,
+      createTestMaterialOptions({ modelRevision: "test-v2" }),
+    );
     try {
       expect((await changed.getIndexStatus())[0]).toMatchObject({ status: "stale" });
       expect(await changed.search("守卫")).toEqual([]);
