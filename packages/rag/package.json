@@ -1,0 +1,13 @@
+{
+  "name": "@cleodoc/rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@cleodoc/contracts": "0.1.0",
+    "node-llama-cpp": "^3.19.1"
+  }
+}

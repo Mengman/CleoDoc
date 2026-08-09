@@ -23,6 +23,17 @@ const providerSchema = z
   })
   .strict();
 
+const embeddingModelSchema = z
+  .object({
+    modelId: z.string().trim().min(1),
+    modelName: z.string().trim().min(1),
+    revision: z.string().trim().min(1),
+    modelFile: z.string().trim().min(1),
+    maxInputTokens: positiveInteger,
+    queryPrefix: z.string(),
+  })
+  .strict();
+
 export const softwareConfigSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -69,6 +80,16 @@ export const softwareConfigSchema = z
       .strict(),
     rag: z
       .object({
+        embedding: z
+          .object({
+            models: z
+              .object({
+                zh: embeddingModelSchema,
+                en: embeddingModelSchema,
+              })
+              .strict(),
+          })
+          .strict(),
         chunking: z
           .object({
             maxChunkChars: positiveInteger,

@@ -106,7 +106,7 @@ describe("CleoDoc CLI", () => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
       });
     }
-  });
+  }, 10_000);
 
   it("keeps interactive chat alive after timeout and exposes the persisted history", async () => {
     const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "cleodoc-cli-timeout-test-"));

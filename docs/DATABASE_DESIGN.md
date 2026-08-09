@@ -681,7 +681,7 @@ CREATE TABLE embedding_models (
 | `revision` | TEXT | NOT NULL | 模型版本或推理框架提供的 Revision。 |
 | `created_at` | TEXT | NOT NULL | 首次登记时间。 |
 
-不保存 `model_hash`、维度、距离算法、归一化方式、推理设备、批次、线程、模型路径或 ONNX Runtime 参数。向量维度可以由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到；距离算法属于检索配置，不属于模型记录。
+不保存 `model_hash`、维度、距离算法、归一化方式、推理设备、批次、线程、模型路径或推理运行参数。向量维度可以由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到；距离算法属于检索配置，不属于模型记录。
 
 ### 12.5 `chunk_embeddings`（已确认、未实现）
 

@@ -113,7 +113,7 @@ v0.1 检索路径为：
 4. 在上下文预算内组装证据包。
 5. 为每次模型调用保存 `ContextManifest`。
 
-本地 Embedding 使用 `@huggingface/transformers` 运行 ONNX 模型。v0.1 将 `Float32Array` 存为 SQLite BLOB，对过滤后的候选做精确余弦检索；不要提前引入独立向量数据库或 ANN 基础设施。向量索引必须放在可替换接口后面。
+本地 Embedding 使用 `node-llama-cpp` 加载 GGUF 模型，同一模型负责 Tokenize 与向量推理。v0.1 将 `Float32Array` 存为 SQLite BLOB，对过滤后的候选做精确余弦检索；不要提前引入独立向量数据库或 ANN 基础设施。向量索引必须放在可替换接口后面。
 
 每条检索结果至少能解释：来源、原文范围、相关度、采用原因和是否最终发送给模型。测试必须覆盖精确名称、近义描述、正文召回、跨项目隔离和 `ContextManifest` 可追溯性。
 

@@ -408,9 +408,11 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。Worker、Token 切片、数据库向量持久化与语义检索尚未实现。
+
 工作内容：
 
-- 使用 Transformers.js 在 Worker 中执行本地 ONNX Embedding。
+- 使用 `node-llama-cpp` 在 Worker 中执行本地 GGUF Embedding，并复用模型 Tokenizer。
 - 实现模型下载、缓存、哈希校验和进度。
 - 在 `embedding_models` 中只记录模型 ID、名称和 revision。
 - 为 `knowledge_chunks` 增加 Chunk 内容 Hash，并把当前整组替换改为保留未变化 `chunk_rowid` 的增量更新。
@@ -424,6 +426,7 @@ cleo search <query> --scope material
 
 ```text
 cleo embedding model
+cleo embedding test <zh|en> <text> [--query]
 cleo embedding download
 cleo index embed
 cleo search <query> --semantic

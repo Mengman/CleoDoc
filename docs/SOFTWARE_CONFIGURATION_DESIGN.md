@@ -85,6 +85,22 @@ agent:
     resultTargetMultiplier: 4
 
 rag:
+  embedding:
+    models:
+      zh:
+        modelId: bge-small-zh-v1.5-q8_0
+        modelName: BAAI/bge-small-zh-v1.5
+        revision: v1.5-q8_0
+        modelFile: models/embedding/bge-small-zh-v1.5-q8_0.gguf
+        maxInputTokens: 512
+        queryPrefix: "为这个句子生成表示以用于检索相关文章："
+      en:
+        modelId: bge-small-en-v1.5-q8_0
+        modelName: BAAI/bge-small-en-v1.5
+        revision: v1.5-q8_0
+        modelFile: models/embedding/bge-small-en-v1.5-q8_0.gguf
+        maxInputTokens: 512
+        queryPrefix: "Represent this sentence for searching relevant passages: "
   chunking:
     maxChunkChars: 800
     splitSearchWindowRatio: 0.75
@@ -99,7 +115,7 @@ debug:
   enabled: false
 ```
 
-`llm.providers` 和其中的模型能力表由 CleoDoc 适配和发行，不要求普通用户维护。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖超时、上下文策略、Agent、切片、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录。
+`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程、批次或推理设备等运行参数。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖超时、上下文策略、Agent、切片、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
 
 ## 4. Provider、模型与密钥
 

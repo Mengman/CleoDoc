@@ -42,6 +42,9 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo index rebuild [--project <directory>]
   cleo search <query> [--scope material] [--limit <数量>] [--project <directory>]
 
+  cleo embedding model
+  cleo embedding test <zh|en> <text> [--query]
+
   cleo conversation list [--project <directory>]
   cleo conversation show <conversation-id> [--project <directory>]
 

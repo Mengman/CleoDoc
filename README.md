@@ -2,7 +2,7 @@
 
 CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
 
-当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。统一知识索引、Embedding、混合 RAG、`ContextManifest` 和 RAG Tool 尚未实现；唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding 基础适配层和开发期检查命令已经接入；Token 切片、向量入库、混合 RAG、`ContextManifest` 和 RAG Tool 尚未实现。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
@@ -168,6 +168,9 @@ npm run cleo -- material remove <material-id>
 npm run cleo -- index status
 npm run cleo -- index rebuild
 npm run cleo -- search "检索关键词" --scope material --limit 10
+npm run cleo -- embedding model
+npm run cleo -- embedding test zh "量子通信利用量子态传递信息"
+npm run cleo -- embedding test en "local document retrieval" --query
 ```
 
 导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示输入编码，并在 `.cleo/derived` 生成可重建的 CDM 与切片检查文件。纯文本 Chunk 与 External Content FTS 保存于 SQLite；`index rebuild` 可从原始资料重建，`search` 当前只检索资料。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。

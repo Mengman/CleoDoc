@@ -67,7 +67,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | 安装包 | Node.js 可执行入口；v0.2 使用 electron-builder | v0.1 CLI 分发；v0.2 Windows、macOS、Linux 桌面打包与签名配置 |
 | 数据库 | Node.js 内置 `node:sqlite` | CLI 与桌面共用的项目数据库和个人资料库 |
 | 全文检索 | SQLite FTS5 trigram | 中文原文和资料检索 |
-| 本地 Embedding | `@huggingface/transformers` | 在 Worker 中运行 ONNX Embedding 模型 |
+| 本地 Embedding | `node-llama-cpp` | 在 Worker 中运行 GGUF Embedding 模型，并复用模型 Tokenizer |
 | Git 引擎 | isomorphic-git | 无系统 Git 依赖的版本管理 |
 | 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | 独立基础协议；AI、用户和解析器直接使用，RAG Core 不直接依赖 |
 | 文档解析 | 独立 Document Ingestion 模块 + CDM Schema | TXT/Markdown、临时 CDM、来源定位和纯文本 ChunkDraft |
@@ -162,7 +162,7 @@ Preload 仅通过 `contextBridge` 暴露白名单 API：
 
 由 Core 创建 Worker Thread，负责：
 
-- 下载后从本地模型目录加载 ONNX 模型。
+- 从应用资源或本地模型缓存加载 GGUF 模型。
 - 批量生成 Document 和 Query Embedding。
 - 生成 Document 和 Query Embedding；精确余弦距离由 SQLite Adapter 中的 sqlite-vec 执行。
 - 返回纯数据，不直接写 SQLite。
@@ -540,7 +540,7 @@ interface EmbeddingProvider {
 }
 ```
 
-- 默认实现使用 Transformers.js 的 `feature-extraction` pipeline，在 Worker 中进行 mean pooling 和 normalize。
+- 默认实现使用 `node-llama-cpp` 加载 GGUF；同一模型负责 Document/Query Tokenize 和 Embedding，输出在适配层归一化。
 - 模型首次使用时由用户确认下载，模型文件进入应用模型缓存。
 - `modelId`、模型名称和 revision 写入 `embedding_models`；维度由向量 BLOB 长度获得，量化、归一化和推理运行参数不复制进模型表。
 - 不同模型生成的向量不得混合查询。
@@ -1003,7 +1003,8 @@ v0.2 在此基础上增加：
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
 - 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
-- 尚未实现：正文 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 已实现：`packages/rag` 的 `node-llama-cpp` CPU Baseline、本地 GGUF 解析、Document/Query Token 统计、归一化向量输出和开发期 CLI 检查命令。
+- 尚未实现：正文 FTS、Embedding Worker 与向量入库、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策
@@ -1021,7 +1022,7 @@ v0.2 在此基础上增加：
 - CDM 是无上层业务依赖的基础协议包；Document Ingestion 依赖 CDM 并输出纯文本 ChunkDraft，RAG Core 不直接依赖 CDM。
 - Document Ingestion 属于未来 RAG 项目的摄取能力，但与 RAG Core 保持独立；CleoDoc 只通过 `RagService` 使用 RAG。
 - RAG 子系统拥有 Source、Chunk、FTS 和 Embedding 表；当前可以复用 `project.sqlite`，未来允许迁移到独立数据库而不改变 CleoDoc 领域逻辑。
-- Transformers.js 本地 Embedding。
+- `node-llama-cpp` 本地 GGUF Embedding。
 - FTS5、向量、精确字段和关系图四路混合召回。
 - v0.1 使用精确向量检索，保留 VectorIndex 替换接口。
 - Agent 使用可持久化状态机和 ChangeSet 审批。
@@ -1051,5 +1052,5 @@ v0.2 在此基础上增加：
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
 - [SQLite WAL](https://www.sqlite.org/wal.html)
 - [SQLite Backup API](https://www.sqlite.org/backup.html)
-- [Transformers.js](https://huggingface.co/docs/transformers.js/en/index)
+- [node-llama-cpp](https://node-llama-cpp.withcat.ai/)
 - [isomorphic-git](https://isomorphic-git.org/)

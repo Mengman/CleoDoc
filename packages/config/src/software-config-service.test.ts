@@ -28,6 +28,10 @@ describe("SoftwareConfigService", () => {
       maxChunkChars: 800,
       splitSearchWindowRatio: 0.75,
     });
+    expect(result.config.rag.embedding.models.zh).toMatchObject({
+      modelId: "bge-small-zh-v1.5-q8_0",
+      maxInputTokens: 512,
+    });
     expect(await readFile(path.join(home, "config.yaml"), "utf8")).toContain("schemaVersion: 1");
   });
 
@@ -43,6 +47,11 @@ context:
   softCompactionRatio: invalid
 debug:
   enabled: true
+rag:
+  embedding:
+    models:
+      zh:
+        maxInputTokens: 100
 unknownSetting: true
 `,
       "utf8",
@@ -54,8 +63,9 @@ unknownSetting: true
     expect(result.config.llm.timeouts.connectionMs).toBe(90_000);
     expect(result.config.context.softCompactionRatio).toBe(0.75);
     expect(result.config.debug.enabled).toBe(true);
+    expect(result.config.rag.embedding.models.zh.maxInputTokens).toBe(512);
     expect(result.warnings.map((warning) => warning.path)).toEqual(
-      expect.arrayContaining(["context.softCompactionRatio", "unknownSetting"]),
+      expect.arrayContaining(["context.softCompactionRatio", "rag.embedding", "unknownSetting"]),
     );
   });
 

@@ -170,7 +170,7 @@ v0.1 支持粘贴内容以及 TXT、Markdown 导入。DOCX、PDF、网页快照�
 2. 使用临时 CDM 识别结构边界，生成只含纯文本和原文字节范围的 Chunk；临时 CDM 可以在入库后删除。
 3. 通过内容哈希去重，仅更新发生变化的块。
 4. 写入 SQLite FTS5 中文全文索引。
-5. 使用本地 ONNX 嵌入模型生成向量。
+5. 使用 `node-llama-cpp` 加载本地 GGUF 嵌入模型生成向量。
 6. 抽取实体、事件、关系、时间、规则和事实声明。
 7. 将抽取结果作为候选知识提交给用户批量确认。
 
@@ -356,7 +356,7 @@ Core Utility Process
 ├─ DiffService
 └─ AgentRuntime
           ↓
-Embedding Worker（Transformers.js / ONNX Runtime）
+Embedding Worker（node-llama-cpp / GGUF）
 ```
 
 - Renderer 不直接访问文件系统、SQLite、Git 或模型密钥。

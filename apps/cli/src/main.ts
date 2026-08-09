@@ -47,6 +47,7 @@ import {
 } from "./arguments.js";
 import { helpText } from "./help.js";
 import { LlmDebugFileLogger } from "./debug-log.js";
+import { runEmbeddingCommand } from "./embedding-command.js";
 
 const softwareConfigService = new SoftwareConfigService();
 const appStateService = new AppStateService();
@@ -95,6 +96,14 @@ async function main(argumentsList: readonly string[]): Promise<void> {
       return;
     case "search":
       await searchCommand(parsed);
+      return;
+    case "embedding":
+      await runEmbeddingCommand(
+        parsed,
+        softwareConfig,
+        softwareConfigService.defaultConfigPath,
+        output,
+      );
       return;
     case "conversation":
       await conversationCommand(parsed);
