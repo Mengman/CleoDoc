@@ -2,5 +2,8 @@
   "name": "@cleodoc/database",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "sqlite-vec": "0.1.9"
+  }
 }

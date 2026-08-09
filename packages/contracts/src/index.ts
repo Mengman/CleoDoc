@@ -6,3 +6,4 @@ export * from "./model.js";
 export * from "./project.js";
 export * from "./project-instructions.js";
 export * from "./session.js";
+export * from "./vector-index.js";

@@ -421,6 +421,37 @@ describe("MaterialService", () => {
     }
   });
 
+  it("searches Chinese and English embeddings with their configured models", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, createTestMaterialOptions());
+    const chinese = "古城档案记载守卫会在午夜关闭城门并核对通行证。".repeat(4);
+    const english = Array.from({ length: 70 }, (_, index) => `railway-evidence-${index}`).join(" ");
+    try {
+      const chineseSource = await service.addText(chinese, { title: "古城档案" });
+      const englishSource = await service.addText(english, { title: "Railway archive" });
+      await service.embedIndex();
+
+      const chineseResults = await service.searchVector(
+        "zh",
+        Float32Array.from([chinese.length, 1]),
+      );
+      const englishResults = await service.searchVector(
+        "en",
+        Float32Array.from([english.length, 2]),
+      );
+      expect(chineseResults.map((result) => result.sourceId)).toEqual([chineseSource.source.id]);
+      expect(englishResults.length).toBeGreaterThan(0);
+      expect(new Set(englishResults.map((result) => result.sourceId))).toEqual(
+        new Set([englishSource.source.id]),
+      );
+    } finally {
+      await service.close();
+    }
+  });
+
   it("rejects unsupported and non-UTF-8 files", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

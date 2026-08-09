@@ -3,9 +3,14 @@ import type {
   KnowledgeSource,
   KnowledgeSourceLanguage,
   KnowledgeSourceIndexStatus,
+  VectorSearchHit,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
-import { KnowledgeChunkRepository, type ProjectDatabase } from "../../database/src/index.js";
+import {
+  KnowledgeChunkRepository,
+  SqliteVectorIndex,
+  type ProjectDatabase,
+} from "../../database/src/index.js";
 import {
   chunkDocument,
   DOCUMENT_CHUNKER_VERSION,
@@ -42,11 +47,12 @@ export class MaterialIndexer {
   private readonly repository: KnowledgeChunkRepository;
   private readonly tokenizers: MaterialTokenizerPool;
   private readonly embeddings: MaterialEmbeddingIndexer;
+  private vectorIndex: SqliteVectorIndex | null = null;
 
   constructor(
     private readonly projectRoot: string,
     private readonly projectId: string,
-    database: ProjectDatabase,
+    private readonly database: ProjectDatabase,
     private readonly chunking: ChunkDocumentOptions,
     embeddingModels: Readonly<Record<KnowledgeSourceLanguage, MaterialEmbeddingModel>>,
     embeddingChunkBatchSize: number,
@@ -106,6 +112,22 @@ export class MaterialIndexer {
       throw new AppError("VALIDATION_ERROR", "检索结果数量必须为 1–100。");
     }
     return this.repository.search(this.projectId, normalized, limit);
+  }
+
+  async searchVector(
+    language: KnowledgeSourceLanguage,
+    query: Float32Array,
+    limit = 10,
+  ): Promise<readonly VectorSearchHit[]> {
+    this.vectorIndex ??= SqliteVectorIndex.open(this.database);
+    return await this.vectorIndex.search(
+      query,
+      {
+        projectId: this.projectId,
+        embeddingModelId: this.tokenizers.model(language).modelId,
+      },
+      limit,
+    );
   }
 
   listStatus(): KnowledgeSourceIndexStatus[] {

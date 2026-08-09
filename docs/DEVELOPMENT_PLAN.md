@@ -46,7 +46,7 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、Tokenizer 切片、增量 Chunk/Embedding Repository、Worker 推理和安全写回编排已完成；下一步实现 sqlite-vec 精确检索 |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、Tokenizer 切片、增量 Chunk/Embedding Repository、Worker 推理、安全写回和 sqlite-vec 精确检索已完成；下一步实现索引命令与诊断 |
 | 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务及安全写回编排已经实现；sqlite-vec 精确检索与语义检索 CLI 尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现；语义检索 CLI 尚未实现。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -480,6 +480,8 @@ cleo search <query> --scope material
 - v0.1 不创建固定维度 `vec0`，不训练 ANN；`VectorIndex` 接口保持可替换。
 
 验收门：中文和英文固定查询分别召回对应资料；过期向量、其他项目向量和不同模型向量不会进入结果。
+
+实施状态：已完成。`SqliteVectorIndex` 实现公共 `VectorIndex` 接口，延迟加载锁定版本的 `sqlite-vec` 0.1.9，并在加载后立即关闭当前数据库连接的扩展加载权限。查询通过 `vec_f32()`、`vec_length()` 和 `vec_distance_cosine()` 校验维度并执行精确余弦排序；SQL 在距离计算前过滤项目、`ready` 资料、模型 ID 和 Chunk Hash。当前继续使用普通 `chunk_embeddings` 表，不创建 `vec0`。真实扩展测试已覆盖中英文模型路由、项目/模型隔离、失效 Source、过期向量和维度错误。
 
 #### 7.8 CLI、诊断与恢复
 

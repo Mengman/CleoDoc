@@ -1,5 +1,6 @@
 import { AppError, type KnowledgeSourceLanguage } from "../../contracts/src/index.js";
 import type { DatabaseSync } from "node:sqlite";
+import { assertFloat32Vector, encodeFloat32LittleEndian } from "./float32-vector.js";
 import type { ProjectDatabase } from "./project-database.js";
 
 export interface EmbeddingModelIdentity {
@@ -184,14 +185,7 @@ function isCurrent(
 
 function validateWrites(writes: readonly ChunkEmbeddingWrite[]): void {
   for (const write of writes) {
-    if (write.vector.length === 0) {
-      throw new AppError("VALIDATION_ERROR", "Embedding 向量不能为空。");
-    }
-    for (const value of write.vector) {
-      if (!Number.isFinite(value)) {
-        throw new AppError("VALIDATION_ERROR", "Embedding 向量包含无效数值。");
-      }
-    }
+    assertFloat32Vector(write.vector);
   }
   const dimensions = new Set(writes.map((write) => write.vector.length));
   if (dimensions.size > 1) {
@@ -242,12 +236,4 @@ function ensureEmbeddingDimensions(
   if (existing !== undefined && Number(existing.byte_length) !== dimensions * 4) {
     throw new AppError("VALIDATION_ERROR", "Embedding 向量维度与已有模型向量不一致。");
   }
-}
-
-function encodeFloat32LittleEndian(vector: Float32Array): Uint8Array {
-  const bytes = Buffer.allocUnsafe(vector.length * 4);
-  for (let index = 0; index < vector.length; index += 1) {
-    bytes.writeFloatLE(vector[index]!, index * 4);
-  }
-  return bytes;
 }

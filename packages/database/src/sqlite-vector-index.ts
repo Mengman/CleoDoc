@@ -1,0 +1,167 @@
+import type { DatabaseSync } from "node:sqlite";
+import * as sqliteVec from "sqlite-vec";
+
+import {
+  AppError,
+  type VectorIndex,
+  type VectorSearchFilter,
+  type VectorSearchHit,
+} from "../../contracts/src/index.js";
+import { encodeFloat32LittleEndian } from "./float32-vector.js";
+import type { ProjectDatabase } from "./project-database.js";
+
+const REQUIRED_SQLITE_VEC_VERSION = "v0.1.9";
+
+interface VectorSearchRow {
+  chunk_id: string;
+  source_id: string;
+  ordinal: number;
+  content: string;
+  start_offset: number;
+  end_offset: number;
+  chunker_version: string;
+  created_at: string;
+  source_title: string;
+  source_label: string | null;
+  distance: number;
+}
+
+export class SqliteVectorIndex implements VectorIndex {
+  private constructor(
+    private readonly projectDatabase: ProjectDatabase,
+    readonly extensionVersion: string,
+  ) {}
+
+  static open(projectDatabase: ProjectDatabase): SqliteVectorIndex {
+    let extensionVersion: string;
+    try {
+      extensionVersion = projectDatabase.read((database) => loadExtension(database));
+    } catch (error) {
+      throw new AppError("VECTOR_INDEX_UNAVAILABLE", "无法加载本地 sqlite-vec 向量扩展。", {
+        cause: error,
+      });
+    }
+    if (extensionVersion !== REQUIRED_SQLITE_VEC_VERSION) {
+      throw new AppError(
+        "VECTOR_INDEX_UNAVAILABLE",
+        `sqlite-vec 版本不匹配：需要 ${REQUIRED_SQLITE_VEC_VERSION}，实际为 ${extensionVersion}。`,
+      );
+    }
+    return new SqliteVectorIndex(projectDatabase, extensionVersion);
+  }
+
+  async search(
+    query: Float32Array,
+    filter: VectorSearchFilter,
+    limit: number,
+  ): Promise<readonly VectorSearchHit[]> {
+    validateSearch(filter, limit);
+    const queryBytes = encodeFloat32LittleEndian(query);
+
+    try {
+      return this.projectDatabase.read((database) => {
+        const expectedDimensions = findExpectedDimensions(database, filter);
+        if (expectedDimensions === undefined) return [];
+        if (expectedDimensions !== query.length) {
+          throw new AppError(
+            "VALIDATION_ERROR",
+            `查询向量维度 ${query.length} 与索引向量维度 ${expectedDimensions} 不一致。`,
+          );
+        }
+
+        const rows = database
+          .prepare(
+            `SELECT kc.chunk_id, kc.source_id, kc.ordinal, kc.content,
+                    kc.start_offset, kc.end_offset, kc.chunker_version, kc.created_at,
+                    s.title AS source_title, s.source_label,
+                    vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?)) AS distance
+             FROM chunk_embeddings ce
+             JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
+             JOIN sources s ON s.id = kc.source_id
+             WHERE s.project_id = ? AND s.source_type = 'material'
+               AND s.index_status = 'ready'
+               AND ce.embedding_model_id = ?
+               AND ce.content_hash = kc.content_hash
+               AND length(ce.embedding) = ?
+             ORDER BY distance ASC, s.updated_at DESC, kc.ordinal ASC
+             LIMIT ?`,
+          )
+          .all(
+            queryBytes,
+            filter.projectId,
+            filter.embeddingModelId,
+            expectedDimensions * 4,
+            limit,
+          ) as unknown as VectorSearchRow[];
+        return rows.map(mapSearchHit);
+      });
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError("DATABASE_ERROR", "sqlite-vec 精确向量检索失败。", { cause: error });
+    }
+  }
+}
+
+function loadExtension(database: DatabaseSync): string {
+  database.enableLoadExtension(true);
+  try {
+    sqliteVec.load(database);
+  } finally {
+    database.enableLoadExtension(false);
+  }
+  const row = database.prepare("SELECT vec_version() AS version").get() as
+    { version: string } | undefined;
+  if (row === undefined) {
+    throw new Error("sqlite-vec did not report its version");
+  }
+  return row.version;
+}
+
+function findExpectedDimensions(
+  database: DatabaseSync,
+  filter: VectorSearchFilter,
+): number | undefined {
+  const row = database
+    .prepare(
+      `SELECT vec_length(vec_f32(ce.embedding)) AS dimensions
+       FROM chunk_embeddings ce
+       JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
+       JOIN sources s ON s.id = kc.source_id
+       WHERE s.project_id = ? AND s.source_type = 'material'
+         AND s.index_status = 'ready'
+         AND ce.embedding_model_id = ?
+         AND ce.content_hash = kc.content_hash
+       LIMIT 1`,
+    )
+    .get(filter.projectId, filter.embeddingModelId) as { dimensions: number } | undefined;
+  return row === undefined ? undefined : Number(row.dimensions);
+}
+
+function validateSearch(filter: VectorSearchFilter, limit: number): void {
+  if (filter.projectId.trim() === "" || filter.embeddingModelId.trim() === "") {
+    throw new AppError("VALIDATION_ERROR", "向量检索缺少项目或 Embedding 模型范围。");
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new AppError("VALIDATION_ERROR", "向量检索结果数量必须为 1–100。");
+  }
+}
+
+function mapSearchHit(row: VectorSearchRow): VectorSearchHit {
+  const distance = Number(row.distance);
+  if (!Number.isFinite(distance)) {
+    throw new AppError("DATABASE_ERROR", "sqlite-vec 返回了无效的余弦距离。");
+  }
+  return {
+    chunkId: row.chunk_id,
+    sourceId: row.source_id,
+    ordinal: Number(row.ordinal),
+    content: row.content,
+    startOffset: Number(row.start_offset),
+    endOffset: Number(row.end_offset),
+    chunkerVersion: row.chunker_version,
+    createdAt: row.created_at,
+    sourceTitle: row.source_title,
+    sourceLabel: row.source_label,
+    distance,
+  };
+}

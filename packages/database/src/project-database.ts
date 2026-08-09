@@ -33,7 +33,7 @@ export class ProjectDatabase {
 
     let database: DatabaseSync | undefined;
     try {
-      database = new DatabaseSync(filePath);
+      database = new DatabaseSync(filePath, { allowExtension: true });
       const instance = new ProjectDatabase(filePath, database, options.busyTimeoutMs);
       instance.configure();
       instance.initializeSchema();
@@ -118,6 +118,7 @@ export class ProjectDatabase {
   }
 
   private configure(): void {
+    this.database.enableLoadExtension(false);
     this.database.exec("PRAGMA foreign_keys = ON");
     this.database.exec("PRAGMA journal_mode = WAL");
     this.database.exec("PRAGMA synchronous = FULL");

@@ -12,7 +12,7 @@
 本文严格区分：
 
 - **当前实现**：完整 Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及唯一保留的 v8→v9 前向迁移。
-- **尚未实现范围**：技术架构中规划但尚未落地的 Embedding 任务编排与检索、混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
+- **尚未实现范围**：技术架构中规划但尚未落地的混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
 
@@ -572,7 +572,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 Schema v9 已实现资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS，以及 Embedding 模型和向量存储表。以下能力仍未进入当前 Schema：
 
-- 正文 FTS、Embedding 任务/索引代次和本地向量检索。
+- 正文 FTS、Embedding 任务/索引代次；本地精确向量检索已经实现，混合召回尚未实现。
 - RetrievalRun、ContextManifest 及证据项。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
 - AgentJob、ChangeSet、候选事实和审批。
@@ -724,7 +724,7 @@ CREATE INDEX chunk_embeddings_chunk_rowid
 
 当 `chunk_embeddings.content_hash <> knowledge_chunks.content_hash` 时，该向量已经过期，不能参与检索。删除 Chunk 或模型时级联删除相应向量。SQLite BLOB 是可变长度字段，不需要预设维度；同一 `embedding_model_id` 下维度一致由 Embedding Repository 在写入和查询边界校验。
 
-### 12.6 sqlite-vec 的数据库职责（已确认、未实现）
+### 12.6 sqlite-vec 的数据库职责（已实现）
 
 v0.1 加载固定版本的 `sqlite-vec`，但不创建固定维度的 `vec0` 虚拟表。`chunk_embeddings` 仍是 CleoDoc 管理的普通可重建表：
 
@@ -737,6 +737,8 @@ v0.1 加载固定版本的 `sqlite-vec`，但不创建固定维度的 `vec0` 虚
 固定存储协议为 IEEE 754 Float32、Little-Endian、连续元素、无文件头和维度头，每个元素 4 字节。主流目标平台可将 `Float32Array` 的有效内存范围映射为 `Uint8Array` 后绑定；实现仍须在边界确认字节序，并在非 Little-Endian 平台显式转换。写入不经过 JSON 数组。
 
 向量查询通过 `sources → knowledge_chunks → chunk_embeddings` 过滤当前项目、Source 状态、活动模型和匹配的 Chunk Hash，再按 `vec_distance_cosine(embedding, vec_f32(?))` 排序。`sqlite-vec` 只是 `VectorIndex` SQLite Adapter 的实现细节；未来改用 `vec0` 或 ANN 时不得改变领域类型、Chunk 身份或上层 RAG 编排。
+
+当前实现锁定 NPM 包 `sqlite-vec` 0.1.9。项目数据库以允许受控加载的方式打开，但初始化立即禁用扩展加载；只有 `SqliteVectorIndex` 首次使用时短暂启用并加载随应用发行的扩展，`finally` 中重新禁用。扩展缺失、版本不匹配或加载失败统一返回 `VECTOR_INDEX_UNAVAILABLE`，不会修改 Source、Chunk、FTS 或 Embedding 表。
 
 ## 13. 待确认的数据库语义
 

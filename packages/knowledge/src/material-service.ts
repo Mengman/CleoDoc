@@ -8,6 +8,8 @@ import type {
   KnowledgeSourceIndexStatus,
   MaterialImportResult,
   MaterialWithContent,
+  KnowledgeSourceLanguage,
+  VectorSearchHit,
 } from "../../contracts/src/index.js";
 import {
   AppError,
@@ -173,6 +175,16 @@ export class MaterialService {
     await this.synchronizeProjection();
     await this.indexer.markOutdated(this.repository.list());
     return this.indexer.search(query, limit);
+  }
+
+  async searchVector(
+    language: KnowledgeSourceLanguage,
+    query: Float32Array,
+    limit = 10,
+  ): Promise<readonly VectorSearchHit[]> {
+    await this.synchronizeProjection();
+    await this.indexer.markOutdated(this.repository.list());
+    return await this.indexer.searchVector(language, query, limit);
   }
 
   async getIndexStatus(): Promise<KnowledgeSourceIndexStatus[]> {
