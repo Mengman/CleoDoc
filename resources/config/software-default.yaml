@@ -49,6 +49,9 @@ rag:
   languageDetection:
     minBlockUnits: 50
   embedding:
+    worker:
+      # Chunk task batch size. This is not llama.cpp's token batchSize.
+      chunkBatchSize: 16
     models:
       zh:
         modelId: bge-small-zh-v1.5-q8_0

@@ -88,6 +88,9 @@ rag:
   languageDetection:
     minBlockUnits: 50
   embedding:
+    worker:
+      # Chunk 任务投递/回传批次，不是 llama.cpp Token Batch
+      chunkBatchSize: 16
     models:
       zh:
         modelId: bge-small-zh-v1.5-q8_0
@@ -116,7 +119,7 @@ debug:
   enabled: false
 ```
 
-`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程、批次或推理设备等运行参数。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖超时、上下文策略、Agent、语言检测、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
+`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程、llama.cpp Token Batch 或推理设备等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖超时、上下文策略、Agent、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
 
 ## 4. Provider、模型与密钥
 

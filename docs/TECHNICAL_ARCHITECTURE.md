@@ -163,8 +163,8 @@ Preload 仅通过 `contextBridge` 暴露白名单 API：
 由 Core 创建 Worker Thread，负责：
 
 - 从应用资源或本地模型缓存加载 GGUF 模型。
-- 批量生成 Document 和 Query Embedding。
-- 生成 Document 和 Query Embedding；精确余弦距离由 SQLite Adapter 中的 sqlite-vec 执行。
+- 分批接收 Document Chunk 任务，并复用一次加载的模型生成 Embedding；当前单 Worker 内按输入串行推理，任务批次不表示多输入模型 Batch。Query Worker 接入留给向量检索步骤。
+- 精确余弦距离由 SQLite Adapter 中的 sqlite-vec 执行。
 - 返回纯数据，不直接写 SQLite。
 
 Worker 崩溃不得影响 Core；Core 将当前索引任务标记为可重试。
@@ -997,14 +997,15 @@ v0.2 在此基础上增加：
 
 实施顺序、任务依赖和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，本架构文档不再保存重复的交付计划。
 
-截至 2026-08-08：
+截至 2026-08-09：
 
 - 已实现：v0.1 CLI/项目/SQLite 基础、模型 Provider、多轮对话与文档保存、资料管理、Session 压缩和历史回查、Reasoning/ModelCall 审计、数据库原生项目指令、受控本地文档 Tool。
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
 - 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
 - 已实现：`packages/rag` 的 `node-llama-cpp` CPU Baseline、本地 GGUF 解析、Document/Query Token 统计、归一化向量输出和开发期 CLI 检查命令。
-- 尚未实现：正文 FTS、Embedding Worker 与向量入库、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 已实现：Embedding Worker 的任务分批、模型复用、逐项进度、取消和纯数据向量回传；Worker 不访问 SQLite。
+- 尚未实现：正文 FTS、Embedding 安全写回编排、向量检索、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

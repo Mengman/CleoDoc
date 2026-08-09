@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–6d、7.1–7.3 已完成，正在实施本地 Embedding
+> 状态：实施中；v0.1 步骤 1–6d、7.1–7.5 已完成，正在实施本地 Embedding
 > 日期：2026-08-09
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -46,7 +46,7 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、语言检测、Tokenizer 切片、Embedding 表结构和增量 Chunk Repository 已完成；下一步实现 Worker 化推理 |
+| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF 运行时、语言检测、Tokenizer 切片、Embedding 表结构、增量 Chunk Repository 和 Worker 推理已完成；下一步实现安全写回编排 |
 | 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
@@ -409,7 +409,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，但 Worker、向量生成编排与语义检索尚未实现。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 运行时、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务已经实现；向量安全写回编排与语义检索尚未实现。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -448,14 +448,17 @@ cleo search <query> --scope material
 
 实施状态：已完成。当前完整 Schema v9 包含 `knowledge_chunks.content_hash`、`embedding_models` 和 `chunk_embeddings`。Chunk Repository 已改为增量同步，重复重建保留未变化 Chunk 及其向量，局部变化通过 Hash 不一致使旧向量失效，删除项由外键级联清理。实际向量生成和补齐从步骤 7.5、7.6 开始。
 
-#### 7.5 Worker 化 Embedding 推理
+#### 7.5 Worker 化 Embedding 推理（已完成）
 
 - 在 Worker Thread 中运行 `node-llama-cpp`，主线程负责调度和数据库短事务。
-- 一次索引任务只加载一次所需模型，批量复用同一模型实例完成 Tokenize 和 Embedding，不为每个 Chunk 重复加载。
-- Worker 返回 Chunk ID、输入 Hash、模型 ID、向量和进度，不持有 SQLite 连接，不在数据库事务中执行模型推理。
+- 一次索引任务只加载一次所需模型；主线程按可配置的 `chunkBatchSize` 分批投递 Chunk，Worker 使用同一模型实例逐个完成 Tokenize 和 Embedding，不为每个 Chunk 重复加载。
+- `chunkBatchSize` 是任务投递和结果回传批次，不是 llama.cpp 的 Token Batch，也不是多输入模型 Batch。当前 `node-llama-cpp` 公开 Embedding API 只接受单个输入，因此同一 Worker 内按 Chunk 串行推理。
+- Worker 的逐 Chunk 输入只包含 Chunk ID 和正文，结果只返回 Chunk ID、Token 数和向量；模型 ID 与输入 Hash 由主线程任务上下文维护，不在线程间重复传递。Worker 不持有 SQLite 连接，不在数据库事务中执行模型推理。
 - 支持任务取消、模型加载失败、输入超限和推理失败的稳定错误；失败不得覆盖已有可用 Chunk 与 FTS。
 
-验收门：批量生成期间 CLI 持续收到进度；取消或异常退出后数据库仍可正常打开，原始资料和已有 FTS 不受影响。
+验收门：批量生成期间调用方持续收到进度；取消或异常退出后数据库仍可正常打开，原始资料和已有 FTS 不受影响。
+
+实施状态：已完成独立 Worker 协议、一次任务一次模型加载、Chunk 任务分批、逐项进度、Transferable 向量回传、取消和稳定错误映射。Worker 不导入数据库模块；CLI 索引命令、缺失向量选择、Hash 再校验和数据库写回属于步骤 7.6、7.8。
 
 #### 7.6 Embedding 编排与安全写回
 

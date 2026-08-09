@@ -12,6 +12,7 @@ export const appErrorCodes = [
   "EMBEDDING_MODEL_LOAD_FAILED",
   "EMBEDDING_GENERATION_FAILED",
   "EMBEDDING_INPUT_TOO_LONG",
+  "EMBEDDING_TASK_CANCELLED",
   "CONFIG_ERROR",
   "DATABASE_ERROR",
   "PROVIDER_AUTH_ERROR",
@@ -79,6 +80,7 @@ export function getExitCode(code: AppErrorCode): number {
     case "PROVIDER_TIMEOUT":
       return 7;
     case "GENERATION_CANCELLED":
+    case "EMBEDDING_TASK_CANCELLED":
       return 130;
     default:
       return 1;

@@ -43,3 +43,25 @@ export interface EmbeddingRuntimeInfo {
   readonly embeddingDimensions: number;
   readonly modelWarnings: readonly string[];
 }
+
+export interface EmbeddingChunkInput {
+  readonly chunkId: string;
+  readonly content: string;
+}
+
+export interface EmbeddingChunkResult {
+  readonly chunkId: string;
+  readonly tokenCount: number;
+  readonly vector: Float32Array;
+}
+
+export interface EmbeddingTaskProgress {
+  readonly completedChunks: number;
+  readonly totalChunks: number;
+  readonly chunkId: string;
+}
+
+export interface EmbeddingWorkerTaskResult {
+  readonly modelId: string;
+  readonly processedChunks: number;
+}

@@ -83,6 +83,7 @@ export const softwareConfigSchema = z
         languageDetection: z.object({ minBlockUnits: positiveInteger }).strict(),
         embedding: z
           .object({
+            worker: z.object({ chunkBatchSize: positiveInteger }).strict(),
             models: z
               .object({
                 zh: embeddingModelSchema,
