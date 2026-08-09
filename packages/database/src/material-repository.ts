@@ -72,6 +72,18 @@ export class MaterialRepository {
              relative_path = excluded.relative_path,
              content_hash = excluded.content_hash,
              size = excluded.size,
+             parser_version = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.parser_version ELSE NULL END,
+             chunker_version = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.chunker_version ELSE NULL END,
+             chunking_config_json = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.chunking_config_json ELSE NULL END,
+             index_status = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.index_status ELSE 'stale' END,
+             index_error_code = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.index_error_code ELSE NULL END,
+             indexed_at = CASE WHEN sources.content_hash = excluded.content_hash
+               THEN sources.indexed_at ELSE NULL END,
              created_at = excluded.created_at,
              updated_at = excluded.updated_at`,
         )
@@ -132,6 +144,18 @@ export class MaterialRepository {
            relative_path = excluded.relative_path,
            content_hash = excluded.content_hash,
            size = excluded.size,
+           parser_version = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.parser_version ELSE NULL END,
+           chunker_version = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.chunker_version ELSE NULL END,
+           chunking_config_json = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.chunking_config_json ELSE NULL END,
+           index_status = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.index_status ELSE 'stale' END,
+           index_error_code = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.index_error_code ELSE NULL END,
+           indexed_at = CASE WHEN sources.content_hash = excluded.content_hash
+             THEN sources.indexed_at ELSE NULL END,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at`,
       );

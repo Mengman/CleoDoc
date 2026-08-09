@@ -165,9 +165,12 @@ npm run cleo -- material list
 npm run cleo -- material show <material-id>
 npm run cleo -- material rename <material-id> "新标题"
 npm run cleo -- material remove <material-id>
+npm run cleo -- index status
+npm run cleo -- index rebuild
+npm run cleo -- search "检索关键词" --scope material --limit 10
 ```
 
-导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示本次识别的输入编码。导入成功后，开发期可检查的临时 CDM XML 写入 `.cleo/derived/documents/<资料 ID>.cdm.xml`；它是可删除、可重建的派生物，不是资料事实源。SQLite 中的 `sources` 表是可重建投影；打开资料服务时会根据元数据校准。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。
+导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示输入编码，并在 `.cleo/derived` 生成可重建的 CDM 与切片检查文件。纯文本 Chunk 与 External Content FTS 保存于 SQLite；`index rebuild` 可从原始资料重建，`search` 当前只检索资料。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。
 
 ## 软件配置
 

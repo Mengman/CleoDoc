@@ -1,6 +1,6 @@
 # CleoDoc 资料解析与切片设计
 
-状态：TXT/Markdown 解析、Baseline 切片及临时结果输出已实现；Chunk 入库和索引尚未实现
+状态：TXT/Markdown 解析、Baseline 切片、Chunk 入库和资料 FTS 已实现
 
 更新日期：2026-08-09
 
@@ -25,11 +25,11 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 → 依据 CDM 结构选择切片边界
 → 提取纯文本与原文字节范围
 → 开发期写入单一临时切片 JSON 供检查
-→ （下一阶段）Chunk 写入 SQLite
+→ Chunk 与 External Content FTS 写入 SQLite
 → 可选保留临时 CDM 用于开发期 Debug
 ```
 
-当前 `packages/document-ingestion` 已完成从项目内 UTF-8 TXT/Markdown 到临时 CDM、解析警告、Node 原文字节范围和纯文本 `ChunkDraft` 的处理。解析器与 Chunker 只返回内存结果，不读取项目目录、不访问 SQLite，也不处理外部编码。CleoDoc `MaterialService` 在导入边界检测并解码 UTF-8、GB2312、GBK 或 GB18030，将内容统一为 UTF-8 后依次调用解析器与 Chunker，并把临时 CDM XML 和单一切片检查文件写入 `.cleo/derived`。当前阶段到此为止，不创建 Chunk 数据库记录、FTS 或 Embedding。
+当前 `packages/document-ingestion` 已完成从项目内 UTF-8 TXT/Markdown 到临时 CDM、解析警告、Node 原文字节范围和纯文本 `ChunkDraft` 的处理。解析器与 Chunker 只返回内存结果，不读取项目目录、不访问 SQLite，也不处理外部编码。CleoDoc `MaterialService` 在导入边界统一编码后依次调用解析器与 Chunker；`MaterialIndexer` 负责临时检查文件和数据库索引编排，数据库 Repository 在短事务中替换 Chunk 与 FTS。Embedding 仍不在本阶段。
 
 ## 2. 数据职责
 
@@ -75,7 +75,7 @@ Chunk 是 SQLite 中的纯文本检索投影，不是 CDM 文档，也不是新�
 .cleo/derived/chunks/<source-id>.chunks.json
 ```
 
-这不是“每个 Chunk 一个文件”，也不是后续 RAG 的读取源。它只汇总该 Source 的本次切片结果，删除资料时同步删除，可随时由原始资料重建；Chunk 正式入库后可以停止生成或删除。预览文件当前包含：
+这不是“每个 Chunk 一个文件”，也不是 RAG 的读取源。它只汇总该 Source 的本次切片结果，删除资料时同步删除，可随时由原始资料重建；当前继续保留供人工检查。预览文件包含：
 
 - `schemaVersion`、`sourceId` 和 `sourceHash`。
 - `parserVersion`、`chunkerVersion`、原始 UTF-8 字节长度和实际切片配置。
@@ -438,7 +438,7 @@ end_offset
 - Source Hash 不一致时，旧位置被识别为过期，不能继续宣称精确定位有效。
 - 解析和切片失败不损坏原件，也不替换旧的可用索引。
 
-其中 TXT/Markdown 到临时 CDM 的解析验收已经由固定单元样本覆盖，包括 UTF-8 BOM、中文与 Emoji 字节范围、CRLF、标题、段落、引用、列表、链接、代码、GFM 表格、样式展平、原始 HTML 转义、图片降级和非法 UTF-8。Baseline Chunk 已覆盖短 TXT 段落贪心合并、标题边界、长段落自然拆分、Markdown 样式剥离后的原文定位、列表整体性和随机 CDM Node ID 不影响输出。进入数据库阶段前仍需结合人工样本补齐超长引用、代码、表格、短尾块和更多中英文边界验收。Chunk 入库、FTS 与完整索引验收仍未完成。
+其中 TXT/Markdown 到临时 CDM 的解析验收已经由固定单元样本覆盖，包括 UTF-8 BOM、中文与 Emoji 字节范围、CRLF、标题、段落、引用、列表、链接、代码、GFM 表格、样式展平、原始 HTML 转义、图片降级和非法 UTF-8。Baseline Chunk 已覆盖短 TXT 段落贪心合并、标题边界、长段落自然拆分、Markdown 样式剥离后的原文定位、列表整体性和随机 CDM Node ID 不影响输出。数据库集成已覆盖 Chunk/FTS 入库、短中文检索、删除清理、重建保持未变化 Chunk ID，以及配置变化将索引标记为过期。超长引用、代码、表格、短尾块和更多中英文边界仍需结合人工语料持续补充。
 
 ## 13. 暂缓问题
 

@@ -38,6 +38,10 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo material rename <material-id> <title> [--project <directory>]
   cleo material remove <material-id> [--project <directory>]
 
+  cleo index status [--project <directory>]
+  cleo index rebuild [--project <directory>]
+  cleo search <query> [--scope material] [--limit <数量>] [--project <directory>]
+
   cleo conversation list [--project <directory>]
   cleo conversation show <conversation-id> [--project <directory>]
 

@@ -6,7 +6,11 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ConversationRepository } from "./conversation-repository.js";
-import { CURRENT_SCHEMA_VERSION } from "./current-schema.js";
+import {
+  CURRENT_SCHEMA_SQL,
+  CURRENT_SCHEMA_VERSION,
+  KNOWLEDGE_INDEX_SCHEMA_SQL,
+} from "./current-schema.js";
 import { ProjectDatabase } from "./project-database.js";
 import { TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 import { SessionRepository } from "./session-repository.js";
@@ -22,7 +26,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v8 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v9 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
@@ -54,6 +58,8 @@ describe("current database schema baseline", () => {
           "conversations",
           "generation_model_call_mapping",
           "generations",
+          "knowledge_chunk_fts",
+          "knowledge_chunks",
           "messages",
           "model_calls",
           "project_instruction_revisions",
@@ -68,6 +74,17 @@ describe("current database schema baseline", () => {
         expect.arrayContaining(["message_rowid", "reasoning_content", "model_call_id"]),
       );
       expect(getColumnNames(database, "conversation_message_fts")).toEqual(["content"]);
+      expect(getColumnNames(database, "knowledge_chunk_fts")).toEqual(["content"]);
+      expect(getColumnNames(database, "sources")).toEqual(
+        expect.arrayContaining([
+          "parser_version",
+          "chunker_version",
+          "chunking_config_json",
+          "index_status",
+          "index_error_code",
+          "indexed_at",
+        ]),
+      );
       expect(
         database.read(
           (sqlite) =>
@@ -105,6 +122,13 @@ describe("current database schema baseline", () => {
             .prepare(
               "SELECT name FROM sqlite_master WHERE name = 'conversation_message_fts_content'",
             )
+            .get(),
+        ),
+      ).toBeUndefined();
+      expect(
+        database.read((sqlite) =>
+          sqlite
+            .prepare("SELECT name FROM sqlite_master WHERE name = 'knowledge_chunk_fts_content'")
             .get(),
         ),
       ).toBeUndefined();
@@ -161,62 +185,69 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("opens an existing fully-upgraded v8 database without rewriting its data or history", async () => {
+  it("migrates a complete v8 database to v9 without rewriting its data or history", async () => {
     const root = await createTemporaryProject("cleodoc-existing-v8-test-");
-    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
-    const conversations = new ConversationRepository(database);
-    const conversation = await conversations.createConversation({
-      projectId: "project-1",
-      providerId: "fake",
-      model: "model",
-      title: "保留的对话",
-    });
-    const sessions = new SessionRepository(database);
-    const session = await sessions.createInitialSession({
-      conversationId: conversation.id,
-      systemPrompt: "system prompt",
-    });
-    const message = await conversations.addMessage(
-      conversation.id,
-      { role: "user", content: "已经完成迁移的数据" },
-      session.id,
-    );
-    await database.close();
-
+    const state = path.join(root, ".cleo");
+    await mkdir(state, { recursive: true });
     const filePath = path.join(root, ".cleo", "project.sqlite");
     const raw = new DatabaseSync(filePath);
-    const insertVersion = raw.prepare(
-      "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-    );
-    for (let version = 1; version < CURRENT_SCHEMA_VERSION; version += 1) {
-      insertVersion.run(version, "2026-01-01T00:00:00.000Z");
-    }
+    raw.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      ${v8SchemaSql()}
+      INSERT INTO schema_migrations(version, applied_at)
+      VALUES (8, '2026-01-01T00:00:00.000Z');
+      INSERT INTO conversations
+        (id, project_id, provider_id, model, title, created_at, updated_at)
+      VALUES
+        ('conversation-1', 'project-1', 'fake', 'model', '保留的对话',
+         '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+      INSERT INTO conversation_sessions
+        (id, conversation_id, ordinal, status, trigger, system_prompt_snapshot,
+         estimated_input_tokens, compaction_required, started_at)
+      VALUES
+        ('session-1', 'conversation-1', 1, 'active', 'conversation_started', 'system prompt',
+         0, 0, '2026-01-01T00:00:00.000Z');
+      INSERT INTO messages
+        (id, conversation_id, sequence, role, content, created_at, session_id)
+      VALUES
+        ('message-1', 'conversation-1', 1, 'user', '已经完成迁移的数据',
+         '2026-01-01T00:00:00.000Z', 'session-1');
+      INSERT INTO sources
+        (id, project_id, source_type, origin, format, title, tags_json, relative_path,
+         content_hash, size, created_at, updated_at)
+      VALUES
+        ('source-1', 'project-1', 'material', 'file', 'markdown', '待索引资料', '[]',
+         'materials/00000000-0000-0000-0000-000000000001.md',
+         '0000000000000000000000000000000000000000000000000000000000000000', 10,
+         '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    `);
     raw.close();
 
     const reopened = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
-      expect(new ConversationRepository(reopened).getConversation(conversation.id)).toMatchObject({
-        id: conversation.id,
+      expect(new ConversationRepository(reopened).getConversation("conversation-1")).toMatchObject({
+        id: "conversation-1",
         title: "保留的对话",
       });
-      expect(new ConversationRepository(reopened).getMessages(conversation.id)).toEqual([
+      expect(new ConversationRepository(reopened).getMessages("conversation-1")).toEqual([
         expect.objectContaining({
-          messageRowid: message.messageRowid,
-          id: message.id,
-          sessionId: session.id,
+          id: "message-1",
+          sessionId: "session-1",
           content: "已经完成迁移的数据",
         }),
       ]);
       expect(
-        reopened.read(
-          (sqlite) =>
-            (
-              sqlite.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get() as {
-                count: number;
-              }
-            ).count,
+        reopened.read((sqlite) =>
+          sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
         ),
-      ).toBe(CURRENT_SCHEMA_VERSION);
+      ).toEqual([{ version: 8 }, { version: 9 }]);
+      expect(getColumnNames(reopened, "knowledge_chunks")).toContain("chunk_id");
+      expect(getColumnNames(reopened, "sources")).toContain("index_status");
+      expect(
+        reopened.read((sqlite) =>
+          sqlite.prepare("SELECT index_status FROM sources WHERE id = 'source-1'").get(),
+        ),
+      ).toEqual({ index_status: "pending" });
     } finally {
       await reopened.close();
     }
@@ -258,6 +289,20 @@ async function createTemporaryProject(prefix: string): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
   temporaryDirectories.push(root);
   return root;
+}
+
+function v8SchemaSql(): string {
+  return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "").replace(
+    `    parser_version TEXT,
+    chunker_version TEXT,
+    chunking_config_json TEXT,
+    index_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (index_status IN ('pending', 'ready', 'stale', 'failed')),
+    index_error_code TEXT,
+    indexed_at TEXT,
+`,
+    "",
+  );
 }
 
 function getColumnNames(database: ProjectDatabase, table: string): string[] {

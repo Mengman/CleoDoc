@@ -4,7 +4,9 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import type {
+  KnowledgeSearchResult,
   KnowledgeSource,
+  KnowledgeSourceIndexStatus,
   MaterialImportResult,
   MaterialWithContent,
 } from "../../contracts/src/index.js";
@@ -24,29 +26,16 @@ import {
 } from "../../project/src/index.js";
 import { decodeMaterialText } from "./text-decoding.js";
 import type { MaterialInputEncoding } from "./text-decoding.js";
-
-interface MaterialMetadataOptions {
-  title?: string;
-  sourceLabel?: string;
-  tags?: readonly string[];
-}
-
-export interface AddFileMaterialOptions extends MaterialMetadataOptions {
-  encoding?: MaterialInputEncoding;
-}
-
-export interface AddTextMaterialOptions extends MaterialMetadataOptions {
-  format?: "text" | "markdown";
-}
-
-export interface MaterialServiceOptions {
-  readonly database: { busyTimeoutMs: number };
-  readonly maxImportBytes: number;
-  readonly chunking: ChunkDocumentOptions;
-}
+import { MaterialIndexer, type MaterialIndexRebuildResult } from "./material-indexer.js";
+import type {
+  AddFileMaterialOptions,
+  AddTextMaterialOptions,
+  MaterialServiceOptions,
+} from "./material-types.js";
 
 export class MaterialService {
   private readonly repository: MaterialRepository;
+  private readonly indexer: MaterialIndexer;
 
   private constructor(
     private readonly projectRoot: string,
@@ -56,6 +45,7 @@ export class MaterialService {
     private readonly chunking: ChunkDocumentOptions,
   ) {
     this.repository = new MaterialRepository(database);
+    this.indexer = new MaterialIndexer(projectRoot, projectId, database, chunking);
   }
 
   static async open(
@@ -74,6 +64,7 @@ export class MaterialService {
     );
     try {
       await service.synchronizeProjection();
+      await service.indexer.markOutdated();
       return service;
     } catch (error) {
       await database.close();
@@ -158,6 +149,31 @@ export class MaterialService {
       await writeJsonAtomic(metadata.absolutePath, current.source).catch(() => undefined);
       throw error;
     }
+  }
+
+  async search(query: string, limit = 10): Promise<KnowledgeSearchResult[]> {
+    await this.synchronizeProjection();
+    await this.indexer.markOutdated();
+    return this.indexer.search(query, limit);
+  }
+
+  async getIndexStatus(): Promise<KnowledgeSourceIndexStatus[]> {
+    await this.synchronizeProjection();
+    await this.indexer.markOutdated();
+    return this.indexer.listStatus();
+  }
+
+  async rebuildIndex(): Promise<MaterialIndexRebuildResult> {
+    await this.synchronizeProjection();
+    const sources = this.repository.list();
+    return await this.indexer.rebuild(
+      sources,
+      async (source) => await this.readSourceContent(source),
+    );
+  }
+
+  async rebuildFts(): Promise<void> {
+    await this.indexer.rebuildFts();
   }
 
   async remove(id: string): Promise<KnowledgeSource> {
@@ -254,19 +270,15 @@ export class MaterialService {
     try {
       await writeJsonAtomic(metadataPath.absolutePath, source);
       await writeFileAtomic(derivedDocumentPath.absolutePath, `${parsedDocument.cdmXml}\n`);
-      await writeJsonAtomic(derivedChunksPath.absolutePath, {
-        schemaVersion: 1,
-        sourceId: source.id,
-        sourceHash: source.contentHash,
-        ...chunkedDocument,
-      });
       await this.repository.upsert(source);
+      await this.indexer.replace(source, parsedDocument, chunkedDocument);
       return { source, created: true, inputEncoding: input.inputEncoding };
     } catch (error) {
       await rm(sourcePath.absolutePath, { force: true }).catch(() => undefined);
       await rm(metadataPath.absolutePath, { force: true }).catch(() => undefined);
       await rm(derivedDocumentPath.absolutePath, { force: true }).catch(() => undefined);
       await rm(derivedChunksPath.absolutePath, { force: true }).catch(() => undefined);
+      await this.repository.remove(id).catch(() => undefined);
       throw error;
     }
   }

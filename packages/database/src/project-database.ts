@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { AppError } from "../../contracts/src/index.js";
 import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
+import { SCHEMA_V8_TO_V9_SQL } from "./schema-migrations.js";
 
 type DatabaseOperation<T> = (database: DatabaseSync) => T;
 
@@ -144,6 +145,11 @@ export class ProjectDatabase {
     }
     if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) return;
 
+    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 9) {
+      this.applyMigration(SCHEMA_V8_TO_V9_SQL, CURRENT_SCHEMA_VERSION);
+      return;
+    }
+
     const applicationObject = this.database
       .prepare(
         `SELECT name FROM sqlite_master
@@ -166,6 +172,20 @@ export class ProjectDatabase {
       this.database
         .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
         .run(CURRENT_SCHEMA_VERSION, new Date().toISOString());
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private applyMigration(sql: string, version: number): void {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.exec(sql);
+      this.database
+        .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+        .run(version, new Date().toISOString());
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");

@@ -1,6 +1,6 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 实现状态：Schema v8 基线、`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地；当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
+> 实现状态：Schema v9 保留既有会话压缩结构；`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地，当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
 > 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
 > 日期：2026-08-03
 > 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -938,7 +938,7 @@ type CompactionEvent =
 - 重启 CLI 后能恢复唯一的 active Session 和未完成压缩状态。
 - 连续多次压缩只注入最新累计摘要，不重复注入所有旧摘要。
 - `session_summaries` 只保存一份 `summary` 正文，不再重复保存 JSON 和注入文本。
-- 已经完整达到 Schema v8 的项目在打开时不会被重写，原有聊天记录保持不变。
+- 完整 Schema v8 项目升级到 v9 时不会重写会话相关表，原有聊天记录保持不变。
 
 ## 19. 明确不做
 

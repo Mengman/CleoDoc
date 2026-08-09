@@ -91,6 +91,23 @@ describe("MaterialService", () => {
           endOffset: Buffer.byteLength("# 铁路资料\n\n夜间列车使用煤油灯。", "utf8"),
         }),
       ]);
+      expect(await service.getIndexStatus()).toEqual([
+        expect.objectContaining({
+          sourceId: imported.source.id,
+          status: "ready",
+          chunkCount: 1,
+          parserVersion: "document-ingestion-v1",
+          chunkerVersion: "structural-baseline-v1",
+        }),
+      ]);
+      expect(await service.search("煤油灯")).toEqual([
+        expect.objectContaining({
+          sourceId: imported.source.id,
+          sourceTitle: "铁路照明资料",
+          content: "铁路资料\n\n夜间列车使用煤油灯。",
+        }),
+      ]);
+      expect(await service.search("铁路")).toHaveLength(1);
 
       const duplicatePath = path.join(directory, "copy.md");
       await writeFile(duplicatePath, "# 铁路资料\n\n夜间列车使用煤油灯。\n", "utf8");
@@ -157,6 +174,7 @@ describe("MaterialService", () => {
       const removed = await service.remove(materialId);
       expect(removed.id).toBe(materialId);
       expect(await service.list()).toEqual([]);
+      expect(await service.search("车站")).toEqual([]);
       await expect(readFile(path.join(project.root, relativePath), "utf8")).rejects.toMatchObject({
         code: "ENOENT",
       });
@@ -206,6 +224,60 @@ describe("MaterialService", () => {
       expect(await reopened.list()).toEqual([added.source]);
     } finally {
       await reopened.close();
+    }
+  });
+
+  it("rebuilds chunks and FTS without changing unchanged public chunk IDs", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, {
+      ...TEST_MATERIAL_OPTIONS,
+      chunking: { maxChunkChars: 12, splitSearchWindowRatio: 0.75 },
+    });
+    try {
+      await service.addText("第一条线索藏在钟楼。第二条线索来自旧车票。", {
+        title: "案件线索",
+      });
+      const before = await service.search("线索");
+      expect(before.length).toBeGreaterThan(1);
+
+      const rebuilt = await service.rebuildIndex();
+      await service.rebuildFts();
+      expect(rebuilt).toEqual({ indexedCount: 1, failed: [] });
+      const after = await service.search("线索");
+      expect(after.map((chunk) => chunk.chunkId)).toEqual(before.map((chunk) => chunk.chunkId));
+      expect((await service.getIndexStatus())[0]).toMatchObject({
+        status: "ready",
+        chunkCount: after.length,
+      });
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("marks an index stale when the configured chunking algorithm inputs change", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const initial = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    await initial.addText("城门在午夜关闭，守卫会记录所有出入者。", { title: "城门记录" });
+    await initial.close();
+
+    const changed = await MaterialService.open(project.root, {
+      ...TEST_MATERIAL_OPTIONS,
+      chunking: { maxChunkChars: 400, splitSearchWindowRatio: 0.75 },
+    });
+    try {
+      expect((await changed.getIndexStatus())[0]).toMatchObject({ status: "stale" });
+      expect(await changed.search("守卫")).toEqual([]);
+      expect(await changed.rebuildIndex()).toEqual({ indexedCount: 1, failed: [] });
+      expect((await changed.getIndexStatus())[0]).toMatchObject({ status: "ready" });
+      expect(await changed.search("守卫")).toHaveLength(1);
+    } finally {
+      await changed.close();
     }
   });
 

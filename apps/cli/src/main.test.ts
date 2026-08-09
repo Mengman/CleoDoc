@@ -318,6 +318,17 @@ describe("CleoDoc CLI", () => {
     expect(await readFile(derivedDocumentPath, "utf8")).toContain("<h1");
     expect(await readFile(derivedDocumentPath, "utf8")).toContain("末班车在午夜到站。");
 
+    const rebuiltIndex = await runCli(["index", "rebuild"], environment);
+    expect(rebuiltIndex.exitCode).toBe(0);
+    expect(rebuiltIndex.stdout).toContain("1 份资料成功，0 份失败");
+    const indexStatus = await runCli(["index", "status"], environment);
+    expect(indexStatus.exitCode).toBe(0);
+    expect(indexStatus.stdout).toContain("ready\t1 chunks");
+    const searched = await runCli(["search", "末班车"], environment);
+    expect(searched.exitCode).toBe(0);
+    expect(searched.stdout).toContain("末班车在午夜到站。");
+    expect(searched.stdout).toContain("chunk:");
+
     const duplicate = await runCli(["material", "add", inputFile], environment);
     expect(duplicate.exitCode).toBe(0);
     expect(duplicate.stdout).toContain("资料已存在，未重复导入");

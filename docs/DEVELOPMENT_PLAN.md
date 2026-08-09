@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–5.8 已完成，步骤 6 的 CDM、资料解析和切片预览已交付
+> 状态：实施中；v0.1 步骤 1–6d 已完成，资料 FTS 可通过 CLI 使用
 > 日期：2026-08-09
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -32,7 +32,7 @@ v0.1 的核心闭环是：
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
 | 1.5 软件 YAML 配置 | 已完成 | 发行默认配置、操作系统用户配置、逐项回退警告、独立 `state.yaml`、Provider/模型能力与运行参数注入 |
-| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v8 基线、版本校验、写入队列和健康检查 |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、Schema v9 基线、v8→v9 前向迁移、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
@@ -44,8 +44,9 @@ v0.1 的核心闭环是：
 | 6a. CDM 最小 Core | 已完成 | 严格 XML、`draft-1` Schema、Node/Mark 校验、10 位 Node ID、基础序列化和树遍历 |
 | 6b. TXT/Markdown 资料解析 | 已完成 | UTF-8/GB 系导入、UTF-8 规范化、TXT 逐行成段、临时 CDM、样式展平、CommonMark + GFM 表格、解析警告、Node 原文字节范围及资料导入连接 |
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
+| 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 6d–8、9b–10 | 未开始 | Chunk 入库、FTS5、Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
+| 7–8、9b–10 | 未开始 | Embedding、混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -233,7 +234,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。Schema v8 基线直接使用单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 6–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。Schema v9 保留 v8 已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
 
 工作内容：
 
@@ -261,7 +262,7 @@ cleo material remove <material-id>
 
 数据库设计：[Message](./DATABASE_DESIGN.md#64-messages)、[ModelCall](./DATABASE_DESIGN.md#612-model_calls)、[Generation 映射](./DATABASE_DESIGN.md#613-generation_model_call_mapping)及[CompactionJob 映射](./DATABASE_DESIGN.md#614-compaction_job_model_call_mapping)
 
-实施状态：已完成。Schema v8 基线包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
+实施状态：已完成。Schema v9 保留 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
 工作内容：
 
@@ -305,7 +306,7 @@ CLI 交互示意：
 
 数据库设计：[project_instruction_revisions](./DATABASE_DESIGN.md#611-project_instruction_revisions)
 
-实施状态：已完成。Schema v8 基线、Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复均已落地。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
+实施状态：已完成。Schema v9 保留该 Repository、ContextBuilder、受控 Tool及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 
 工作内容：
 
@@ -368,14 +369,14 @@ CLI 命令：
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
 - 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。
-- 已经完整达到 Schema v8 的项目重新打开时，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
+- 完整 Schema v8 项目升级到 v9 时，只新增资料索引结构，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
 - 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 并发规则。
 
 ### 步骤 6：统一知识模型与 FTS5
 
 统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、结构切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、External Content FTS 和检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-实施状态：CDM 最小 Core、独立 `packages/document-ingestion` 资料解析模块和 Baseline 结构切片已经完成，并接入 `MaterialService`。文件导入按 BOM、严格 UTF-8、GB18030 的顺序检测，兼容 GB2312/GBK，并统一为 UTF-8 项目副本；随后生成临时 CDM 和纯文本 ChunkDraft。开发期分别写入 `.cleo/derived/documents/<source-id>.cdm.xml` 与 `.cleo/derived/chunks/<source-id>.chunks.json` 供人工检查。Chunk 入库、FTS 与索引状态尚未实现。
+实施状态：CDM、资料解析、Baseline 结构切片、Chunk 入库和资料 FTS 已完成，并接入 `MaterialService`。文件导入后在数据库事务外生成临时 CDM 与 ChunkDraft，再以短事务切换 `knowledge_chunks`、External Content FTS 和 Source 索引状态。开发期仍写入 `.cleo/derived/documents/<source-id>.cdm.xml` 与 `.cleo/derived/chunks/<source-id>.chunks.json` 供检查。CLI 已提供 `index status`、`index rebuild` 和仅限资料范围的 `search`；正文索引、Embedding 和混合检索尚未实现。
 
 工作内容：
 
@@ -405,15 +406,18 @@ cleo search <query> --scope material
 
 ### 步骤 7：本地 Embedding 与向量检索
 
-本步骤使用 SQLite 普通表保存 Float32 BLOB，并在 Worker 中执行精确余弦检索；不把 sqlite-vec 或 SQLite vec1 作为 v0.1 必需依赖。后端选型和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
+本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
 工作内容：
 
 - 使用 Transformers.js 在 Worker 中执行本地 ONNX Embedding。
 - 实现模型下载、缓存、哈希校验和进度。
-- 记录模型 ID、revision、维度、量化和归一化方式。
-- 以 Float32 BLOB 保存向量。
-- 对元数据预过滤后的候选执行精确余弦检索。
+- 在 `embedding_models` 中只记录模型 ID、名称和 revision。
+- 为 `knowledge_chunks` 增加 Chunk 内容 Hash，并把当前整组替换改为保留未变化 `chunk_rowid` 的增量更新。
+- 在 `chunk_embeddings` 中以无头部的 IEEE 754 Float32 Little-Endian BLOB 保存向量，并同时保存生成时的 Chunk 内容 Hash。
+- 将项目最低 Node.js 版本提高到支持 `node:sqlite.loadExtension()` 的稳定基线，加载可信 sqlite-vec 扩展后关闭扩展加载入口。
+- 使用 `vec_f32()` 校验写入和 Query 向量，使用 `vec_distance_cosine()` 对元数据预过滤后的候选执行精确余弦检索。
+- 验证同一模型向量维度一致、过期 Hash 不参与查询、模型切换共存、删除级联和扩展加载失败路径。
 - 实现索引代次和模型切换重建。
 
 命令：

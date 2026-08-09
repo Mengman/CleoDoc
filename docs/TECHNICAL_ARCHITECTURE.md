@@ -78,7 +78,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 
 - 独立图数据库。
 - 独立向量数据库服务。
-- 将 sqlite-vec 作为不可替换的 v0.1 核心依赖。
+- 将 sqlite-vec 的 `vec0`、固定维度表或实验性 ANN 作为不可替换的领域存储格式。
 - LangChain.js 或 LlamaIndex.TS 的内部 Document/Storage 模型。
 - Renderer 直接访问 Node.js、文件系统、Git 或 SQLite。
 
@@ -164,7 +164,7 @@ Preload 仅通过 `contextBridge` 暴露白名单 API：
 
 - 下载后从本地模型目录加载 ONNX 模型。
 - 批量生成 Document 和 Query Embedding。
-- 执行精确余弦相似度计算。
+- 生成 Document 和 Query Embedding；精确余弦距离由 SQLite Adapter 中的 sqlite-vec 执行。
 - 返回纯数据，不直接写 SQLite。
 
 Worker 崩溃不得影响 Core；Core 将当前索引任务标记为可重试。
@@ -311,7 +311,7 @@ erDiagram
 
 ## 7. SQLite 架构
 
-当前 Schema v8 基线已落地的表、字段、索引、External Content FTS、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
+当前 Schema v9 基线已落地的表、字段、索引、两类 External Content FTS、ModelCall 审计和已识别问题，详见 [DATABASE_DESIGN.md](./DATABASE_DESIGN.md)。本节同时包含尚未实现的长期 Schema 规划，两者不得混为当前功能。
 
 ### 7.1 数据库拓扑
 
@@ -416,7 +416,7 @@ SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialSer
 
 ## 8. 自研 RAG 架构
 
-> 实现状态：上游 TXT/Markdown Document Ingestion 与 Baseline 结构切片已实现，切片结果暂按 Source 写入 `.cleo/derived/chunks` 供人工检查；统一知识 Chunk 入库、作品/资料 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。当前已有的 `conversation_message_fts` 仅服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
+> 实现状态：上游 TXT/Markdown Document Ingestion、Baseline 结构切片、资料 Chunk 入库和资料 FTS 已实现；切片结果仍按 Source 写入 `.cleo/derived/chunks` 供人工检查。正文 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。`conversation_message_fts` 继续只服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
 ### 8.1 独立项目目标与模块边界
 
@@ -542,18 +542,20 @@ interface EmbeddingProvider {
 
 - 默认实现使用 Transformers.js 的 `feature-extraction` pipeline，在 Worker 中进行 mean pooling 和 normalize。
 - 模型首次使用时由用户确认下载，模型文件进入应用模型缓存。
-- `modelId`、revision、维度、量化方式和归一化策略写入 `embedding_models`。
+- `modelId`、模型名称和 revision 写入 `embedding_models`；维度由向量 BLOB 长度获得，量化、归一化和推理运行参数不复制进模型表。
 - 不同模型生成的向量不得混合查询。
 - 更换模型时创建新的索引代次，旧 FTS 检索保持可用，完成后原子切换。
 
 ### 8.6 向量查询
 
-v0.1 使用 SQLite BLOB 保存 `Float32Array`，在 Worker 中对过滤后的候选执行精确余弦检索：
+v0.1 使用普通 SQLite 表保存 IEEE 754 Float32 Little-Endian BLOB，并由 SQLite Adapter 加载固定版本的 sqlite-vec，对过滤后的候选执行精确余弦检索：
 
 - 先由 SQLite 根据项目、类型、权威、人物和时间过滤。
+- 只使用活动模型且 Chunk Hash 与生成向量时一致的记录。
+- 通过 `vec_f32()` 校验向量，通过 `vec_distance_cosine()` 计算并排序；Query 向量只作为 BLOB 参数传入。
 - 项目级软上限为 5 万个 Chunk。
 - 超过阈值时提示用户优化资料库，并记录 ANN 后端迁移指标。
-- `VectorIndex` 隔离存储实现；若真实基准证明需要 SQLite 向量扩展，优先评估 sqlite-vec，SQLite vec1 保持观察，两者都不能成为不可替换的领域存储格式。
+- 当前不创建固定维度的 `vec0` 虚拟表，也不实现 ANN。`VectorIndex` 隔离存储实现；若真实基准证明需要索引加速，再评估 sqlite-vec 的稳定索引能力或 SQLite vec1，两者都不能成为不可替换的领域存储格式。
 
 ### 8.7 混合召回
 
@@ -735,7 +737,7 @@ interface DocumentDiff {
 
 Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。Tool 的领域边界、Schema、结果、副作用和运行规则统一遵循 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。项目指令现在以 SQLite 追加式 Revision 为事实源，Session 不保存文件路径或文件快照，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
-v0.1 的 Schema v8 基线包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+v0.1 的 Schema v9 保留 v8 已确定的会话结构，并新增资料 Chunk 与 FTS。会话部分包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
 
 模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩比例/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，当前 Payload 触发点分别约为 391,732 Token 和 476,632 Token；压缩请求安全输入上限 `M` 约为 565,424 Token，最终累计摘要长度建议目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 
@@ -1001,7 +1003,7 @@ v0.2 在此基础上增加：
 - 已实现：项目级 `ProjectToolCatalog` 组合 Tool、Conversation 级 `ProjectToolRuntime`、`ToolExecutionContext` 注入和 Conversation 隔离的临时审批。
 - 已实现：独立 `packages/cdm` 最小 Core，包括严格 XML 解析、非正式 `draft-1` Schema、Node/Mark 与 Node ID 校验、基础序列化和树遍历；正式 CDM v1 Schema 仍待解析样本验证。
 - 已实现：独立 `packages/document-ingestion`，将项目内 UTF-8 TXT、CommonMark 和 GFM 表格解析为临时 CDM、警告及 Node 原文字节范围；解析器不访问项目文件或 SQLite。`MaterialService` 在导入边界按 BOM、严格 UTF-8、GB18030 顺序检测，兼容 GB2312/GBK，统一写为 UTF-8 后调用解析器并将临时 CDM 写入 `.cleo/derived/documents/`。
-- 尚未实现：统一知识 Chunk 入库、作品与资料 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
+- 尚未实现：正文 FTS、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool、CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

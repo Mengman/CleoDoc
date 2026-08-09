@@ -1,4 +1,49 @@
-export const CURRENT_SCHEMA_VERSION = 8 as const;
+export const CURRENT_SCHEMA_VERSION = 9 as const;
+
+export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
+  CREATE TABLE knowledge_chunks (
+    chunk_rowid INTEGER PRIMARY KEY,
+    chunk_id TEXT NOT NULL UNIQUE,
+    source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    content TEXT NOT NULL CHECK (length(content) > 0),
+    start_offset INTEGER NOT NULL CHECK (start_offset >= 0),
+    end_offset INTEGER NOT NULL CHECK (end_offset > start_offset),
+    chunker_version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (source_id, ordinal)
+  );
+
+  CREATE INDEX knowledge_chunks_source_rowid
+    ON knowledge_chunks(source_id, chunk_rowid);
+
+  CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
+    content,
+    content='knowledge_chunks',
+    content_rowid='chunk_rowid',
+    tokenize='trigram'
+  );
+
+  CREATE TRIGGER knowledge_chunk_fts_insert AFTER INSERT ON knowledge_chunks
+  BEGIN
+    INSERT INTO knowledge_chunk_fts(rowid, content)
+    VALUES (new.chunk_rowid, new.content);
+  END;
+
+  CREATE TRIGGER knowledge_chunk_fts_delete AFTER DELETE ON knowledge_chunks
+  BEGIN
+    INSERT INTO knowledge_chunk_fts(knowledge_chunk_fts, rowid, content)
+    VALUES ('delete', old.chunk_rowid, old.content);
+  END;
+
+  CREATE TRIGGER knowledge_chunk_fts_update AFTER UPDATE OF content ON knowledge_chunks
+  BEGIN
+    INSERT INTO knowledge_chunk_fts(knowledge_chunk_fts, rowid, content)
+    VALUES ('delete', old.chunk_rowid, old.content);
+    INSERT INTO knowledge_chunk_fts(rowid, content)
+    VALUES (new.chunk_rowid, new.content);
+  END;
+`;
 
 /**
  * Complete schema for a newly-created CleoDoc project database.
@@ -50,6 +95,13 @@ export const CURRENT_SCHEMA_SQL = `
     relative_path TEXT NOT NULL UNIQUE,
     content_hash TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL CHECK (size >= 0),
+    parser_version TEXT,
+    chunker_version TEXT,
+    chunking_config_json TEXT,
+    index_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (index_status IN ('pending', 'ready', 'stale', 'failed')),
+    index_error_code TEXT,
+    indexed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -58,6 +110,8 @@ export const CURRENT_SCHEMA_SQL = `
     ON sources(project_id, updated_at DESC);
   CREATE INDEX sources_project_content_hash
     ON sources(project_id, content_hash);
+
+  ${KNOWLEDGE_INDEX_SCHEMA_SQL}
 
   CREATE TABLE conversation_sessions (
     id TEXT PRIMARY KEY,

@@ -1,0 +1,135 @@
+import type {
+  KnowledgeSearchResult,
+  KnowledgeSource,
+  KnowledgeSourceIndexStatus,
+} from "../../contracts/src/index.js";
+import { AppError, asAppError } from "../../contracts/src/index.js";
+import { KnowledgeChunkRepository, type ProjectDatabase } from "../../database/src/index.js";
+import {
+  chunkDocument,
+  DOCUMENT_CHUNKER_VERSION,
+  DOCUMENT_PARSER_VERSION,
+  parseDocument,
+} from "@cleodoc/document-ingestion";
+import type {
+  ChunkDocumentOptions,
+  ChunkedDocument,
+  ParsedDocument,
+} from "@cleodoc/document-ingestion";
+import { resolveInsideProject, writeJsonAtomic } from "../../project/src/index.js";
+
+export interface MaterialIndexRebuildFailure {
+  readonly sourceId: string;
+  readonly title: string;
+  readonly errorCode: string;
+  readonly message: string;
+}
+
+export interface MaterialIndexRebuildResult {
+  readonly indexedCount: number;
+  readonly failed: readonly MaterialIndexRebuildFailure[];
+}
+
+export class MaterialIndexer {
+  private readonly repository: KnowledgeChunkRepository;
+  private readonly chunkingConfigJson: string;
+
+  constructor(
+    private readonly projectRoot: string,
+    private readonly projectId: string,
+    database: ProjectDatabase,
+    private readonly chunking: ChunkDocumentOptions,
+  ) {
+    this.repository = new KnowledgeChunkRepository(database);
+    this.chunkingConfigJson = JSON.stringify(chunking);
+  }
+
+  async markOutdated(): Promise<void> {
+    await this.repository.markOutdated(
+      DOCUMENT_PARSER_VERSION,
+      DOCUMENT_CHUNKER_VERSION,
+      this.chunkingConfigJson,
+    );
+  }
+
+  async replace(
+    source: KnowledgeSource,
+    parsedDocument: ParsedDocument,
+    chunkedDocument: ChunkedDocument,
+  ): Promise<void> {
+    await this.writePreview(source, chunkedDocument);
+    await this.repository.replaceForSource({
+      sourceId: source.id,
+      expectedContentHash: source.contentHash,
+      parserVersion: parsedDocument.parserVersion,
+      chunkerVersion: chunkedDocument.chunkerVersion,
+      chunkingConfigJson: this.chunkingConfigJson,
+      chunks: chunkedDocument.chunks,
+    });
+  }
+
+  search(query: string, limit = 10): KnowledgeSearchResult[] {
+    const normalized = query.trim();
+    if (normalized === "" || normalized.length > 500) {
+      throw new AppError("VALIDATION_ERROR", "检索关键词长度必须为 1–500 个字符。");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new AppError("VALIDATION_ERROR", "检索结果数量必须为 1–100。");
+    }
+    return this.repository.search(this.projectId, normalized, limit);
+  }
+
+  listStatus(): KnowledgeSourceIndexStatus[] {
+    return this.repository.listStatus();
+  }
+
+  async rebuild(
+    sources: readonly KnowledgeSource[],
+    readContent: (source: KnowledgeSource) => Promise<string>,
+  ): Promise<MaterialIndexRebuildResult> {
+    let indexedCount = 0;
+    const failed: MaterialIndexRebuildFailure[] = [];
+    for (const source of sources) {
+      try {
+        const content = await readContent(source);
+        const parsedDocument = parseDocument({ format: source.format, content });
+        const chunkedDocument = chunkDocument(
+          { parsedDocument, sourceContent: content },
+          this.chunking,
+        );
+        await this.replace(source, parsedDocument, chunkedDocument);
+        indexedCount += 1;
+      } catch (error) {
+        const applicationError = asAppError(error);
+        await this.repository.markFailed(source.id, applicationError.code);
+        failed.push({
+          sourceId: source.id,
+          title: source.title,
+          errorCode: applicationError.code,
+          message: applicationError.message,
+        });
+      }
+    }
+    return { indexedCount, failed };
+  }
+
+  async rebuildFts(): Promise<void> {
+    await this.repository.rebuildFts();
+  }
+
+  private async writePreview(
+    source: KnowledgeSource,
+    chunkedDocument: ChunkedDocument,
+  ): Promise<void> {
+    const path = await resolveInsideProject(
+      this.projectRoot,
+      `.cleo/derived/chunks/${source.id}.chunks.json`,
+    );
+    await writeJsonAtomic(path.absolutePath, {
+      schemaVersion: 1,
+      sourceId: source.id,
+      sourceHash: source.contentHash,
+      ...chunkedDocument,
+    });
+  }
+}

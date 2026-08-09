@@ -1,6 +1,6 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：上游 TXT/Markdown 解析与 Baseline ChunkDraft 已实现；Chunk 入库、索引与 RAG 尚未实现
+状态：TXT/Markdown、Baseline Chunk、SQLite Chunk 与资料 FTS 已实现；Embedding 与混合 RAG 尚未实现
 
 更新日期：2026-08-09
 
@@ -35,8 +35,8 @@ CleoDoc 的 RAG 面向单机桌面应用以及未来可能的移动端、嵌入�
 4. **不为每个 Chunk 创建文件。** 正式 Chunk 正文和定位字段直接保存在 SQLite；当前 `.cleo/derived/chunks/<source-id>.chunks.json` 只是按 Source 汇总的临时检查产物，不是 RAG 存储层。
 5. **FTS5 与 Chunk 使用 External Content 模式。** FTS 索引通过整数 `rowid` 引用 `knowledge_chunks`，不另存一份业务正文。
 6. **Embedding 与 Chunk 分表。** 一个 Chunk 可以针对不同模型生成不同向量，模型升级不要求修改 Chunk。
-7. **v0.1 不依赖向量扩展。** 向量先以 `Float32Array` BLOB 保存在 SQLite，经元数据过滤后在 Worker 中执行精确余弦检索。
-8. **需要 SQLite 向量扩展时，优先试验 sqlite-vec；vec1 保持观察。** 两者都只能位于 `VectorIndex` 适配层后面，不能渗透到领域类型和事实文件。
+7. **v0.1 使用 sqlite-vec 的稳定基础函数。** 向量以 Float32 Little-Endian BLOB 保存在普通 SQLite 表中，经元数据过滤后由 `vec_distance_cosine()` 执行精确余弦检索。
+8. **v0.1 不创建 `vec0`，也不实现 ANN。** `sqlite-vec` 只能位于 `VectorIndex` SQLite Adapter 后面，不能渗透到领域类型和事实文件；SQLite vec1 继续保持观察。
 
 ## 3. 总体数据流
 
@@ -78,6 +78,7 @@ interface KnowledgeChunk {
   sourceId: string;
   ordinal: number;
   content: string;
+  contentHash: string;
   startOffset: number;
   endOffset: number;
   chunkerVersion: string;
@@ -88,7 +89,7 @@ interface KnowledgeChunk {
 
 - `content` 只能是规范化纯文本，不含 CDM、XML、Markdown 或标题路径。
 - `startOffset`、`endOffset` 是项目内规范化 UTF-8 TXT/Markdown 资料副本的连续字节范围。
-- Source Hash 保存在现有 `sources` 表，不重复进入每个 Chunk。
+- Source 文件 Hash 保存在现有 `sources` 表；`KnowledgeChunk.contentHash` 只校验当前 Chunk 的纯文本，两者语义不同。
 - 临时 CDM 和 Node ID 不进入 RAG 公共类型，也不参与长期引用回溯。
 - `chunk_rowid` 可以在数据库内部关联 FTS 和向量，但不能出现在 Tool Result 或 CDM 中。
 
@@ -131,7 +132,7 @@ CREATE TABLE knowledge_chunks (
 );
 ```
 
-这是设计草案，不表示表已经进入当前数据库 Schema。真正实现时需要与项目、来源、访问范围和删除语义一并评审后提升 Schema 版本。
+该表已经进入 Schema v9。Repository 写入前校验 Source Hash、资料字节长度、Chunk 顺序和原文范围，并在一个短事务中替换同一 Source 的完整 Chunk 集合。
 
 ### 6.2 External Content FTS
 
@@ -163,40 +164,47 @@ Embedding 与 Chunk 分离，避免模型升级污染正文和 FTS：
 
 ```sql
 CREATE TABLE embedding_models (
-  embedding_model_id   TEXT PRIMARY KEY,
-  provider             TEXT NOT NULL,
-  model_name           TEXT NOT NULL,
-  revision             TEXT NOT NULL,
-  dimensions           INTEGER NOT NULL,
-  element_type         TEXT NOT NULL,
-  distance_metric      TEXT NOT NULL,
-  normalization        TEXT NOT NULL,
-  model_content_hash   TEXT NOT NULL,
-  created_at           TEXT NOT NULL
+  embedding_model_id TEXT PRIMARY KEY,
+  model_name         TEXT NOT NULL,
+  revision           TEXT NOT NULL,
+  created_at         TEXT NOT NULL,
+  UNIQUE (model_name, revision)
 );
 
 CREATE TABLE chunk_embeddings (
-  chunk_rowid          INTEGER NOT NULL,
-  embedding_model_id   TEXT NOT NULL,
-  content_hash         TEXT NOT NULL,
-  embedding            BLOB NOT NULL,
-  created_at           TEXT NOT NULL,
-  PRIMARY KEY (chunk_rowid, embedding_model_id)
+  embedding_model_id TEXT NOT NULL,
+  chunk_rowid        INTEGER NOT NULL,
+  content_hash       TEXT NOT NULL,
+  embedding          BLOB NOT NULL
+    CHECK (length(embedding) > 0 AND length(embedding) % 4 = 0),
+  created_at         TEXT NOT NULL,
+  PRIMARY KEY (embedding_model_id, chunk_rowid),
+  FOREIGN KEY (embedding_model_id)
+    REFERENCES embedding_models(embedding_model_id) ON DELETE CASCADE,
+  FOREIGN KEY (chunk_rowid)
+    REFERENCES knowledge_chunks(chunk_rowid) ON DELETE CASCADE
 );
+
+CREATE INDEX chunk_embeddings_chunk_rowid
+  ON chunk_embeddings(chunk_rowid);
 ```
 
-`embedding_model_id` 标识包含具体 Revision 的一次模型配置；同名模型升级后创建新标识，不覆盖旧向量。向量由 `@huggingface/transformers` 在 Worker 中运行本地 ONNX 模型生成，以紧凑 `Float32Array` BLOB 保存，不使用 JSON 数组。原始空间约为 `Chunk 数量 × 维度 × 4 字节`，尚未包含 SQLite 页、索引和元数据开销。
+`embedding_model_id` 标识包含具体 Revision 的模型；同名模型升级后创建新标识，不覆盖旧向量。模型表不保存 `model_hash`、维度、距离算法或推理运行参数。向量维度由 `length(embedding) / 4` 或 `vec_length(embedding)` 得到，同一模型下的维度一致性由 Repository 校验。
+
+向量由 `@huggingface/transformers` 在 Worker 中运行本地 ONNX 模型生成，以无头部的 IEEE 754 Float32 Little-Endian 连续 BLOB 保存，不使用 JSON 数组。`knowledge_chunks.content_hash` 记录当前 Chunk 纯文本 Hash，`chunk_embeddings.content_hash` 记录生成该向量时的 Hash；两者不一致时向量过期。原始空间约为 `Chunk 数量 × 维度 × 4 字节`，尚未包含 SQLite 页、索引和元数据开销。
+
+写入时，Little-Endian 平台将 `Float32Array` 的有效内存范围映射为 `Uint8Array`，绑定到 `vec_f32(?)` 进行格式校验后保存。实现必须在边界确认本机字节序，非 Little-Endian 平台显式转换。Query Embedding 使用同一协议作为查询参数，不写入数据库。
 
 ### 7.2 v0.1 查询方式
 
 v0.1 采用可解释、容易验证的精确搜索：
 
 1. SQLite 按当前项目、资料类型、访问范围和 Source 状态过滤候选。
-2. 只读取候选 Chunk 对应模型的向量 BLOB。
-3. Worker 计算精确余弦距离并返回 Top-K。
+2. 只选择活动 `embedding_model_id` 且 `chunk_embeddings.content_hash = knowledge_chunks.content_hash` 的向量。
+3. SQLite 使用 `vec_distance_cosine(embedding, vec_f32(?))` 计算精确余弦距离并返回 Top-K，距离越小越相似。
 4. 与 FTS 结果融合后再读取需要展示和发送给模型的正文。
 
-该方案没有 ANN 训练、索引参数和原生扩展打包问题，适合先验证一部作品约数万 Chunk 的真实延迟和召回。超过当前架构定义的项目级软上限时记录指标，而不是预先引入复杂索引。
+该方案没有 ANN 训练和索引参数；`sqlite-vec` 负责原生距离计算，但 `chunk_embeddings` 仍是普通业务表，不创建固定维度 `vec0`。它适合先验证一部作品约数万 Chunk 的真实延迟和召回。超过当前架构定义的项目级软上限时记录指标，而不是预先引入复杂索引。
 
 ### 7.3 可替换接口
 
@@ -222,20 +230,20 @@ interface VectorIndex {
 | 维度 | sqlite-vec | SQLite vec1 |
 |---|---|---|
 | 维护方 | Alex Garcia 社区项目 | SQLite 官方项目 |
-| 当前定位 | pre-v1 alpha；提供 `vec0`、距离函数和多种语言绑定 | 0.7；提供精确 NN 与基于 IVFADC/OPQ 的 ANN |
+| 当前定位 | pre-v1；提供 `vec0`、距离函数和多种语言绑定 | 0.7；提供精确 NN 与基于 IVFADC/OPQ 的 ANN |
 | Node.js 集成 | 有 NPM 绑定和 Node.js 文档 | 官方文档以编译 C 扩展为主，需要自行完成 Node/Electron 集成与分发 |
 | 平台目标 | 桌面、移动端、WASM 和嵌入式平台已有明确支持路径 | C 实现可移植，x86/ARM 有 SIMD；官方仍说明测试不足，WASM SIMD 等能力尚在路线图中 |
 | 向量类型 | Float32、Int8、Bit | 当前以 Float32 为主 |
 | ANN | 当前 `vec0` 是穷举式精确 KNN，不提供可作为基线的 ANN | IVFADC/OPQ，需要训练、参数选择和通常必需的重排 |
-| CleoDoc 当前结论 | 若基准证明需要扩展，优先试验 | 保持观察，成熟后通过相同接口评测 |
+| CleoDoc 当前结论 | v0.1 使用基础向量校验和距离函数，不使用 `vec0` 或实验性 ANN | 保持观察，成熟后通过相同接口评测 |
 
 最终选型：
 
-- **现在：SQLite 普通表 + Float32 BLOB + Worker 精确余弦。** 这是 v0.1 正式设计。
-- **第一候选扩展：sqlite-vec。** 原因是 Node.js、移动端和多平台分发路径更直接，但必须锁定确切版本，因为其官方仍标记为 pre-v1。
+- **现在：SQLite 普通表 + Float32 Little-Endian BLOB + sqlite-vec 精确余弦。** 这是 v0.1 正式设计。
+- **sqlite-vec 的当前边界。** 只使用 `vec_f32()`、`vec_length()` 和 `vec_distance_cosine()`；不创建 `vec0`，不让固定维度虚拟表成为领域存储。必须锁定确切版本，因为官方仍标记为 pre-v1。
 - **后续候选：SQLite vec1。** 官方维护是长期优势，但当前测试、打包和 ANN 训练复杂度不适合作为 CleoDoc 首版基础设施。
-- 引入任一扩展前，必须用相同数据集比较 Top-K 召回、P50/P95 延迟、索引时间、内存、磁盘和各目标平台安装包增量。
-- 某个平台无法加载扩展时必须自动使用基础精确实现；不能导致资料无法搜索。
+- 引入 `vec0`、vec1 或 ANN 前，必须用相同数据集比较 Top-K 召回、P50/P95 延迟、索引时间、内存、磁盘和各目标平台安装包增量。
+- CLI 实现必须使用支持 `node:sqlite.loadExtension()` 的 Node.js 版本；Windows、macOS 和 Linux 发布前分别验证扩展加载与签名。扩展加载失败不得损坏 Chunk、FTS 或原始资料，并应返回明确的向量检索不可用错误。
 
 官方参考：
 
@@ -338,16 +346,16 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 - 将 TXT、Markdown 解析为可删除的临时 CDM，固定丢弃纯展示样式。
 - 实现基于块级段落结构的确定性 Baseline Chunk：超长块向前寻找自然边界递归拆分，同一标题区域内的小块按最大长度贪心向前合并，并保留连续原文字节范围。
-- 实现 `knowledge_chunks`、FTS5、Embedding BLOB 和精确余弦检索。
+- 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
 - 实现 FTS 与向量的混合召回、RAG Tool 和 ContextManifest。
 - 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。
-- 不要求 sqlite-vec 或 vec1，不实现 ANN。
+- 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 
 ### 后续版本
 
 - 实现 CleoDoc 自有 DOCX、带文本层 PDF 和网页快照适配器。
 - 评估表格、脚注、图片说明和复杂阅读顺序。
-- 在固定基准证明必要后试验 sqlite-vec。
+- 在固定基准证明必要后试验 sqlite-vec 的 `vec0` 或届时稳定的 ANN 能力。
 - vec1 达到可接受的稳定性和跨平台分发条件后再参与同一基准。
 - 扫描 PDF OCR、模型驱动语义切块和复杂版面恢复继续保持在首版范围之外。
 
