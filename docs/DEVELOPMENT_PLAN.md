@@ -414,6 +414,7 @@ cleo search <query> --scope material
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
 - 使用 `node-llama-cpp` 加载中文和英文 Q8_0 GGUF。
+- Windows、Linux 和 Intel macOS 使用 CPU 预编译绑定；Apple Silicon 使用发行包提供的 Metal 预编译绑定，但保持 `gpuLayers: 0`，不把模型层卸载到 GPU。
 - 模型实例同时提供 Document/Query Token 统计与 Embedding 推理。
 - Query 指令由发行模型配置提供，只应用于 Query，不写入 Chunk 正文。
 - 输出归一化 `Float32Array`，并提供开发期 `embedding model/test` 命令。

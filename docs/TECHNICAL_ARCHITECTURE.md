@@ -67,7 +67,7 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | 安装包 | Node.js 可执行入口；v0.2 使用 electron-builder | v0.1 CLI 分发；v0.2 Windows、macOS、Linux 桌面打包与签名配置 |
 | 数据库 | Node.js 内置 `node:sqlite` | CLI 与桌面共用的项目数据库和个人资料库 |
 | 全文检索 | SQLite FTS5 trigram | 中文原文和资料检索 |
-| 本地 Embedding | `node-llama-cpp` | 在 Worker 中运行 GGUF Embedding 模型，并复用模型 Tokenizer |
+| 本地 Embedding | `node-llama-cpp` | 在 Worker 中运行 GGUF Embedding 模型并复用模型 Tokenizer；Apple Silicon 加载 Metal 预编译绑定但保持 `gpuLayers: 0` |
 | Git 引擎 | isomorphic-git | 无系统 Git 依赖的版本管理 |
 | 文档模型 | 严格 XML + HTML 文档语义子集的 CDM | 独立基础协议；AI、用户和解析器直接使用，RAG Core 不直接依赖 |
 | 文档解析 | 独立 Document Ingestion 模块 + CDM Schema | TXT/Markdown、临时 CDM、来源定位和纯文本 ChunkDraft |

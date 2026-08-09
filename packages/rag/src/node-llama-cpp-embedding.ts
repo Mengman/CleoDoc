@@ -11,6 +11,7 @@ import {
 
 import { AppError } from "../../contracts/src/index.js";
 import { formatEmbeddingInput } from "./embedding-model-definition.js";
+import { resolveEmbeddingLlamaBackend } from "./embedding-platform.js";
 import type {
   EmbeddingInputKind,
   EmbeddingResult,
@@ -44,7 +45,7 @@ export class NodeLlamaCppEmbeddingRuntime implements EmbeddingTokenizer {
     let model: LlamaModel | undefined;
     try {
       llama = await getLlama({
-        gpu: false,
+        gpu: resolveEmbeddingLlamaBackend(),
         build: "never",
         skipDownload: true,
         progressLogs: false,
@@ -197,7 +198,7 @@ export class NodeLlamaCppEmbeddingTokenizer implements EmbeddingTokenizer {
     let model: LlamaModel | undefined;
     try {
       llama = await getLlama({
-        gpu: false,
+        gpu: resolveEmbeddingLlamaBackend(),
         build: "never",
         skipDownload: true,
         progressLogs: false,

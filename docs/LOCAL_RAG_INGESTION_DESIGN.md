@@ -132,6 +132,8 @@ en → BAAI/bge-small-en-v1.5
 
 Embedding 模型使用 GGUF 格式并由 `node-llama-cpp` 加载。同一个 GGUF 同时提供 Tokenizer 和 Embedding 推理：只执行切片时可以使用 `vocabOnly: true`；生成向量时在 Worker 中完整加载一次模型，并在整个任务中复用。主线程按 `chunkBatchSize` 分批投递和接收 Chunk，但当前公开 API 仍在同一 Worker 内逐个推理；这里的任务批次不是 llama.cpp Token Batch 或多输入模型 Batch。不得为每个 Chunk 重复加载模型。
 
+运行时优先使用发行的预编译绑定。Windows、Linux 和 Intel macOS 选择 CPU 绑定；Apple Silicon 因发行包只提供 ARM64 Metal 绑定而选择 `metal`，但模型加载仍设置 `gpuLayers: 0`。这只是选择可用的本地二进制，不表示当前 CPU Baseline 已启用 GPU 模型层推理。
+
 切片器只依赖以下能力，不直接导入 `node-llama-cpp`：
 
 ```ts
