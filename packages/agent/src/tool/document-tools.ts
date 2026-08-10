@@ -41,17 +41,13 @@ type ReadProjectDocumentInput = z.infer<typeof readProjectDocumentInputSchema>;
 
 const readProjectDocumentOutputSchema = z
   .object({
-    document: z
-      .object({
-        path: z.string(),
-        updatedAt: updatedAtSchema,
-        offset: z.number().int().nonnegative(),
-        content: z.string(),
-        truncated: z.boolean(),
-        nextOffset: z.number().int().nonnegative().nullable(),
-        totalCharacters: z.number().int().nonnegative(),
-      })
-      .strict(),
+    path: z.string(),
+    updatedAt: updatedAtSchema,
+    offset: z.number().int().nonnegative(),
+    content: z.string(),
+    truncated: z.boolean(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+    totalCharacters: z.number().int().nonnegative(),
   })
   .strict();
 type ReadProjectDocumentOutput = z.infer<typeof readProjectDocumentOutputSchema>;
@@ -67,14 +63,10 @@ type WriteProjectDocumentInput = z.infer<typeof writeProjectDocumentInputSchema>
 
 const writeProjectDocumentOutputSchema = z
   .object({
-    document: z
-      .object({
-        path: z.string(),
-        size: z.number().int().nonnegative(),
-        updatedAt: updatedAtSchema,
-        created: z.boolean(),
-      })
-      .strict(),
+    path: z.string(),
+    size: z.number().int().nonnegative(),
+    updatedAt: updatedAtSchema,
+    created: z.boolean(),
   })
   .strict();
 type WriteProjectDocumentOutput = z.infer<typeof writeProjectDocumentOutputSchema>;
@@ -118,7 +110,7 @@ export class ReadProjectDocumentTool implements Tool<
   ReadProjectDocumentOutput
 > {
   readonly name = "read_project_document";
-  readonly version = 1;
+  readonly version = 2;
   readonly description =
     "通过 manuscript 下的相对路径分段读取当前项目的一份 Markdown 文档。只在确实需要引用正文内容时使用，不得访问项目外文件。";
   readonly exposure = "full";
@@ -134,15 +126,13 @@ export class ReadProjectDocumentTool implements Tool<
     const content = document.content.slice(input.offset, input.offset + input.maxCharacters);
     const nextOffset = input.offset + content.length;
     return toolSuccess({
-      document: {
-        path: document.summary.relativePath,
-        updatedAt: document.summary.updatedAt,
-        offset: input.offset,
-        content,
-        truncated: nextOffset < document.content.length,
-        nextOffset: nextOffset < document.content.length ? nextOffset : null,
-        totalCharacters: document.content.length,
-      },
+      path: document.summary.relativePath,
+      updatedAt: document.summary.updatedAt,
+      offset: input.offset,
+      content,
+      truncated: nextOffset < document.content.length,
+      nextOffset: nextOffset < document.content.length ? nextOffset : null,
+      totalCharacters: document.content.length,
     });
   }
 
@@ -150,7 +140,7 @@ export class ReadProjectDocumentTool implements Tool<
     input: ReadProjectDocumentInput,
     outcome: ToolOutcome<ReadProjectDocumentOutput>,
   ): string {
-    const document = outcome.ok ? outcome.data.document : undefined;
+    const document = outcome.ok ? outcome.data : undefined;
     return compactionEvent(this, outcome, {
       path: document?.path ?? input.document,
       ...(document === undefined
@@ -171,7 +161,7 @@ export class WriteProjectDocumentTool implements Tool<
   WriteProjectDocumentOutput
 > {
   readonly name = "write_project_document";
-  readonly version = 1;
+  readonly version = 2;
   readonly description =
     "根据用户明确的保存要求，在当前项目 manuscript 目录中创建 Markdown 文档。目标已存在时，只有用户明确要求覆盖才设置 overwrite=true；所有写入都需要用户批准。";
   readonly exposure = "full";
@@ -201,12 +191,10 @@ export class WriteProjectDocumentTool implements Tool<
     }
     const saved = await this.documents.save(input.path, input.content, exists);
     return toolSuccess({
-      document: {
-        path: saved.relativePath,
-        size: saved.size,
-        updatedAt: saved.updatedAt,
-        created: saved.created,
-      },
+      path: saved.relativePath,
+      size: saved.size,
+      updatedAt: saved.updatedAt,
+      created: saved.created,
     });
   }
 
@@ -214,7 +202,7 @@ export class WriteProjectDocumentTool implements Tool<
     input: WriteProjectDocumentInput,
     outcome: ToolOutcome<WriteProjectDocumentOutput>,
   ): string {
-    const document = outcome.ok ? outcome.data.document : undefined;
+    const document = outcome.ok ? outcome.data : undefined;
     return compactionEvent(this, outcome, {
       operation:
         document === undefined

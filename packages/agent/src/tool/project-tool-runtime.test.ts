@@ -55,14 +55,12 @@ describe("ProjectToolRuntime", () => {
     });
     expect(read).toMatchObject({
       ok: true,
-      tool: { name: "read_project_document", version: 1 },
+      tool: { name: "read_project_document", version: 2 },
       data: {
-        document: {
-          path: "manuscript/notes.md",
-          content: "# 资料",
-          truncated: true,
-          updatedAt: expect.any(String),
-        },
+        path: "manuscript/notes.md",
+        content: "# 资料",
+        truncated: true,
+        updatedAt: expect.any(String),
       },
     });
     expect(JSON.stringify(read)).not.toContain("contentHash");
@@ -89,7 +87,8 @@ describe("ProjectToolRuntime", () => {
     );
     expect(created).toMatchObject({
       ok: true,
-      data: { document: { path: "manuscript/summary.md", created: true } },
+      tool: { name: "write_project_document", version: 2 },
+      data: { path: "manuscript/summary.md", created: true },
     });
 
     const overwritten = await executeTool(
@@ -104,7 +103,8 @@ describe("ProjectToolRuntime", () => {
     );
     expect(overwritten).toMatchObject({
       ok: true,
-      data: { document: { created: false } },
+      tool: { name: "write_project_document", version: 2 },
+      data: { created: false },
     });
     expect(approvalCount).toBe(1);
     expect((await documents.read("manuscript/summary.md")).content).toBe("改稿");
@@ -147,14 +147,13 @@ describe("ProjectToolRuntime", () => {
         ok: true,
         data: {
           page: 1,
-          pageSize: 10,
           totalPages: 1,
           action: "list",
           tools: expect.arrayContaining([
             expect.objectContaining({ name: "list_project_documents", version: 1 }),
             expect.objectContaining({ name: "read_project_instructions", version: 1 }),
             expect.objectContaining({ name: "set_project_instructions", version: 1 }),
-            expect.objectContaining({ name: "project_tool_catalog", version: 1 }),
+            expect.objectContaining({ name: "project_tool_catalog", version: 2 }),
           ]),
         },
       });
@@ -174,9 +173,9 @@ describe("ProjectToolRuntime", () => {
             inputSchema: expect.any(Object),
             outputSchema: expect.any(Object),
           },
-          callableNextRound: true,
         },
       });
+      expect(JSON.stringify(loaded)).not.toContain("callableNextRound");
       expect(tools.toolInfo.definitions.map((tool) => tool.name)).toContain(
         "set_project_instructions",
       );
@@ -194,6 +193,7 @@ describe("ProjectToolRuntime", () => {
           ]),
         },
       });
+      expect(JSON.stringify(listedAfterLoad)).not.toContain('"pageSize"');
 
       const set = await executeTool(
         tools,
@@ -336,15 +336,14 @@ describe("ProjectToolRuntime", () => {
       });
       expect(read).toMatchObject({
         ok: true,
+        tool: { name: "read_conversation_message", version: 2 },
         data: {
-          message: {
-            messageId: stored.id,
-            role: "assistant",
-            content: "主角是一名退",
-            offset: 0,
-            truncated: true,
-            nextOffset: 6,
-          },
+          messageId: stored.id,
+          role: "assistant",
+          content: "主角是一名退",
+          offset: 0,
+          truncated: true,
+          nextOffset: 6,
         },
       });
       expect(JSON.stringify(read)).not.toContain("reasoning");
@@ -368,7 +367,7 @@ describe("ProjectToolRuntime", () => {
 
     expect(result).toMatchObject({
       ok: false,
-      tool: { name: "write_project_document", version: 1 },
+      tool: { name: "write_project_document", version: 2 },
       error: { code: "PATH_OUTSIDE_PROJECT" },
     });
     expect(await new DocumentService(project.root).list()).toHaveLength(0);

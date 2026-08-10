@@ -547,6 +547,11 @@ describe("session compaction", () => {
           argumentsJson: JSON.stringify({ document: "manuscript/chapter.md", offset: 0 }),
         },
         {
+          id: "read-doc-v1",
+          name: "read_project_document",
+          argumentsJson: JSON.stringify({ document: "manuscript/legacy.md", offset: 0 }),
+        },
+        {
           id: "search-history-1",
           name: "search_conversation_history",
           argumentsJson: JSON.stringify({ query: "HISTORY_QUERY_SECRET", limit: 5 }),
@@ -576,14 +581,12 @@ describe("session compaction", () => {
         toolCallId: "write-1",
         content: JSON.stringify({
           ok: true,
-          tool: { name: "write_project_document", version: 1 },
+          tool: { name: "write_project_document", version: 2 },
           data: {
-            document: {
-              path: "manuscript/summary.md",
-              size: 10,
-              updatedAt: "2026-08-03T00:00:00.000Z",
-              created: true,
-            },
+            path: "manuscript/summary.md",
+            size: 10,
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            created: true,
           },
         }),
       }),
@@ -594,7 +597,7 @@ describe("session compaction", () => {
         toolCallId: "write-failed",
         content: JSON.stringify({
           ok: false,
-          tool: { name: "write_project_document", version: 1 },
+          tool: { name: "write_project_document", version: 2 },
           error: {
             code: "DOCUMENT_ALREADY_EXISTS",
             message: "ERROR_MESSAGE_SECRET",
@@ -608,17 +611,15 @@ describe("session compaction", () => {
         toolCallId: "read-doc-1",
         content: JSON.stringify({
           ok: true,
-          tool: { name: "read_project_document", version: 1 },
+          tool: { name: "read_project_document", version: 2 },
           data: {
-            document: {
-              path: "manuscript/chapter.md",
-              updatedAt: "2026-08-03T00:00:00.000Z",
-              offset: 0,
-              content: "DOCUMENT_CONTENT_SECRET",
-              truncated: false,
-              nextOffset: null,
-              totalCharacters: 100,
-            },
+            path: "manuscript/chapter.md",
+            updatedAt: "2026-08-03T00:00:00.000Z",
+            offset: 0,
+            content: "DOCUMENT_CONTENT_SECRET",
+            truncated: false,
+            nextOffset: null,
+            totalCharacters: 100,
           },
         }),
       }),
@@ -649,18 +650,16 @@ describe("session compaction", () => {
         toolCallId: "read-history-1",
         content: JSON.stringify({
           ok: true,
-          tool: { name: "read_conversation_message", version: 1 },
+          tool: { name: "read_conversation_message", version: 2 },
           data: {
-            message: {
-              messageId: "old-message",
-              role: "user",
-              createdAt: "2026-08-03T00:00:00.000Z",
-              content: "HISTORY_MESSAGE_SECRET",
-              offset: 0,
-              truncated: false,
-              nextOffset: null,
-              totalCharacters: 22,
-            },
+            messageId: "old-message",
+            role: "user",
+            createdAt: "2026-08-03T00:00:00.000Z",
+            content: "HISTORY_MESSAGE_SECRET",
+            offset: 0,
+            truncated: false,
+            nextOffset: null,
+            totalCharacters: 22,
           },
         }),
       }),
@@ -681,6 +680,22 @@ describe("session compaction", () => {
       storedMessage({
         sequence: 8,
         role: "tool",
+        name: "read_project_document",
+        toolCallId: "read-doc-v1",
+        content: JSON.stringify({
+          ok: true,
+          tool: { name: "read_project_document", version: 1 },
+          data: {
+            document: {
+              path: "manuscript/legacy.md",
+              content: "LEGACY_DOCUMENT_CONTENT_SECRET",
+            },
+          },
+        }),
+      }),
+      storedMessage({
+        sequence: 9,
+        role: "tool",
         name: "future_tool",
         toolCallId: "unknown-1",
         content: "UNKNOWN_TOOL_RESULT_SECRET",
@@ -691,18 +706,18 @@ describe("session compaction", () => {
       const projected = runtime.projectToolEventsForCompaction(messages);
       expect(projected).toEqual([
         expect.objectContaining({
-          tool: { name: "write_project_document", version: 1 },
+          tool: { name: "write_project_document", version: 2 },
           operation: "document_created",
           status: "completed",
           path: "manuscript/summary.md",
         }),
         expect.objectContaining({
-          tool: { name: "write_project_document", version: 1 },
+          tool: { name: "write_project_document", version: 2 },
           status: "failed",
           errorCode: "DOCUMENT_ALREADY_EXISTS",
         }),
         expect.objectContaining({
-          tool: { name: "read_project_document", version: 1 },
+          tool: { name: "read_project_document", version: 2 },
           path: "manuscript/chapter.md",
           totalCharacters: 100,
           truncated: false,
@@ -712,7 +727,7 @@ describe("session compaction", () => {
           resultCount: 1,
         }),
         expect.objectContaining({
-          tool: { name: "read_conversation_message", version: 1 },
+          tool: { name: "read_conversation_message", version: 2 },
           readCharacters: 22,
           truncated: false,
         }),
@@ -720,6 +735,7 @@ describe("session compaction", () => {
           tool: { name: "read_project_instructions", version: 1 },
           updatedAt: "2026-08-03T00:00:00.000Z",
         }),
+        { tool: { name: "read_project_document", version: 1 }, status: "completed" },
         { tool: { name: "future_tool", version: 0 }, status: "unknown" },
       ]);
       const serialized = JSON.stringify(projected);
@@ -732,6 +748,7 @@ describe("session compaction", () => {
         "HISTORY_EXCERPT_SECRET",
         "HISTORY_MESSAGE_SECRET",
         "PROJECT_INSTRUCTIONS_SECRET",
+        "LEGACY_DOCUMENT_CONTENT_SECRET",
         "ARG_SECRET",
         "UNKNOWN_TOOL_RESULT_SECRET",
       ]) {

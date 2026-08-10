@@ -84,7 +84,6 @@ const catalogOutputSchema = z.discriminatedUnion("action", [
       action: z.literal("list"),
       tools: z.array(toolSummarySchema),
       page: z.number().int().positive(),
-      pageSize: z.number().int().positive(),
       totalPages: z.number().int().nonnegative(),
     })
     .strict(),
@@ -92,7 +91,6 @@ const catalogOutputSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("get"),
       tool: publicDefinitionSchema,
-      callableNextRound: z.literal(true),
     })
     .strict(),
 ]);
@@ -111,7 +109,7 @@ export interface ProjectToolInfo {
 
 export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, ProjectToolCatalogOutput> {
   readonly name = "project_tool_catalog";
-  readonly version = 1;
+  readonly version = 2;
   readonly description =
     "发现当前项目可用的 Tool。使用 list 分页查看全部 Tool；使用 get 按名称取得完整定义并使该版本从下一轮起可调用。";
   readonly exposure = "full";
@@ -194,7 +192,6 @@ export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, Project
         action: "list",
         tools: tools.slice(start, start + pageSize).map(toSummary),
         page,
-        pageSize,
         totalPages,
       });
     }
@@ -213,7 +210,6 @@ export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, Project
     return toolSuccess({
       action: "get",
       tool: this.publicDefinition(tool),
-      callableNextRound: true,
     });
   }
 

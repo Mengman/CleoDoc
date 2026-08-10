@@ -47,18 +47,14 @@ type ReadConversationMessageInput = z.infer<typeof readConversationMessageInputS
 
 const readConversationMessageOutputSchema = z
   .object({
-    message: z
-      .object({
-        messageId: z.string(),
-        role: z.enum(["user", "assistant"]),
-        createdAt: updatedAtSchema,
-        content: z.string(),
-        offset: z.number().int().nonnegative(),
-        truncated: z.boolean(),
-        nextOffset: z.number().int().nonnegative().nullable(),
-        totalCharacters: z.number().int().nonnegative(),
-      })
-      .strict(),
+    messageId: z.string(),
+    role: z.enum(["user", "assistant"]),
+    createdAt: updatedAtSchema,
+    content: z.string(),
+    offset: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+    totalCharacters: z.number().int().nonnegative(),
   })
   .strict();
 type ReadConversationMessageOutput = z.infer<typeof readConversationMessageOutputSchema>;
@@ -107,7 +103,7 @@ export class ReadConversationMessageTool implements Tool<
   ReadConversationMessageOutput
 > {
   readonly name = "read_conversation_message";
-  readonly version = 1;
+  readonly version = 2;
   readonly description =
     "根据 search_conversation_history 返回的 messageId，分段读取一条不可变历史消息。不得读取其他 Conversation、当前活动 Session 或 Reasoning。";
   readonly exposure = "catalog";
@@ -129,16 +125,14 @@ export class ReadConversationMessageTool implements Tool<
     const content = message.content.slice(input.offset, input.offset + input.maxCharacters);
     const nextOffset = input.offset + content.length;
     return toolSuccess({
-      message: {
-        messageId: message.id,
-        role: message.role === "user" ? "user" : "assistant",
-        createdAt: message.createdAt,
-        content,
-        offset: input.offset,
-        truncated: nextOffset < message.content.length,
-        nextOffset: nextOffset < message.content.length ? nextOffset : null,
-        totalCharacters: message.content.length,
-      },
+      messageId: message.id,
+      role: message.role === "user" ? "user" : "assistant",
+      createdAt: message.createdAt,
+      content,
+      offset: input.offset,
+      truncated: nextOffset < message.content.length,
+      nextOffset: nextOffset < message.content.length ? nextOffset : null,
+      totalCharacters: message.content.length,
     });
   }
 
@@ -149,8 +143,8 @@ export class ReadConversationMessageTool implements Tool<
     return compactionEvent(this, outcome, {
       ...(outcome.ok
         ? {
-            readCharacters: outcome.data.message.content.length,
-            truncated: outcome.data.message.truncated,
+            readCharacters: outcome.data.content.length,
+            truncated: outcome.data.truncated,
           }
         : {}),
     });

@@ -360,6 +360,7 @@ CLI 命令：
 - `allow_until_exit` 按 Conversation 隔离；动态加载状态按精确 `name + version` 在 Conversation 内保持和恢复。
 - 压缩投影通过 Catalog 同时解析组合 Tool 与业务 Tool，Catalog 的 `list/get` 固定忽略。
 - ChatService 在每次真实模型请求前重新读取当前 Catalog 定义，并通过请求顶层 `tools` 字段发送所有 `exposure = "full"` 的 Tool；Catalog 入口因此不需要独立版本公告或持久化状态。
+- 已完成 LLM 可见 JSON 简化审查：`read_project_document`、`write_project_document` 和 `read_conversation_message` v2 删除单对象包装层；`project_tool_catalog` v2 删除重复的 `pageSize` 与恒定的 `callableNextRound`。
 
 验收：
 

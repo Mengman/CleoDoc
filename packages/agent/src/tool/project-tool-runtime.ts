@@ -134,6 +134,11 @@ export class ProjectToolRuntime {
         events.push(genericStoredToolEvent(name, result));
         continue;
       }
+      if (tool.name === this.catalog.name) continue;
+      if (result.identity.name !== tool.name || result.identity.version !== tool.version) {
+        events.push(genericStoredToolEvent(name, result));
+        continue;
+      }
       const input = tool.inputSchema.safeParse(parseJson(call.argumentsJson));
       if (!input.success) {
         events.push(genericStoredToolEvent(name, result));

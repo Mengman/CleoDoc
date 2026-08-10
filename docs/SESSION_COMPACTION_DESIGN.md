@@ -507,7 +507,7 @@ DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模
     {
       "tool": {
         "name": "write_project_document",
-        "version": 1
+        "version": 2
       },
       "status": "completed",
       "operation": "document_created",

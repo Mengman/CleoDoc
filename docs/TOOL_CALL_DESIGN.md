@@ -272,26 +272,7 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 
 Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provider 能力过滤 Tool。未授权 Tool 不得通过元 Tool 泄露或加载。
 
-### 4.1 LLM 可见 JSON 简化审查
-
-按照 [1.11](#111-llm-可见-json-必须简单直接) 对现有和已设计 Tool 进行审查。标记为“待简化”的项目当前仍保持 v1 兼容；实现修改时必须提升对应 Tool 版本并更新测试，不能只改文档或静默改变历史协议。
-
-| Tool | 结论 | 审查说明 |
-|---|---|---|
-| `list_project_documents` | 符合 | `documents` 数组是多结果必要层级；路径、大小和更新时间都有后续读取决策价值。 |
-| `read_project_document` | **待简化** | 成功 Data 只有一份文档，却额外使用 `document` 单对象包装层；v2 应把文档字段提升到 Data 根级。 |
-| `write_project_document` | **待简化** | 成功 Data 的 `document` 单对象包装没有独立业务语义；v2 应直接返回路径、大小、更新时间和创建状态。 |
-| `read_project_instructions` | 符合 | 只返回正文和必要更新时间，没有内部 Revision。 |
-| `append_project_instructions` | 符合 | 不重复输入正文，只返回更新时间和更新后字符数。 |
-| `set_project_instructions` | 符合 | 不重复输入正文，与追加 Tool 使用同一简单结果。 |
-| `search_conversation_history` | 符合 | `results` 是多命中必要数组；每项字段均服务于判断和后续精读。 |
-| `read_conversation_message` | **待简化** | 成功 Data 只有一条消息，却额外使用 `message` 单对象包装层；v2 应把消息字段提升到 Data 根级。 |
-| `project_tool_catalog` | **部分待简化** | `action` 是组合 Tool 判别所必需；`list` 结果重复返回 `pageSize`、`get` 固定返回 `callableNextRound: true` 的必要性不足，入口协议下次升级时删除。 |
-| `search_knowledge` | 符合 | 单一根对象加必要的 `results` 数组；不返回内部检索诊断。 |
-| `list_materials` | 符合 | 只返回选择资料所需的 `sourceId`、标题、格式、语言和索引状态。 |
-| `read_material_context` | 符合 | 同一 `sourceId` 信息只返回一次，Chunk 数组保持原文顺序。 |
-
-公共 `ToolResult` 的 `ok + tool + data/error` 信封用于统一成功/失败判断、Tool 身份和版本，不属于可以逐 Tool 删除的冗余包装。该信封是否需要整体调整只能作为公共协议单独评审。
+以下各 Tool 的“输入示例”是模型提交的参数对象；“成功输出示例”是 CleoDoc 实际返回给模型的完整 `ToolResult`，因此包含公共的 `ok + tool + data` 信封。示例只用于说明稳定的公开 JSON 结构，不替代运行时 Schema 校验。
 
 ## 5. 文档 Tool
 
@@ -303,6 +284,12 @@ Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provid
 
 Input：无参数（`{}`）。
 
+输入示例：
+
+```json
+{}
+```
+
 Output Schema 字段：
 
 | 路径 | 类型 | 说明 |
@@ -311,6 +298,24 @@ Output Schema 字段：
 | `documents[].path` | string | manuscript 下的项目相对路径 |
 | `documents[].size` | nonnegative integer | UTF-8 文件字节数 |
 | `documents[].updatedAt` | datetime string | 文件最后更新时间 |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "list_project_documents", "version": 1 },
+  "data": {
+    "documents": [
+      {
+        "path": "manuscript/chapter-01.md",
+        "size": 12840,
+        "updatedAt": "2026-08-10T10:00:00.000Z"
+      }
+    ]
+  }
+}
+```
 
 压缩投影只保留 Tool 名称、版本、状态和 `documentCount`，不复制完整路径列表。
 
@@ -328,19 +333,47 @@ Input Schema 字段：
 | `offset` | nonnegative integer | 默认 0 |
 | `maxCharacters` | integer | 默认 20,000；最大 50,000 |
 
+输入示例：
+
+```json
+{
+  "document": "manuscript/chapter-01.md",
+  "offset": 0,
+  "maxCharacters": 15
+}
+```
+
 Output Schema 字段：
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
-| `document.path` | string | 实际读取路径 |
-| `document.updatedAt` | datetime string | 当前文件更新时间 |
-| `document.offset` | nonnegative integer | 本段起点 |
-| `document.content` | string | 本段正文 |
-| `document.truncated` | boolean | 是否仍有未返回内容 |
-| `document.nextOffset` | integer 或 null | 下一段起点 |
-| `document.totalCharacters` | nonnegative integer | 当前完整文档字符数 |
+| `path` | string | 实际读取路径 |
+| `updatedAt` | datetime string | 当前文件更新时间 |
+| `offset` | nonnegative integer | 本段起点 |
+| `content` | string | 本段正文 |
+| `truncated` | boolean | 是否仍有未返回内容 |
+| `nextOffset` | integer 或 null | 下一段起点 |
+| `totalCharacters` | nonnegative integer | 当前完整文档字符数 |
 
-> JSON 简化标记：v1 的 `document` 单对象包装层没有独立业务语义。后续实现 v2 时将以上字段提升到成功 Data 根级；当前代码和历史结果保持不变。
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "read_project_document", "version": 2 },
+  "data": {
+    "path": "manuscript/chapter-01.md",
+    "updatedAt": "2026-08-10T10:00:00.000Z",
+    "offset": 0,
+    "content": "# 第一章\n\n雨从凌晨开始下。",
+    "truncated": true,
+    "nextOffset": 15,
+    "totalCharacters": 35000
+  }
+}
+```
+
+当前协议为 v2。v1 历史 Result 中的 `document` 包装层只作为历史消息保留，不参与 v2 Output Schema 校验。
 
 压缩投影只保留路径、更新时间和读取范围，不保留 `content`：
 
@@ -348,7 +381,7 @@ Output Schema 字段：
 {
   "tool": {
     "name": "read_project_document",
-    "version": 1
+    "version": 2
   },
   "status": "completed",
   "path": "manuscript/chapter-01.md",
@@ -374,16 +407,41 @@ Input Schema 字段：
 | `content` | string | 必填；最多 500,000 字符 |
 | `overwrite` | boolean | 默认 false |
 
+输入示例：
+
+```json
+{
+  "path": "manuscript/chapter-02.md",
+  "content": "# 第二章\n\n林默回到了旧车站。",
+  "overwrite": false
+}
+```
+
 Output Schema 字段：
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
-| `document.path` | string | 保存路径 |
-| `document.size` | nonnegative integer | UTF-8 文件字节数 |
-| `document.updatedAt` | datetime string | 保存完成时间 |
-| `document.created` | boolean | true 为新建，false 为覆盖 |
+| `path` | string | 保存路径 |
+| `size` | nonnegative integer | UTF-8 文件字节数 |
+| `updatedAt` | datetime string | 保存完成时间 |
+| `created` | boolean | true 为新建，false 为覆盖 |
 
-> JSON 简化标记：v1 的 `document` 单对象包装层待在 v2 删除，结果直接返回 `path`、`size`、`updatedAt` 和 `created`。
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "write_project_document", "version": 2 },
+  "data": {
+    "path": "manuscript/chapter-02.md",
+    "size": 46,
+    "updatedAt": "2026-08-10T10:05:00.000Z",
+    "created": true
+  }
+}
+```
+
+当前协议为 v2，成功 Data 直接返回以上字段。
 
 压缩投影不复制 `content`，只保留名称、版本、状态、`document_created/document_updated`、路径和更新时间。
 
@@ -401,12 +459,31 @@ Output Schema 字段：
 
 Input：无参数（`{}`）。
 
+输入示例：
+
+```json
+{}
+```
+
 Output Schema：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `content` | string | 当前完整项目指令；未设置时为空字符串 |
 | `updatedAt` | datetime string 或 null | 最近更新时间；未设置时为 null |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "read_project_instructions", "version": 1 },
+  "data": {
+    "content": "保持第三人称限知视角。",
+    "updatedAt": "2026-08-10T09:00:00.000Z"
+  }
+}
+```
 
 压缩投影只保留名称、版本、状态和更新时间，不复制指令内容。
 
@@ -422,12 +499,33 @@ Input Schema：
 |---|---|---|
 | `text` | string | 必填；1～65,536 字符 |
 
+输入示例：
+
+```json
+{
+  "text": "\n涉及案件事实时必须先检索项目资料。"
+}
+```
+
 Output Schema：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `updatedAt` | datetime string | 修改完成时间 |
 | `totalCharacters` | nonnegative integer | 更新后项目指令字符数 |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "append_project_instructions", "version": 1 },
+  "data": {
+    "updatedAt": "2026-08-10T10:10:00.000Z",
+    "totalCharacters": 38
+  }
+}
+```
 
 不返回更新后的完整项目指令。下一轮模型请求会重新注入最新项目指令；重复放入 Tool Result 只会增加 Context。压缩投影只保留名称、版本、状态、`project_instructions_appended`、更新时间和更新后字符数。
 
@@ -443,7 +541,28 @@ Input Schema：
 |---|---|---|
 | `content` | string | 必填；最多 65,536 字符；允许为空 |
 
+输入示例：
+
+```json
+{
+  "content": "保持第三人称限知视角。\n涉及案件事实时必须先检索项目资料。"
+}
+```
+
 Output Schema 与追加 Tool 相同，只返回 `updatedAt` 和 `totalCharacters`，不重复输入中的完整内容。压缩投影中的操作为 `project_instructions_set`。
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "set_project_instructions", "version": 1 },
+  "data": {
+    "updatedAt": "2026-08-10T10:12:00.000Z",
+    "totalCharacters": 31
+  }
+}
+```
 
 ### 6.4 删除精确片段替换 Tool
 
@@ -475,6 +594,15 @@ Input Schema：
 | `query` | string | 必填；1～1,000 字符 |
 | `limit` | integer | 默认 5；1～10 |
 
+输入示例：
+
+```json
+{
+  "query": "主角退休前的职务",
+  "limit": 5
+}
+```
+
 Output Schema：
 
 | 路径 | 类型 | 说明 |
@@ -484,6 +612,25 @@ Output Schema：
 | `results[].role` | `user` 或 `assistant` | 消息角色 |
 | `results[].createdAt` | datetime string | 消息时间 |
 | `results[].excerpt` | string | 包含命中位置的简短摘要 |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "search_conversation_history", "version": 1 },
+  "data": {
+    "results": [
+      {
+        "messageId": "msg_01J5Y6T8P3A7C9N2K4M6R8V0X1",
+        "role": "user",
+        "createdAt": "2026-08-09T14:20:00.000Z",
+        "excerpt": "主角退休前是市刑侦支队的刑警。"
+      }
+    ]
+  }
+}
+```
 
 不返回 `sessionId`、Session Sequence、`message_rowid` 或 FTS Rank。压缩投影不保留 Query、Message ID 或 Excerpt，只保留名称、版本、状态和命中数量。
 
@@ -501,20 +648,49 @@ Input Schema：
 | `offset` | nonnegative integer | 默认 0 |
 | `maxCharacters` | integer | 默认 10,000；最大 20,000 |
 
+输入示例：
+
+```json
+{
+  "messageId": "msg_01J5Y6T8P3A7C9N2K4M6R8V0X1",
+  "offset": 0,
+  "maxCharacters": 10000
+}
+```
+
 Output Schema：
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
-| `message.messageId` | string | 被读取消息引用 |
-| `message.role` | `user` 或 `assistant` | 消息角色 |
-| `message.createdAt` | datetime string | 消息时间 |
-| `message.content` | string | 当前读取片段 |
-| `message.offset` | nonnegative integer | 当前片段起点 |
-| `message.truncated` | boolean | 是否仍有未返回内容 |
-| `message.nextOffset` | integer 或 null | 下一片段起点 |
-| `message.totalCharacters` | nonnegative integer | 完整消息字符数 |
+| `messageId` | string | 被读取消息引用 |
+| `role` | `user` 或 `assistant` | 消息角色 |
+| `createdAt` | datetime string | 消息时间 |
+| `content` | string | 当前读取片段 |
+| `offset` | nonnegative integer | 当前片段起点 |
+| `truncated` | boolean | 是否仍有未返回内容 |
+| `nextOffset` | integer 或 null | 下一片段起点 |
+| `totalCharacters` | nonnegative integer | 完整消息字符数 |
 
-> JSON 简化标记：v1 的 `message` 单对象包装层待在 v2 删除，消息字段提升到成功 Data 根级。
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "read_conversation_message", "version": 2 },
+  "data": {
+    "messageId": "msg_01J5Y6T8P3A7C9N2K4M6R8V0X1",
+    "role": "user",
+    "createdAt": "2026-08-09T14:20:00.000Z",
+    "content": "主角退休前是市刑侦支队的刑警。",
+    "offset": 0,
+    "truncated": false,
+    "nextOffset": null,
+    "totalCharacters": 15
+  }
+}
+```
+
+当前协议为 v2。v1 历史 Result 中的 `message` 包装层只作为历史消息保留。
 
 逻辑目标是读取完整消息，但必须保留分段机制，防止一条超长模型回复一次占满 Context。压缩投影不保留 Message ID 和正文，只记录名称、版本、状态、读取字符数及是否仍有后续。
 
@@ -547,62 +723,60 @@ Embedding 或 sqlite-vec 不可用时，CleoDoc 在内部降级为 Exact + FTS�
 
 > 在当前项目已经建立索引的资料中执行混合检索。query 必须使用目标资料的语言：搜索英文资料时使用英文 query，搜索中文资料时使用中文 query。目标包含多种语言时，分别使用相应语言调用本 Tool。若不清楚资料语言，先调用 list_materials。
 
-Input Schema：
+Input 字段：
 
-```ts
-const searchKnowledgeInputSchema = z
-  .object({
-    query: z.string().trim().min(1).max(500),
-    limit: z.number().int().min(1).max(10).optional(),
-    sourceId: z.uuid().optional(),
-  })
-  .strict();
-```
+| 字段 | 类型 | 默认值/限制 |
+|---|---|---|
+| `query` | string | 必填；1～500 字符；必须使用目标资料的语言 |
+| `limit` | integer | 默认 5；1～10 |
+| `sourceId` | UUID string | 可选；必须原样复制 `list_materials` 返回值，不能使用资料标题 |
 
-- `query` 是实际用于 Exact、FTS 和 Embedding 的文本。
-- `limit` 默认 5，最大 10。
-- `sourceId` 是可选的资料 UUID，用于把搜索限制到一份资料。它只能原样复制 `list_materials.materials[].sourceId`，不能传资料 `title`。
-- 不提供 `language` 参数。CleoDoc 根据 query 的实际语言选择 Embedding 模型，避免模型声明英文却提交中文 query。
+不提供 `language` 参数。CleoDoc 根据 query 的实际语言选择 Embedding 模型，避免模型声明英文却提交中文 query。
 
-Output Schema 直接内联结果项，不再创建独立的 `Evidence` 输出层：
-
-```ts
-const searchKnowledgeOutputSchema = z
-  .object({
-    queryLanguage: z.enum(["zh", "en"]),
-    sourceLanguages: z.array(z.enum(["zh", "en"])),
-    languageWarning: z.string().nullable(),
-    results: z.array(
-      z
-        .object({
-          sourceId: z.uuid(),
-          chunkId: z.string(),
-          title: z.string(),
-          content: z.string(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
-```
-
-`sourceId` 与 `chunkId` 是 CDM `<reference>` 使用的稳定公开标识，不是数据库 Row ID。当前 `sourceId` 复用 `KnowledgeSource.id` 的 UUID；`title` 只是显示名称，不能代替 `sourceId`。结果数组顺序已经表示最终相关性，LLM 不需要内部排名字段。
-
-正常结果示例：
+输入示例：
 
 ```json
 {
-  "queryLanguage": "en",
-  "sourceLanguages": ["en"],
-  "languageWarning": null,
-  "results": [
-    {
-      "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
-      "chunkId": "chk_8r2v5x9m",
-      "title": "Triton Programming Guide",
-      "content": "Triton is a language and compiler for writing efficient GPU kernels."
-    }
-  ]
+  "query": "What is Triton used for?",
+  "limit": 5,
+  "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c"
+}
+```
+
+Output 字段：
+
+| 路径 | 类型 | 说明 |
+|---|---|---|
+| `queryLanguage` | `zh` 或 `en` | 检索 Query 的主语言 |
+| `sourceLanguages` | Array | 当前检索范围内资料的语言集合 |
+| `languageWarning` | string 或 null | Query 与资料语言明确不匹配时的提示 |
+| `results` | Array | 已按最终相关性排序的证据 |
+| `results[].sourceId` | UUID string | 资料公开引用 |
+| `results[].chunkId` | string | Chunk 公开引用 |
+| `results[].title` | string | 资料显示名称 |
+| `results[].content` | string | Chunk 纯文本内容 |
+
+`sourceId` 与 `chunkId` 是 CDM `<reference>` 使用的稳定公开标识，不是数据库 Row ID。当前 `sourceId` 复用 `KnowledgeSource.id` 的 UUID；`title` 只是显示名称，不能代替 `sourceId`。结果数组顺序已经表示最终相关性，LLM 不需要内部排名字段。
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "search_knowledge", "version": 2 },
+  "data": {
+    "queryLanguage": "en",
+    "sourceLanguages": ["en"],
+    "languageWarning": null,
+    "results": [
+      {
+        "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
+        "chunkId": "chk_8r2v5x9m",
+        "title": "Triton Programming Guide",
+        "content": "Triton is a language and compiler for writing efficient GPU kernels."
+      }
+    ]
+  }
 }
 ```
 
@@ -610,22 +784,20 @@ const searchKnowledgeOutputSchema = z
 
 `queryLanguage` 复用当前 Query 主语言检测逻辑，只返回 `zh` 或 `en`，并据此选择 Embedding 模型。`sourceLanguages` 来自当前项目、`material` 类型、`ready` 状态且满足可选 `sourceId` 限制的资料语言并集；指定 `sourceId` 时就是该资料的语言列表。
 
-只在明确不匹配时生成非阻断警告：
-
-```ts
-const mismatch =
-  sourceLanguages.length > 0 &&
-  !sourceLanguages.includes(queryLanguage);
-```
+只在资料语言集合非空、且不包含 Query 主语言时生成非阻断警告。
 
 示例：
 
 ```json
 {
-  "queryLanguage": "zh",
-  "sourceLanguages": ["en"],
-  "languageWarning": "资料是英文的，请使用英文 query 重新搜索。",
-  "results": []
+  "ok": true,
+  "tool": { "name": "search_knowledge", "version": 2 },
+  "data": {
+    "queryLanguage": "zh",
+    "sourceLanguages": ["en"],
+    "languageWarning": "资料是英文的，请使用英文 query 重新搜索。",
+    "results": []
+  }
 }
 ```
 
@@ -639,37 +811,55 @@ Source 语言目前是资料级信息，不精确到每个 Chunk。Chunk 级语�
 
 > 列出当前项目导入资料的标题、格式、语言、公开 `sourceId` 和索引状态。需要确认有哪些资料、资料属于什么格式、使用什么语言或者选择 `search_knowledge.sourceId` 时调用。本 Tool 不读取资料正文。
 
-Input Schema：
+Input 字段：
 
-```ts
-const listMaterialsInputSchema = z
-  .object({
-    page: z.number().int().positive().optional(),
-    pageSize: z.number().int().min(1).max(20).optional(),
-  })
-  .strict();
+| 字段 | 类型 | 默认值/限制 |
+|---|---|---|
+| `page` | positive integer | 默认 1 |
+| `pageSize` | positive integer | 默认 10；最大 20 |
+
+输入示例：
+
+```json
+{
+  "page": 1,
+  "pageSize": 10
+}
 ```
 
-`page` 默认 1，`pageSize` 默认 10。Output 不重复返回模型已经提交的 `pageSize`：
+Output 字段：
 
-```ts
-const listMaterialsOutputSchema = z
-  .object({
-    materials: z.array(
-      z
-        .object({
-          sourceId: z.uuid(),
-          title: z.string(),
-          format: z.enum(["text", "markdown"]),
-          languages: z.array(z.enum(["zh", "en"])),
-          indexStatus: z.enum(["pending", "ready", "stale", "failed"]),
-        })
-        .strict(),
-    ),
-    page: z.number().int().positive(),
-    totalPages: z.number().int().nonnegative(),
-  })
-  .strict();
+| 路径 | 类型 | 说明 |
+|---|---|---|
+| `materials` | Array | 当前页资料摘要 |
+| `materials[].sourceId` | UUID string | 后续 RAG Tool 使用的资料引用 |
+| `materials[].title` | string | 资料显示名称 |
+| `materials[].format` | `text` 或 `markdown` | 当前支持的原始资料格式 |
+| `materials[].languages` | Array | 资料包含的语言 |
+| `materials[].indexStatus` | `pending/ready/stale/failed` | 当前索引状态 |
+| `page` | positive integer | 当前页 |
+| `totalPages` | nonnegative integer | 总页数 |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "list_materials", "version": 2 },
+  "data": {
+    "materials": [
+      {
+        "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
+        "title": "Triton Programming Guide",
+        "format": "markdown",
+        "languages": ["en"],
+        "indexStatus": "ready"
+      }
+    ],
+    "page": 1,
+    "totalPages": 1
+  }
+}
 ```
 
 `sourceId` 是资料 UUID，供后续 Tool 原样引用；`title` 是面向用户的显示名称，二者不得互换。当前资料还没有 Tag 功能，因此不返回 `tags`；`updatedAt` 对模型的检索决策没有直接帮助，也不返回。保留 `format`，以支持“查询 PDF 中的信息”一类按资料格式表达的用户要求。v0.1 只允许 `text` 和 `markdown`；真正支持 PDF、DOCX 等格式时扩展枚举并提升 Tool 版本，不能提前让模型误以为已经支持。
@@ -680,39 +870,65 @@ const listMaterialsOutputSchema = z
 
 > 根据 `search_knowledge` 返回的 `sourceId` 和 `chunkId`，读取目标 Chunk 以及有限的相邻 Chunk。`sourceId` 必须原样传递，不能使用资料 `title`。只在搜索结果缺少必要前后文时调用。返回结果始终包含指定的目标 Chunk。
 
-Input Schema：
+Input 字段：
 
-```ts
-const readMaterialContextInputSchema = z
-  .object({
-    sourceId: z.uuid(),
-    chunkId: z.string().trim().min(1),
-    before: z.number().int().min(0).max(3).optional(),
-    after: z.number().int().min(0).max(3).optional(),
-  })
-  .strict();
+| 字段 | 类型 | 默认值/限制 |
+|---|---|---|
+| `sourceId` | UUID string | 必填；来自 `search_knowledge` 的同一结果项 |
+| `chunkId` | string | 必填；来自 `search_knowledge` 的同一结果项 |
+| `before` | integer | 默认 1；0～3 |
+| `after` | integer | 默认 1；0～3 |
+
+输入示例：
+
+```json
+{
+  "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
+  "chunkId": "chk_8r2v5x9m",
+  "before": 1,
+  "after": 1
+}
 ```
 
-`before` 和 `after` 默认都是 1。即使都为 0，也必须返回 `chunkId` 指定的目标 Chunk。
+即使 `before` 和 `after` 都为 0，也必须返回 `chunkId` 指定的目标 Chunk。
 
-相邻 Chunk 属于同一资料，因此 `sourceId` 只返回一次：
+Output 字段：
 
-```ts
-const readMaterialContextOutputSchema = z
-  .object({
-    sourceId: z.uuid(),
-    title: z.string(),
-    targetChunkId: z.string(),
-    chunks: z.array(
-      z
-        .object({
-          chunkId: z.string(),
-          content: z.string(),
-        })
-        .strict(),
-    ),
-  })
-  .strict();
+| 路径 | 类型 | 说明 |
+|---|---|---|
+| `sourceId` | UUID string | 目标资料引用，只返回一次 |
+| `title` | string | 资料显示名称 |
+| `targetChunkId` | string | 请求的目标 Chunk |
+| `chunks` | Array | 按原文顺序排列的目标及相邻 Chunk |
+| `chunks[].chunkId` | string | Chunk 公开引用 |
+| `chunks[].content` | string | Chunk 纯文本内容 |
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "read_material_context", "version": 2 },
+  "data": {
+    "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
+    "title": "Triton Programming Guide",
+    "targetChunkId": "chk_8r2v5x9m",
+    "chunks": [
+      {
+        "chunkId": "chk_7q1u4w8k",
+        "content": "GPU kernels are usually written with low-level programming models."
+      },
+      {
+        "chunkId": "chk_8r2v5x9m",
+        "content": "Triton is a language and compiler for writing efficient GPU kernels."
+      },
+      {
+        "chunkId": "chk_9s3w6y0n",
+        "content": "Its programming model operates on blocks of values."
+      }
+    ]
+  }
+}
 ```
 
 `chunks` 固定按照原文顺序返回：前置 Chunk、目标 Chunk、后置 Chunk；不得按照检索相关性重新排序。Service 必须校验 Source 属于当前项目且处于 `ready` 状态、目标 Chunk 存在并属于该 Source、相邻读取没有超过限制。
@@ -778,59 +994,11 @@ Catalog 负责：
 - 通过 `get` 操作返回指定 Tool 的完整公开定义。
 - 作为组合 Tool 为自身提供名称、版本、Schema、结果包装与压缩策略。
 
-Catalog 内部的 Tool Map 不保存 Catalog 自身，因此不存在 `Catalog → Catalog` 的对象引用。需要列出或按名称解析自身时，由 `listTools()` 或 `getToolOrSelf()` 显式合并自身定义：
-
-```ts
-class ProjectToolCatalog
-  implements Tool<ProjectToolCatalogInput, ProjectToolCatalogOutput>
-{
-  readonly name = "project_tool_catalog";
-  readonly version = 1;
-  readonly exposure = "full";
-  readonly approval = "auto";
-
-  private readonly tools: Map<string, Tool<unknown, unknown>>;
-
-  listTools(page: number, pageSize: number): ListToolsOutput;
-  getTool(name: string): Tool<unknown, unknown> | null;
-  getToolOrSelf(name: string): Tool<unknown, unknown> | null;
-}
-```
-
-Catalog 的初始化按功能域组合，不在 Runtime 中逐个 `new` Tool：
-
-```ts
-const catalog = new ProjectToolCatalog([
-  ...createDocumentTools(documentService),
-  ...createProjectInstructionTools(projectInstructionRepository),
-  ...createConversationHistoryTools(sessionRepository),
-  ...createKnowledgeTools(materialService),
-]);
-```
-
-`createKnowledgeTools()` 已按上述方式接入 Catalog。以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
+Catalog 内部的 Tool Map 不保存 Catalog 自身，因此不存在 `Catalog → Catalog` 的对象引用。列出全部 Tool 或按名称查询 Catalog 自身时，由 Catalog 显式把自己的公开定义与业务 Tool 合并。Catalog 按文档、项目指令、Conversation 历史和 RAG 等功能域一次性收集 Tool；Runtime 不逐个创建 Tool。构造阶段只完成名称校验、Schema 转换和定义缓存，不执行模型调用、文档解析或其他重任务。
 
 ### 9.2 Catalog Input
 
-原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 区分操作。Provider Function Tool 要求参数 Schema 顶层必须是 `type: "object"`，因此不直接把 Zod 判别联合生成的顶层 `oneOf` 作为公开 Schema：
-
-```ts
-const projectToolCatalogInputSchema = z
-  .object({
-    action: z.enum(["list", "get"]),
-    page: z.number().int().positive().optional(),
-    pageSize: z.number().int().min(1).max(20).optional(),
-    name: z.string().trim().min(1).optional(),
-  })
-  .strict()
-  .superRefine((input, context) => {
-    if (input.action === "get" && input.name === undefined) {
-      context.addIssue({ code: "custom", path: ["name"], message: "get 操作必须提供 Tool 名称。" });
-    }
-  });
-```
-
-`page` 和 `pageSize` 的默认值由 Catalog 执行时补全，避免 JSON Schema 把带 Zod Default 的字段误标为必填。`get` 的 `name` 条件必填规则由同一 Zod Schema 校验。
+原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 区分操作，并保持顶层为 JSON Object，以兼容 Provider Function Tool。`page` 和 `pageSize` 的默认值由 Catalog 执行时补全；`get` 操作必须提供 `name`。
 
 `list` 操作字段：
 
@@ -851,13 +1019,13 @@ const projectToolCatalogInputSchema = z
 
 ### 9.3 list 操作
 
-调用示例：
+输入示例：
 
 ```json
 {
   "action": "list",
   "page": 1,
-  "pageSize": 10
+  "pageSize": 2
 }
 ```
 
@@ -871,21 +1039,46 @@ const projectToolCatalogInputSchema = z
 | `tools[].version` | positive integer | 当前契约版本 |
 | `tools[].description` | string | 功能和适用时机 |
 | `page` | positive integer | 当前页 |
-| `pageSize` | positive integer | 实际页大小 |
 | `totalPages` | nonnegative integer | 总页数；没有结果时为 0 |
 
 `list` 始终返回全部已授权 Tool，不因 `exposure` 或当前是否加载而过滤。结果按 `name` 稳定排序；超出总页数时返回空 `tools`，不自动修改页码。调用 `list` 不改变 Runtime 的动态加载状态。
 
-> JSON 简化标记：`pageSize` 已由模型在 Input 中给出，Output 再次返回的决策价值有限。下次升级 Catalog 入口协议时删除该字段。
+Catalog v2 不在 Output 中重复返回模型刚刚提交的 `pageSize`。
+
+成功输出示例：
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "project_tool_catalog", "version": 2 },
+  "data": {
+    "action": "list",
+    "tools": [
+      {
+        "name": "append_project_instructions",
+        "version": 1,
+        "description": "在执行时的最新项目指令末尾追加文本。仅在用户要求保留已有指令并增加新规则时使用，执行前需要用户批准。"
+      },
+      {
+        "name": "list_materials",
+        "version": 2,
+        "description": "列出当前项目导入资料。sourceId 是供 search_knowledge 使用的资料 UUID，title 只是显示名称；不读取资料正文。"
+      }
+    ],
+    "page": 1,
+    "totalPages": 6
+  }
+}
+```
 
 ### 9.4 get 操作
 
-调用示例：
+输入示例：
 
 ```json
 {
   "action": "get",
-  "name": "search_conversation_history"
+  "name": "read_project_instructions"
 }
 ```
 
@@ -901,51 +1094,48 @@ const projectToolCatalogInputSchema = z
 | `tool.inputSchema` | JSON Schema Object | Provider 可用输入定义 |
 | `tool.outputSchema` | JSON Schema Object | 成功 Data 输出定义 |
 | `tool.errors` | Array | 稳定错误码、含义和恢复方式 |
-| `callableNextRound` | literal true | 当前版本已加入后续模型请求 |
 
 Catalog 只查找和返回 Tool 定义，不保存当前 Conversation 已加载哪些 Tool。`get` 成功后，`ProjectToolRuntime` 把返回的 `name + version` 加入自己的 `loadedToolVersions`；重复查询保持幂等。查询不存在或未授权的名称统一返回 `TOOL_NOT_FOUND`。
 
-> JSON 简化标记：`callableNextRound` 当前只能为 `true`，没有提供额外状态信息。下次升级 Catalog 入口协议时删除该字段，并由 Tool 描述说明成功加载后的调用时机。
+Catalog v2 不再返回恒为 `true` 的 `callableNextRound`；入口 Tool 的描述已经说明，`get` 成功后该版本从下一轮起可调用。
 
-Catalog Output 使用与 Input 相同的 `action` 判别：
+成功输出示例：
 
-```ts
-type ProjectToolCatalogOutput =
-  | {
-      action: "list";
-      tools: ToolSummary[];
-      page: number;
-      pageSize: number;
-      totalPages: number;
+下面的 `inputSchema` 和 `outputSchema` 只展示模型理解 Tool 所需的主体结构，省略 JSON Schema 生成器附加的 `$schema`、日期正则等元数据。
+
+```json
+{
+  "ok": true,
+  "tool": { "name": "project_tool_catalog", "version": 2 },
+  "data": {
+    "action": "get",
+    "tool": {
+      "name": "read_project_instructions",
+      "version": 1,
+      "description": "读取当前项目的完整项目指令。仅在需要检查或准备修改项目指令时使用；普通对话已经由系统上下文提供当前项目指令。",
+      "approval": "auto",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string" },
+          "updatedAt": {
+            "anyOf": [
+              { "type": "string", "format": "date-time" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "required": ["content", "updatedAt"],
+        "additionalProperties": false
+      },
+      "errors": []
     }
-  | {
-      action: "get";
-      tool: ToolPublicDefinition;
-      callableNextRound: true;
-    };
-```
-
-Catalog 的执行逻辑只读取自己的不可变目录：
-
-```ts
-async execute(
-  input: ProjectToolCatalogInput,
-  _context: ToolExecutionContext,
-): Promise<ToolOutcome<ProjectToolCatalogOutput>> {
-  if (input.action === "list") {
-    return toolSuccess(this.listTools(input.page, input.pageSize));
   }
-
-  const tool = this.getToolOrSelf(input.name);
-  if (tool === null) {
-    return toolFailure("TOOL_NOT_FOUND", "找不到指定 Tool。");
-  }
-
-  return toolSuccess({
-    action: "get",
-    tool: this.publicDefinition(tool),
-    callableNextRound: true,
-  });
 }
 ```
 
@@ -1053,7 +1243,7 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 
 正文、项目指令全文、历史消息、搜索 Query、RAG 证据正文、Chunk ID、Excerpt、Message ID、Tool 参数中的大文本、Reasoning 和 `contentHash` 均不得进入压缩投影。
 
-`ProjectToolCatalog.getCompactionMessage()` 对 `list` 和 `get` 都固定返回 `null`。压缩投影器通过 `catalog.getToolOrSelf(toolName)` 统一解析 Catalog 自身和业务 Tool：Catalog 调用直接忽略，业务 Tool 委托其 `getCompactionMessage()`，未知或已删除的历史 Tool 才降级为通用状态事件。这样不需要保留 `ListToolsTool`、`GetToolTool` 类，也不会把“已知但应忽略”的 Catalog 调用误判为未知 Tool。
+`ProjectToolCatalog.getCompactionMessage()` 对 `list` 和 `get` 都固定返回 `null`。压缩投影器通过 `catalog.getToolOrSelf(toolName)` 统一解析 Catalog 自身和业务 Tool：Catalog 调用直接忽略；当前版本业务 Tool 委托其 `getCompactionMessage()`；未知、已删除或历史结果版本与当前 Tool 版本不同的调用降级为只含 Tool 身份和成功/失败状态的通用事件。这样既不需要保留旧版 Output 解析代码，也不会拿新 Schema 误读历史协议。
 
 ## 12. 错误与恢复
 
