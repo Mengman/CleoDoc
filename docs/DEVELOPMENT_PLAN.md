@@ -561,7 +561,7 @@ cleo search <query> --hybrid --explain
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
 
-实施状态：已完成。`KnowledgeToolService` 将资料列表、混合检索和同一 Source 的相邻 Chunk 读取封装为项目隔离的 Application Service；`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，跨项目 Source 对模型表现为当前项目中不存在。普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
+实施状态：已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service；三个 RAG Tool v2 统一使用 UUID 格式的 `sourceId`，模型必须从 `list_materials` 到 `search_knowledge`、再到 `read_material_context` 原样传递，不能使用资料标题代替。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，跨项目 `sourceId` 对模型表现为当前项目中不存在。普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
 
 ```ts
 interface SearchKnowledgeInput {

@@ -42,7 +42,7 @@ describe("knowledge tools", () => {
           totalPages: 1,
           materials: [
             {
-              source: fixture.sourceId,
+              sourceId: fixture.sourceId,
               title: "English Railway Notes",
               format: "text",
               languages: ["en"],
@@ -57,14 +57,21 @@ describe("knowledge tools", () => {
         searchTool.inputSchema.safeParse({ query: "railway", projectId: fixture.projectId })
           .success,
       ).toBe(false);
+      expect(
+        searchTool.inputSchema.safeParse({ query: "railway", sourceId: "English Railway Notes" })
+          .success,
+      ).toBe(false);
+      expect(
+        searchTool.inputSchema.safeParse({ query: "railway", source: fixture.sourceId }).success,
+      ).toBe(false);
       await expect(
         searchTool.execute(
-          { query: "railway", source: fixture.sourceId },
+          { query: "railway", sourceId: fixture.sourceId },
           { projectId: "another-project", conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });
       const mismatch = await searchTool.execute(
-        { query: "铁路时刻", source: fixture.sourceId },
+        { query: "铁路时刻", sourceId: fixture.sourceId },
         context,
       );
       expect(mismatch).toMatchObject({
@@ -77,14 +84,14 @@ describe("knowledge tools", () => {
       });
 
       const search = await searchTool.execute(
-        { query: "railway timetable", source: fixture.sourceId },
+        { query: "railway timetable", sourceId: fixture.sourceId },
         context,
       );
       expect(search.ok).toBe(true);
       if (!search.ok) return;
       expect(search.data.languageWarning).toBeNull();
       expect(search.data.results[0]).toMatchObject({
-        source: fixture.sourceId,
+        sourceId: fixture.sourceId,
         title: "English Railway Notes",
         content: expect.stringContaining("railway timetable"),
       });
@@ -95,20 +102,20 @@ describe("knowledge tools", () => {
       const target = search.data.results[0]!;
       const readTool = new ReadMaterialContextTool(fixture.knowledge);
       const read = await readTool.execute(
-        { source: target.source, chunkId: target.chunkId, before: 0, after: 0 },
+        { sourceId: target.sourceId, chunkId: target.chunkId, before: 0, after: 0 },
         context,
       );
       expect(read).toMatchObject({
         ok: true,
         data: {
-          source: fixture.sourceId,
+          sourceId: fixture.sourceId,
           targetChunkId: target.chunkId,
           chunks: [{ chunkId: target.chunkId, content: target.content }],
         },
       });
 
       const compacted = searchTool.getCompactionMessage(
-        { query: "railway timetable", source: fixture.sourceId },
+        { query: "railway timetable", sourceId: fixture.sourceId },
         search,
       );
       expect(compacted).not.toContain("railway timetable");
@@ -117,7 +124,7 @@ describe("knowledge tools", () => {
       expect(listTool.getCompactionMessage({}, list)).not.toContain("English Railway Notes");
       expect(
         readTool.getCompactionMessage(
-          { source: target.source, chunkId: target.chunkId, before: 0, after: 0 },
+          { sourceId: target.sourceId, chunkId: target.chunkId, before: 0, after: 0 },
           read,
         ),
       ).not.toContain(target.content);
@@ -168,7 +175,7 @@ describe("knowledge tools", () => {
     try {
       await expect(
         new SearchKnowledgeTool(staleKnowledge).execute(
-          { query: "railway", source: fixture.sourceId },
+          { query: "railway", sourceId: fixture.sourceId },
           { projectId: fixture.projectId, conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_INDEXED" });
@@ -190,7 +197,7 @@ describe("knowledge tools", () => {
       ).toMatchObject({ ok: true, data: { materials: [] } });
       await expect(
         new SearchKnowledgeTool(deletedKnowledge).execute(
-          { query: "railway", source: fixture.sourceId },
+          { query: "railway", sourceId: fixture.sourceId },
           { projectId: fixture.projectId, conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });

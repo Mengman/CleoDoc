@@ -11,7 +11,7 @@ export interface SearchKnowledgeRequest {
   readonly projectId: string;
   readonly query: string;
   readonly limit?: number;
-  readonly source?: string;
+  readonly sourceId?: string;
 }
 
 export interface SearchKnowledgeResult {
@@ -19,7 +19,7 @@ export interface SearchKnowledgeResult {
   readonly sourceLanguages: KnowledgeSourceLanguage[];
   readonly languageWarning: string | null;
   readonly results: {
-    source: string;
+    sourceId: string;
     chunkId: string;
     title: string;
     content: string;
@@ -34,7 +34,7 @@ export interface ListKnowledgeMaterialsRequest {
 
 export interface ListKnowledgeMaterialsResult {
   readonly materials: {
-    source: string;
+    sourceId: string;
     title: string;
     format: KnowledgeSource["format"];
     languages: KnowledgeSourceLanguage[];
@@ -46,14 +46,14 @@ export interface ListKnowledgeMaterialsResult {
 
 export interface ReadMaterialContextRequest {
   readonly projectId: string;
-  readonly source: string;
+  readonly sourceId: string;
   readonly chunkId: string;
   readonly before?: number;
   readonly after?: number;
 }
 
 export interface ReadMaterialContextResult {
-  readonly source: string;
+  readonly sourceId: string;
   readonly title: string;
   readonly targetChunkId: string;
   readonly chunks: { chunkId: string; content: string }[];
@@ -72,18 +72,18 @@ export class KnowledgeToolService {
   async searchKnowledge(input: SearchKnowledgeRequest): Promise<SearchKnowledgeResult> {
     this.assertProject(input.projectId);
     const { sources, statusBySource } = await this.readSourceSnapshot();
-    const selected = selectSources(sources, statusBySource, input.source);
+    const selected = selectSources(sources, statusBySource, input.sourceId);
     const sourceLanguages = orderedLanguages(selected);
     const result = await this.materials.searchHybrid(input.query, {
       limit: input.limit ?? 5,
-      ...(input.source === undefined ? {} : { filter: { sourceId: input.source } }),
+      ...(input.sourceId === undefined ? {} : { filter: { sourceId: input.sourceId } }),
     });
     return {
       queryLanguage: result.language,
       sourceLanguages,
       languageWarning: languageWarning(result.language, sourceLanguages),
       results: result.retrievalContext.items.map(({ chunk }) => ({
-        source: chunk.sourceId,
+        sourceId: chunk.sourceId,
         chunkId: chunk.chunkId,
         title: chunk.sourceTitle,
         content: chunk.content,
@@ -100,7 +100,7 @@ export class KnowledgeToolService {
     const start = (page - 1) * pageSize;
     return {
       materials: sources.slice(start, start + pageSize).map((source) => ({
-        source: source.id,
+        sourceId: source.id,
         title: source.title,
         format: source.format,
         languages: source.languages,
@@ -114,13 +114,13 @@ export class KnowledgeToolService {
   async readMaterialContext(input: ReadMaterialContextRequest): Promise<ReadMaterialContextResult> {
     this.assertProject(input.projectId);
     const result = this.materials.readChunkContext(
-      input.source,
+      input.sourceId,
       input.chunkId,
       input.before ?? 1,
       input.after ?? 1,
     );
     return {
-      source: result.sourceId,
+      sourceId: result.sourceId,
       title: result.sourceTitle,
       targetChunkId: result.targetChunkId,
       chunks: result.chunks.map((chunk) => ({ ...chunk })),
