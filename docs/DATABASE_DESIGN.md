@@ -102,7 +102,8 @@ PRAGMA busy_timeout = 5000;
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
 - 当前数据库基线是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
 - 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放旧 DDL。
-- 完整 v8 数据库执行一次 v8→v9 前向迁移，增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表，并删除已停止使用的 `sources.source_label`。
+- 完整 v8 数据库执行一次 v8→v9 前向迁移，增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表，并删除已停止使用的 `sources.source_label` 和 `sources.tags_json`。
+- 此字段删除发生在尚未发布的开发期 v9 内。由旧开发版本创建、已经标记为 v9 且仍含 `sources.tags_json` 的数据库在打开时只删除该列，已有 Source 行和 Schema 版本号保持不变。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动删除它们。
 - 当前代码不恢复 v1–v8 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
@@ -216,7 +217,6 @@ UNIQUE(conversation_id, sequence)
 | `format` | TEXT | NOT NULL、CHECK | 当前只允许 `text` 或 `markdown` |
 | `title` | TEXT | NOT NULL | 用户可见的资料标题 |
 | `original_file_name` | TEXT | 可空 | 导入前的原始文件名 |
-| `tags_json` | TEXT | NOT NULL | 标签字符串数组 JSON |
 | `languages_json` | TEXT | NOT NULL、默认 `["zh"]` | 检测出的有序语言列表 JSON；当前允许 `zh`、`en`，第一项是主语言 |
 | `relative_path` | TEXT | NOT NULL、UNIQUE | 资料正文在项目中的相对路径 |
 | `content_hash` | TEXT | NOT NULL、UNIQUE | SHA-256 内容哈希，用于去重和变化检测 |

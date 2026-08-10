@@ -114,7 +114,6 @@ export const CURRENT_SCHEMA_SQL = `
     format TEXT NOT NULL CHECK (format IN ('text', 'markdown')),
     title TEXT NOT NULL,
     original_file_name TEXT,
-    tags_json TEXT NOT NULL,
     languages_json TEXT NOT NULL DEFAULT '["zh"]',
     relative_path TEXT NOT NULL UNIQUE,
     content_hash TEXT NOT NULL UNIQUE,

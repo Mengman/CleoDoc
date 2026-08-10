@@ -40,29 +40,6 @@ export function normalizeTitle(title: string): string {
   return normalized;
 }
 
-export function normalizeTags(tags: readonly string[]): string[] {
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-  for (const tag of tags) {
-    const value = tag.trim();
-    if (value === "") {
-      continue;
-    }
-    if (value.length > 100) {
-      throw new AppError("VALIDATION_ERROR", "单个资料标签不能超过 100 个字符。");
-    }
-    const key = value.toLocaleLowerCase("zh-CN");
-    if (!seen.has(key)) {
-      seen.add(key);
-      normalized.push(value);
-    }
-  }
-  if (normalized.length > 100) {
-    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 100 个标签。");
-  }
-  return normalized;
-}
-
 export function defaultPastedTitle(): string {
   return `粘贴资料 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
 }

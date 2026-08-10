@@ -30,7 +30,7 @@ export async function runMaterialCommand(
 ): Promise<void> {
   const config = getSoftwareConfig();
   const [subcommand, reference, value] = parsed.positionals;
-  assertOnlyOptions(parsed, ["project", "stdin", "title", "tags", "format", "encoding"]);
+  assertOnlyOptions(parsed, ["project", "stdin", "title", "format", "encoding"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
   const materials = await MaterialService.open(root, createMaterialServiceOptions());
   try {
@@ -84,7 +84,6 @@ async function addMaterial(
 ): Promise<void> {
   const fromStdin = optionBoolean(parsed, "stdin");
   const title = optionString(parsed, "title");
-  const tags = parseTags(optionString(parsed, "tags"));
   const requestedFormat = optionString(parsed, "format");
   const requestedEncoding = optionString(parsed, "encoding");
   if (fromStdin) {
@@ -99,7 +98,6 @@ async function addMaterial(
     }
     const result = await materials.addText(await readStandardInput(context, maxImportBytes), {
       ...(title === undefined ? {} : { title }),
-      ...(tags.length === 0 ? {} : { tags }),
       ...(requestedFormat === undefined ? {} : { format: requestedFormat as "text" | "markdown" }),
     });
     printMaterialImported(context, result);
@@ -113,7 +111,6 @@ async function addMaterial(
   }
   const result = await materials.addFile(reference, {
     ...(title === undefined ? {} : { title }),
-    ...(tags.length === 0 ? {} : { tags }),
     ...(requestedEncoding === undefined
       ? {}
       : { encoding: parseMaterialEncodingLabel(requestedEncoding) }),
@@ -129,7 +126,7 @@ async function listMaterials(
   if (list.length === 0) context.output.write("尚无资料。\n");
   for (const source of list) {
     context.output.write(
-      `${source.id}\t${source.title}\t${source.format}\t${source.languages.join(",")}\t${source.size} bytes\t${source.tags.join(",")}\n`,
+      `${source.id}\t${source.title}\t${source.format}\t${source.languages.join(",")}\t${source.size} bytes\n`,
     );
   }
 }
@@ -138,10 +135,6 @@ function assertPositionals(parsed: ParsedArguments, expected: number, usage: str
   if (parsed.positionals.length !== expected) {
     throw new AppError("VALIDATION_ERROR", `用法：${usage}`);
   }
-}
-
-function parseTags(value: string | undefined): string[] {
-  return value === undefined ? [] : value.split(",").map((tag) => tag.trim());
 }
 
 async function readStandardInput(
@@ -192,7 +185,6 @@ function printMaterialMetadata(
   context.output.write(`资料 ID：${source.id}\n`);
   context.output.write(`格式：${source.format}\n`);
   context.output.write(`语言：${source.languages.join(", ")}\n`);
-  context.output.write(`标签：${source.tags.length === 0 ? "无" : source.tags.join(", ")}\n`);
   context.output.write(`路径：${source.relativePath}\n内容哈希：${source.contentHash}\n`);
   context.output.write(`创建时间：${source.createdAt}\n更新时间：${source.updatedAt}\n`);
 }

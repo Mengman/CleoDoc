@@ -287,7 +287,7 @@ describe("CleoDoc CLI", () => {
     expect((await runCli(["init", projectDirectory], environment)).exitCode).toBe(0);
 
     const added = await runCli(
-      ["material", "add", inputFile, "--title", "铁路时刻资料", "--tags", "历史,铁路"],
+      ["material", "add", inputFile, "--title", "铁路时刻资料"],
       environment,
     );
     expect(added.exitCode, JSON.stringify(added)).toBe(0);

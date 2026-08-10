@@ -398,7 +398,7 @@ Agent
 
 ### 7.5 v0.1 资料事实源与投影
 
-步骤 5 将资料正文保存为 `materials/<material-id>.txt|md`，并将对应的 `KnowledgeSource` 元数据保存为 `sources/metadata/<material-id>.json`。元数据包含项目 ID、标题、原文件名、标签、格式、相对路径、内容哈希、字节数和时间。
+步骤 5 将资料正文保存为 `materials/<material-id>.txt|md`，并将对应的 `KnowledgeSource` 元数据保存为 `sources/metadata/<material-id>.json`。元数据包含项目 ID、标题、原文件名、格式、语言、相对路径、内容哈希、字节数和时间。当前版本尚未实现资料标签功能。
 
 SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialService` 打开时读取并校验元数据、项目归属、路径、UTF-8 内容、字节数和哈希，然后同步 SQLite。添加、重命名和删除采用原子文件写入并在数据库失败时回滚当前操作；进程在文件与数据库更新之间中断时，下次打开以文件事实源校准投影。
 

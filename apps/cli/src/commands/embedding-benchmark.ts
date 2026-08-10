@@ -293,9 +293,9 @@ async function seedBenchmarkIndex(
       sqlite
         .prepare(
           `INSERT INTO sources
-           (id, project_id, source_type, origin, format, title, tags_json, languages_json,
+           (id, project_id, source_type, origin, format, title, languages_json,
             relative_path, content_hash, size, created_at, updated_at)
-           VALUES (?, ?, 'material', 'paste', 'text', ?, '[]', ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, 'material', 'paste', 'text', ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           document.key,

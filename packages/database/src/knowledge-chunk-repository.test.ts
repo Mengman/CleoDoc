@@ -92,9 +92,9 @@ async function insertSource(database: ProjectDatabase): Promise<void> {
     sqlite
       .prepare(
         `INSERT INTO sources
-         (id, project_id, source_type, origin, format, title, tags_json, languages_json,
+         (id, project_id, source_type, origin, format, title, languages_json,
           relative_path, content_hash, size, created_at, updated_at)
-         VALUES ('source-1', 'project-1', 'material', 'paste', 'text', 'Source', '[]', '["en"]',
+         VALUES ('source-1', 'project-1', 'material', 'paste', 'text', 'Source', '["en"]',
                  'materials/source-1.txt', ?, 100,
                  '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
       )

@@ -37,7 +37,6 @@ describe("MaterialService", () => {
     try {
       const imported = await service.addFile(inputPath, {
         title: "铁路照明资料",
-        tags: ["历史", "铁路", "历史"],
       });
       expect(imported.created).toBe(true);
       expect(imported.source).toMatchObject({
@@ -46,7 +45,6 @@ describe("MaterialService", () => {
         format: "markdown",
         title: "铁路照明资料",
         originalFileName: "民国铁路.md",
-        tags: ["历史", "铁路"],
       });
       expect(
         await readFile(path.join(project.root, imported.source.relativePath), "utf8"),
@@ -231,7 +229,6 @@ describe("MaterialService", () => {
     try {
       const added = await service.addText("车站只有一个出口。", {
         title: "场景笔记",
-        tags: ["场景"],
       });
       materialId = added.source.id;
       relativePath = added.source.relativePath;

@@ -144,7 +144,10 @@ export class ProjectDatabase {
         `项目数据库版本 v${newestVersion} 高于当前程序支持的 v${CURRENT_SCHEMA_VERSION}。`,
       );
     }
-    if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) return;
+    if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) {
+      this.removeObsoleteSourceTagsColumn();
+      return;
+    }
 
     if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 9) {
       this.applyMigration(SCHEMA_V8_TO_V9_SQL, 9);
@@ -187,6 +190,22 @@ export class ProjectDatabase {
       this.database
         .prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)")
         .run(version, new Date().toISOString());
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private removeObsoleteSourceTagsColumn(): void {
+    const columns = this.database.prepare("PRAGMA table_info(sources)").all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === "tags_json")) return;
+
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.exec("ALTER TABLE sources DROP COLUMN tags_json");
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");

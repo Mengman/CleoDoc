@@ -10,7 +10,6 @@ interface SourceRow {
   format: KnowledgeSource["format"];
   title: string;
   original_file_name: string | null;
-  tags_json: string;
   languages_json: string;
   relative_path: string;
   content_hash: string;
@@ -58,9 +57,9 @@ export class MaterialRepository {
         .prepare(
           `INSERT INTO sources
            (id, project_id, source_type, origin, format, title, original_file_name,
-            tags_json, languages_json, relative_path, content_hash, size,
+            languages_json, relative_path, content_hash, size,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              project_id = excluded.project_id,
              source_type = excluded.source_type,
@@ -68,7 +67,6 @@ export class MaterialRepository {
              format = excluded.format,
              title = excluded.title,
              original_file_name = excluded.original_file_name,
-             tags_json = excluded.tags_json,
              languages_json = excluded.languages_json,
              relative_path = excluded.relative_path,
              content_hash = excluded.content_hash,
@@ -96,7 +94,6 @@ export class MaterialRepository {
           source.format,
           source.title,
           source.originalFileName,
-          JSON.stringify(source.tags),
           JSON.stringify(source.languages),
           source.relativePath,
           source.contentHash,
@@ -131,9 +128,9 @@ export class MaterialRepository {
       const upsert = database.prepare(
         `INSERT INTO sources
          (id, project_id, source_type, origin, format, title, original_file_name,
-          tags_json, languages_json, relative_path, content_hash, size,
+          languages_json, relative_path, content_hash, size,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            source_type = excluded.source_type,
@@ -141,7 +138,6 @@ export class MaterialRepository {
            format = excluded.format,
            title = excluded.title,
            original_file_name = excluded.original_file_name,
-           tags_json = excluded.tags_json,
            languages_json = excluded.languages_json,
            relative_path = excluded.relative_path,
            content_hash = excluded.content_hash,
@@ -170,7 +166,6 @@ export class MaterialRepository {
           source.format,
           source.title,
           source.originalFileName,
-          JSON.stringify(source.tags),
           JSON.stringify(source.languages),
           source.relativePath,
           source.contentHash,
@@ -184,7 +179,6 @@ export class MaterialRepository {
 }
 
 function mapSource(row: SourceRow): KnowledgeSource {
-  const tags = parseStringArray(row.tags_json, "资料标签投影格式无效。");
   const languages = parseStringArray(row.languages_json, "资料语言投影格式无效。");
   if (
     languages.length < 1 ||
@@ -203,7 +197,6 @@ function mapSource(row: SourceRow): KnowledgeSource {
     format: row.format,
     title: row.title,
     originalFileName: row.original_file_name,
-    tags,
     languages: languages as KnowledgeSource["languages"],
     relativePath: row.relative_path,
     contentHash: row.content_hash,

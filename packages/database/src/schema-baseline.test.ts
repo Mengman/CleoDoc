@@ -89,6 +89,7 @@ describe("current database schema baseline", () => {
           "indexed_at",
         ]),
       );
+      expect(getColumnNames(database, "sources")).not.toContain("tags_json");
       expect(
         database.read(
           (sqlite) =>
@@ -249,6 +250,7 @@ describe("current database schema baseline", () => {
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("content_hash");
       expect(getColumnNames(reopened, "sources")).toContain("index_status");
       expect(getColumnNames(reopened, "sources")).not.toContain("source_label");
+      expect(getColumnNames(reopened, "sources")).not.toContain("tags_json");
       expect(
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT index_status FROM sources WHERE id = 'source-1'").get(),
@@ -259,6 +261,49 @@ describe("current database schema baseline", () => {
           sqlite.prepare("SELECT languages_json FROM sources WHERE id = 'source-1'").get(),
         ),
       ).toEqual({ languages_json: '["zh"]' });
+    } finally {
+      await reopened.close();
+    }
+  });
+
+  it("removes the obsolete tags column from an existing v9 database", async () => {
+    const root = await createTemporaryProject("cleodoc-old-v9-tags-test-");
+    const state = path.join(root, ".cleo");
+    await mkdir(state, { recursive: true });
+    const filePath = path.join(state, "project.sqlite");
+    const raw = new DatabaseSync(filePath);
+    raw.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      ${CURRENT_SCHEMA_SQL.replace(
+        `    original_file_name TEXT,\n`,
+        `    original_file_name TEXT,\n    tags_json TEXT NOT NULL,\n`,
+      )}
+      INSERT INTO schema_migrations(version, applied_at)
+      VALUES (9, '2026-01-01T00:00:00.000Z');
+      INSERT INTO sources
+        (id, project_id, source_type, origin, format, title, tags_json, languages_json,
+         relative_path, content_hash, size, created_at, updated_at)
+      VALUES
+        ('source-1', 'project-1', 'material', 'paste', 'text', '保留的资料', '["旧标签"]',
+         '["zh"]', 'materials/00000000-0000-0000-0000-000000000001.txt',
+         '0000000000000000000000000000000000000000000000000000000000000000', 12,
+         '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    `);
+    raw.close();
+
+    const reopened = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
+    try {
+      expect(getColumnNames(reopened, "sources")).not.toContain("tags_json");
+      expect(
+        reopened.read((sqlite) =>
+          sqlite.prepare("SELECT title FROM sources WHERE id = 'source-1'").get(),
+        ),
+      ).toEqual({ title: "保留的资料" });
+      expect(
+        reopened.read((sqlite) =>
+          sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
+        ),
+      ).toEqual([{ version: 9 }]);
     } finally {
       await reopened.close();
     }
@@ -304,7 +349,10 @@ async function createTemporaryProject(prefix: string): Promise<string> {
 
 function v8SchemaSql(): string {
   return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
-    .replace(`    title TEXT NOT NULL,\n`, `    title TEXT NOT NULL,\n    source_label TEXT,\n`)
+    .replace(
+      `    title TEXT NOT NULL,\n`,
+      `    title TEXT NOT NULL,\n    source_label TEXT,\n    tags_json TEXT NOT NULL,\n`,
+    )
     .replace(`    languages_json TEXT NOT NULL DEFAULT '["zh"]',\n`, "")
     .replace(
       `    parser_version TEXT,

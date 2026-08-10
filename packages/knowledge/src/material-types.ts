@@ -14,7 +14,6 @@ import type {
 
 interface MaterialMetadataOptions {
   title?: string;
-  tags?: readonly string[];
 }
 
 export interface AddFileMaterialOptions extends MaterialMetadataOptions {

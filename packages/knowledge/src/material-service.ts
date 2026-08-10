@@ -33,7 +33,6 @@ import {
   hashContent,
   materialFormatFromPath,
   materialNotFound,
-  normalizeTags,
   normalizeTitle,
   parseKnowledgeSource,
 } from "./material-validation.js";
@@ -131,7 +130,6 @@ export class MaterialService {
       inputEncoding: decoded.inputEncoding,
       title: options.title ?? path.basename(originalFileName, path.extname(originalFileName)),
       originalFileName,
-      tags: options.tags,
     });
   }
 
@@ -145,7 +143,6 @@ export class MaterialService {
       inputEncoding: "utf-8",
       title: options.title ?? defaultPastedTitle(),
       originalFileName: null,
-      tags: options.tags,
     });
   }
 
@@ -291,7 +288,6 @@ export class MaterialService {
       inputEncoding: MaterialInputEncoding;
       title: string;
       originalFileName: string | null;
-      tags?: readonly string[];
     },
   ): Promise<MaterialImportResult> {
     assertMaterialContent(content, this.maxImportBytes);
@@ -318,7 +314,6 @@ export class MaterialService {
       format: input.format,
       title: normalizeTitle(input.title),
       originalFileName: input.originalFileName,
-      tags: normalizeTags(input.tags ?? []),
       languages,
       relativePath,
       contentHash,

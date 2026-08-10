@@ -13,7 +13,6 @@ export const knowledgeSourceSchema = z.object({
   format: z.enum(["text", "markdown"]),
   title: z.string().trim().min(1).max(200),
   originalFileName: z.string().trim().min(1).max(500).nullable(),
-  tags: z.array(z.string().trim().min(1).max(100)).max(100),
   languages: z
     .array(knowledgeSourceLanguageSchema)
     .min(1)
