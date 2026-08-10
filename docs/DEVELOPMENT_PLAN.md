@@ -49,7 +49,7 @@ v0.1 的核心闭环是：
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 7. 本地 Embedding 与向量检索 | 进行中 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索及 CLI 诊断恢复已完成；下一步执行测试与基准 |
 | 9b. LLM 本地 RAG Tool | 已完成 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影 |
-| 10. CLI 发布 | 未开始 | 垂直闭环、跨平台 CLI 包和发布验收 |
+| 10. CLI 发布 | 进行中 | 快速失败恢复测试已完成；待完成手工垂直闭环、跨平台 CLI 包和发布验收 |
 
 ## 2. 开发原则
 
@@ -595,6 +595,8 @@ interface SearchKnowledgeInput {
 10. 重启 CLI、恢复原 Conversation，并基于已保存章节、资料和对话上下文继续创作。
 
 v0.1 的 RAG Tool 只检索导入资料；正文尚未进入统一 RAG 索引，通过 `list_project_documents` 和 `read_project_document` 受控读取。自动批准的 Tool 在 CLI 后台执行，不向用户直接展示 Tool 请求或原始 Tool Result；只有 `approval = "ask"` 的 Tool 在执行前进入用户审批。Tool Result 继续作为 Message 持久化并返回 LLM，用于当前回合决策、上下文恢复和内部审计。
+
+实施状态：快速、进程内的失败恢复测试已经完成，覆盖 Provider 超时、生成取消、无效 Tool 参数后重试、Tool 轮数上限、Embedding 查询不可用时 Exact + FTS 降级、索引过期、资料删除后的旧引用失效、文档覆盖保护、跨项目隔离，以及 Conversation、Message、Tool Result 和索引的重启恢复。自动 Tool 的请求与原始结果不再输出到普通 CLI；需要授权的写入仍显示审批界面。会重复启动真实 CLI 子进程、加载本地原生模型和等待模拟网络的长时间集成测试不进入默认 Vitest/CI；固定垂直闭环改为发布前手工验收。步骤 10 剩余工作是手工垂直闭环、跨平台打包和最终发布验收。
 
 v0.1 发布条件：
 

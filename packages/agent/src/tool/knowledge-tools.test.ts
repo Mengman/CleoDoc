@@ -156,6 +156,48 @@ describe("knowledge tools", () => {
       await fixture.knowledge.close();
     }
   });
+
+  it("rejects stale indexes and invalidates public references after material deletion", async () => {
+    const fixture = await createFixture();
+    await fixture.knowledge.close();
+
+    const staleKnowledge = await KnowledgeToolService.open(
+      fixture.projectRoot,
+      createTestMaterialOptions({ modelRevision: "test-v2" }),
+    );
+    try {
+      await expect(
+        new SearchKnowledgeTool(staleKnowledge).execute(
+          { query: "railway", source: fixture.sourceId },
+          { projectId: fixture.projectId, conversationId: "conversation-1" },
+        ),
+      ).rejects.toMatchObject({ code: "MATERIAL_NOT_INDEXED" });
+    } finally {
+      await staleKnowledge.close();
+    }
+
+    const materialOptions = createTestMaterialOptions();
+    const materials = await MaterialService.open(fixture.projectRoot, materialOptions);
+    await materials.remove(fixture.sourceId);
+    await materials.close();
+    const deletedKnowledge = await KnowledgeToolService.open(fixture.projectRoot, materialOptions);
+    try {
+      expect(
+        await new ListMaterialsTool(deletedKnowledge).execute(
+          {},
+          { projectId: fixture.projectId, conversationId: "conversation-1" },
+        ),
+      ).toMatchObject({ ok: true, data: { materials: [] } });
+      await expect(
+        new SearchKnowledgeTool(deletedKnowledge).execute(
+          { query: "railway", source: fixture.sourceId },
+          { projectId: fixture.projectId, conversationId: "conversation-1" },
+        ),
+      ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });
+    } finally {
+      await deletedKnowledge.close();
+    }
+  });
 });
 
 async function createFixture(): Promise<{

@@ -27,7 +27,7 @@ export async function generateOnce(
 ): Promise<ChatGenerationResult> {
   const controller = new AbortController();
   const removeHandler = installInterruptHandler(context, controller);
-  let displayPhase: "idle" | "reasoning" | "answer" | "tool" = "idle";
+  let displayPhase: "idle" | "reasoning" | "answer" = "idle";
   try {
     const result = await chat.send({
       ...inputValue,
@@ -40,14 +40,11 @@ export async function generateOnce(
           }
           context.output.write(event.text);
         } else if (event.type === "text-delta") {
-          if (displayPhase === "reasoning" || displayPhase === "tool") {
+          if (displayPhase === "reasoning") {
             context.output.write("\n\n回答：\n");
           }
           displayPhase = "answer";
           context.output.write(event.text);
-        } else if (event.type === "tool-call") {
-          context.output.write(`\n[工具请求] ${event.call.name}\n`);
-          displayPhase = "tool";
         }
       },
     });
