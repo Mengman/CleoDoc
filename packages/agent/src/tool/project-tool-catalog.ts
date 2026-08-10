@@ -7,6 +7,7 @@ import type {
   SessionRepository,
 } from "../../../database/src/index.js";
 import type { DocumentService } from "../../../project/src/index.js";
+import type { KnowledgeToolService } from "../../../knowledge/src/index.js";
 import {
   ListProjectDocumentsTool,
   ReadProjectDocumentTool,
@@ -21,6 +22,7 @@ import {
   ReadConversationMessageTool,
   SearchConversationHistoryTool,
 } from "./conversation-history-tools.js";
+import { createKnowledgeTools } from "./knowledge-tools.js";
 import {
   asUnknownTool,
   toolFailure,
@@ -100,6 +102,7 @@ export interface ProjectToolCatalogDependencies {
   documents: DocumentService;
   projectInstructions?: ProjectInstructionRepository;
   history?: SessionRepository;
+  knowledge?: KnowledgeToolService;
 }
 
 export interface ProjectToolInfo {
@@ -152,6 +155,9 @@ export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, Project
         asUnknownTool(new SearchConversationHistoryTool(dependencies.history)),
         asUnknownTool(new ReadConversationMessageTool(dependencies.history)),
       );
+    }
+    if (dependencies.knowledge !== undefined) {
+      tools.push(...createKnowledgeTools(dependencies.knowledge));
     }
     return new ProjectToolCatalog(tools);
   }

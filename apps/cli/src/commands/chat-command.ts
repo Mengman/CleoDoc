@@ -1,6 +1,7 @@
 import { ChatService } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
 import { AppError } from "../../../../packages/contracts/src/index.js";
+import { KnowledgeToolService } from "../../../../packages/knowledge/src/index.js";
 import { DocumentService } from "../../../../packages/project/src/index.js";
 import {
   assertOnlyOptions,
@@ -17,6 +18,7 @@ import {
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
 import { printSaved } from "./command-utils.js";
 import { runInteractiveChat } from "./interactive-chat.js";
+import { createMaterialServiceOptions } from "./material-command.js";
 import { generateOnce } from "./send-chat-message.js";
 
 export async function runChatCommand(
@@ -59,7 +61,13 @@ export async function runChatCommand(
   }
   const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
   const contextBudgetPolicy = resolveContextBudgetPolicy(providerId, model, parsed);
-  const chat = await ChatService.open(project.root, chatServiceOptions());
+  const knowledge = await KnowledgeToolService.open(project.root, createMaterialServiceOptions());
+  const chat = await ChatService.open(project.root, chatServiceOptions(), { knowledge }).catch(
+    async (error: unknown) => {
+      await knowledge.close();
+      throw error;
+    },
+  );
   const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
   const onDebugEvent = debugLogger?.onEvent;
   if (debugLogger !== undefined) {
@@ -106,7 +114,11 @@ export async function runChatCommand(
     try {
       await chat.close();
     } finally {
-      await debugLogger?.close();
+      try {
+        await knowledge.close();
+      } finally {
+        await debugLogger?.close();
+      }
     }
   }
 }

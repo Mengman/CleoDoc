@@ -2,6 +2,7 @@ export * from "./conversation-repository.js";
 export * from "./chunk-embedding-repository.js";
 export * from "./float32-vector.js";
 export * from "./knowledge-chunk-repository.js";
+export * from "./knowledge-context-repository.js";
 export * from "./material-repository.js";
 export * from "./model-call-repository.js";
 export * from "./project-instruction-repository.js";

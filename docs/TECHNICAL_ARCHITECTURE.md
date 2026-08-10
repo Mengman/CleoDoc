@@ -416,7 +416,7 @@ SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialSer
 
 ## 8. 自研 RAG 架构
 
-> 实现状态：上游 TXT/Markdown Document Ingestion、Baseline 结构切片、资料 Chunk 入库、资料 FTS、本地 Embedding、Exact/FTS/Vector 混合检索和 `RetrievalContext` 已实现；切片结果仍按 Source 写入 `.cleo/derived/chunks` 供人工检查。正文 FTS 与 LLM RAG Tool 尚未实现。`conversation_message_fts` 继续只服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
+> 实现状态：上游 TXT/Markdown Document Ingestion、Baseline 结构切片、资料 Chunk 入库、资料 FTS、本地 Embedding、Exact/FTS/Vector 混合检索、`RetrievalContext` 和资料 RAG Tool 已实现；切片结果仍按 Source 写入 `.cleo/derived/chunks` 供人工检查。正文 FTS 尚未实现。`conversation_message_fts` 继续只服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
 ### 8.1 独立项目目标与模块边界
 
@@ -739,7 +739,7 @@ v0.1 的完整 Schema v9 包含既有会话、资料 Chunk、FTS、`sources.lang
 
 v0.1 在 CLI 前台执行单任务 Tool Loop。应用/项目初始化时创建一个 `ProjectToolCatalog`，一次性持有所有无执行状态的业务 Tool 并缓存 Schema；Catalog 自身以 `project_tool_catalog` 组合 Tool 暴露 `list/get` 操作。`ProjectToolRuntime` 按 Conversation 创建和缓存，同一 Conversation 的多次发送及 Session 压缩复用同一个 Runtime；Runtime 只持有不可变的 `projectId + conversationId`、当前 Conversation 的退出前临时审批和已加载 `name + version`，不持有 `sessionId`。业务 Tool 通过 `ToolExecutionContext` 获得可信执行范围，构造函数只保存稳定 Service/Repository。动态加载状态可从当前 Conversation 的成功 Catalog `get` 结果恢复且不跨 Conversation，版本变化后必须重新加载。每次普通模型请求都从当前 Catalog 重新组装顶层 `tools`；`full` Tool 直接发送，`catalog` Tool 只通过 Catalog `list/get` 发现和加载，不向 System Context 注入独立 Tool 摘要。因此 Catalog 入口不需要独立公告或数据库版本追踪。详细实现见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md#15-实现状态与重构边界)。
 
-模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；目标协议改为直接读取 CDM，并通过 Node ID 插入、替换内容、删除和移动节点，视觉行号不再属于文档协议，详见[文档处理设计](./文档处理设计.md)。该能力尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理项目指令的内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际使用的证据要关联到 `RetrievalContext`。
+模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；目标协议改为直接读取 CDM，并通过 Node ID 插入、替换内容、删除和移动节点，视觉行号不再属于文档协议，详见[文档处理设计](./文档处理设计.md)。该能力尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理项目指令的内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。资料检索通过 `list_materials` 识别资料语言和索引状态，通过 `search_knowledge` 执行项目隔离的混合检索，必要时以 `read_material_context` 读取同一 Source 内有限的相邻 Chunk。Tool 只返回公开 Source、Chunk ID、标题和纯文本证据，不返回内部 Row ID、Hash 或排序诊断；模型不能提供 Project ID。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。
 
 Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
@@ -1003,7 +1003,8 @@ v0.2 在此基础上增加：
 - 已实现：`index embed/status` 的增量补齐、进度、完整度、部分失败恢复与取消，以及按 Query 语言选择模型的 `search --semantic`；RAG Debug 日志只保存安全的运行元数据。
 - 已实现：Embedding 步骤 7.9 的编码、级联、恢复、失败隔离测试，以及固定中英文近义语料和真实 Q8_0 CPU/GPU 模型的可重复基准命令；GPU 模式会报告实际后端和卸载层数，首份加载、首次与稳态推理、吞吐、SQLite 查询、Top-1/Top-5 Query Recall 和回溯结果记录在 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
 - 已实现：资料 Exact、trigram FTS、Vector 三路召回，项目/类型/Source Revision 过滤、RRF、范围去重、来源与字符预算、内存 RetrievalContext 和可解释 CLI；普通检索不写审计表。
-- 尚未实现：正文 FTS、RAG Tool 和 CLI 发布验收。
+- 已实现：资料 RAG Tool 的 Application Service、项目隔离、语言提示、相邻 Chunk 精读、Catalog/Tool Loop 接入和压缩投影；检索过程不持久化，实际证据使用既有 Tool Result Message 审计。
+- 尚未实现：正文 FTS 和 CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

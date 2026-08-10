@@ -419,7 +419,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 已实现 FTS 与向量的混合召回和 RetrievalContext；下一步接入 RAG Tool。
+- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。
 - 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 

@@ -48,7 +48,8 @@ v0.1 的核心闭环是：
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 7. 本地 Embedding 与向量检索 | 进行中 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索及 CLI 诊断恢复已完成；下一步执行测试与基准 |
-| 9b–10 | 未开始 | RAG Tool 和 CLI 发布 |
+| 9b. LLM 本地 RAG Tool | 已完成 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影 |
+| 10. CLI 发布 | 未开始 | 垂直闭环、跨平台 CLI 包和发布验收 |
 
 ## 2. 开发原则
 
@@ -556,15 +557,17 @@ cleo search <query> --hybrid --explain
 
 - 向模型暴露 `search_knowledge`、`list_materials` 和 `read_material_context`；正文继续使用已经实现的 `read_project_document`。
 - 实现受限制的 Tool Loop。
-- Tool 只能访问当前项目和允许的作用域。
+- Tool 只能访问当前项目中的导入资料；正文尚未进入统一索引，v1 不提供 `scope` 参数。
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
+
+实施状态：已完成。`KnowledgeToolService` 将资料列表、混合检索和同一 Source 的相邻 Chunk 读取封装为项目隔离的 Application Service；`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，跨项目 Source 对模型表现为当前项目中不存在。普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
 
 ```ts
 interface SearchKnowledgeInput {
   query: string;
-  scope: Array<'manuscript' | 'material'>;
   limit?: number;
+  source?: string;
 }
 ```
 

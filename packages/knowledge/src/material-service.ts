@@ -11,7 +11,12 @@ import type {
   VectorSearchHit,
 } from "../../contracts/src/index.js";
 import { AppError, KNOWLEDGE_SOURCE_SCHEMA_VERSION } from "../../contracts/src/index.js";
-import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
+import {
+  KnowledgeContextRepository,
+  MaterialRepository,
+  ProjectDatabase,
+  type KnowledgeChunkContext,
+} from "../../database/src/index.js";
 import { detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
@@ -50,11 +55,12 @@ import type {
 
 export class MaterialService {
   private readonly repository: MaterialRepository;
+  private readonly contextRepository: KnowledgeContextRepository;
   private readonly indexer: MaterialIndexer;
 
   private constructor(
     private readonly projectRoot: string,
-    private readonly projectId: string,
+    readonly projectId: string,
     private readonly database: ProjectDatabase,
     private readonly maxImportBytes: number,
     private readonly languageDetection: MaterialServiceOptions["languageDetection"],
@@ -64,6 +70,7 @@ export class MaterialService {
     retrieval: MaterialServiceOptions["retrieval"],
   ) {
     this.repository = new MaterialRepository(database);
+    this.contextRepository = new KnowledgeContextRepository(database);
     this.indexer = new MaterialIndexer(
       projectRoot,
       projectId,
@@ -206,6 +213,15 @@ export class MaterialService {
   ): Promise<MaterialHybridSearchResult> {
     await this.synchronizeProjection();
     return await this.indexer.searchHybrid(query, options);
+  }
+
+  readChunkContext(
+    sourceId: string,
+    chunkId: string,
+    before: number,
+    after: number,
+  ): KnowledgeChunkContext {
+    return this.contextRepository.read(this.projectId, sourceId, chunkId, before, after);
   }
 
   async getIndexStatus(): Promise<MaterialIndexDiagnostic[]> {

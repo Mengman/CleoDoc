@@ -24,6 +24,7 @@ import {
   SessionRepository,
 } from "../../database/src/index.js";
 import { DocumentService } from "../../project/src/index.js";
+import type { KnowledgeToolService } from "../../knowledge/src/index.js";
 import { ProjectToolCatalog, ProjectToolRuntime } from "./tool/index.js";
 import {
   DEFAULT_SYSTEM_PROMPT,
@@ -48,6 +49,10 @@ export interface ChatServiceOptions {
   compaction: ConstructorParameters<typeof CompactionService>[2];
 }
 
+export interface ChatServiceDependencies {
+  readonly knowledge?: KnowledgeToolService;
+}
+
 export class ChatService {
   private readonly repository: ConversationRepository;
   private readonly sessions: SessionRepository;
@@ -63,6 +68,7 @@ export class ChatService {
     private readonly projectRoot: string,
     private readonly database: ProjectDatabase,
     private readonly options: ChatServiceOptions,
+    dependencies: ChatServiceDependencies,
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
@@ -73,14 +79,20 @@ export class ChatService {
       documents: this.documents,
       projectInstructions: this.projectInstructions,
       history: this.sessions,
+      ...(dependencies.knowledge === undefined ? {} : { knowledge: dependencies.knowledge }),
     });
   }
 
-  static async open(projectRoot: string, options: ChatServiceOptions): Promise<ChatService> {
+  static async open(
+    projectRoot: string,
+    options: ChatServiceOptions,
+    dependencies: ChatServiceDependencies = {},
+  ): Promise<ChatService> {
     const service = new ChatService(
       projectRoot,
       await ProjectDatabase.open(projectRoot, options.database),
       options,
+      dependencies,
     );
     await service.sessions.recoverInterruptedJobs();
     await service.modelCalls.recoverInterruptedCalls();

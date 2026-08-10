@@ -258,12 +258,12 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `SetProjectInstructionsTool` | `set_project_instructions` | `catalog` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `catalog` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `catalog` | `auto` | 已实现 |
-| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | 已设计，待实现 |
-| `ListMaterialsTool` | `list_materials` | `full` | `auto` | 已设计，待实现 |
-| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | 已设计，待实现 |
+| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | 已实现 |
+| `ListMaterialsTool` | `list_materials` | `full` | `auto` | 已实现 |
+| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | 已实现 |
 | `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
-`write_draft` 尚未成为已实现的 LLM Tool，不计入本清单。三个 RAG Tool 已进入目标清单，但尚未接入 `ProjectToolCatalog` 和 Tool Loop。
+`write_draft` 尚未成为已实现的 LLM Tool，不计入本清单。三个 RAG Tool 已接入 `ProjectToolCatalog`、Conversation 级 Runtime 和 Tool Loop。
 
 两个披露等级含义：
 
@@ -287,9 +287,9 @@ Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provid
 | `search_conversation_history` | 符合 | `results` 是多命中必要数组；每项字段均服务于判断和后续精读。 |
 | `read_conversation_message` | **待简化** | 成功 Data 只有一条消息，却额外使用 `message` 单对象包装层；v2 应把消息字段提升到 Data 根级。 |
 | `project_tool_catalog` | **部分待简化** | `action` 是组合 Tool 判别所必需；`list` 结果重复返回 `pageSize`、`get` 固定返回 `callableNextRound: true` 的必要性不足，入口协议下次升级时删除。 |
-| `search_knowledge` | 符合（设计） | 单一根对象加必要的 `results` 数组；不返回内部检索诊断。 |
-| `list_materials` | 符合（设计） | 只返回选择资料所需的 Source、标题、格式、语言和索引状态。 |
-| `read_material_context` | 符合（设计） | 同一 Source 信息只返回一次，Chunk 数组保持原文顺序。 |
+| `search_knowledge` | 符合 | 单一根对象加必要的 `results` 数组；不返回内部检索诊断。 |
+| `list_materials` | 符合 | 只返回选择资料所需的 Source、标题、格式、语言和索引状态。 |
+| `read_material_context` | 符合 | 同一 Source 信息只返回一次，Chunk 数组保持原文顺序。 |
 
 公共 `ToolResult` 的 `ok + tool + data/error` 信封用于统一成功/失败判断、Tool 身份和版本，不属于可以逐 Tool 删除的冗余包装。该信封是否需要整体调整只能作为公共协议单独评审。
 
@@ -806,7 +806,7 @@ const catalog = new ProjectToolCatalog([
 ]);
 ```
 
-其中 `createKnowledgeTools()` 属于步骤 9 的待实现设计。以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
+`createKnowledgeTools()` 已按上述方式接入 Catalog。以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
 
 ### 9.2 Catalog Input
 
@@ -1257,7 +1257,8 @@ classDiagram
 - `loadedToolVersions` 按精确 `name + version` 恢复，版本变化后必须重新通过 Catalog `get` 加载。
 - OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。
 - SQLite 中的文档 Hash 和项目指令 Revision 不进入 LLM 可见 Tool Result。
-- `write_draft` 仍未进入实现范围。三个 RAG Tool 的公开契约已经在第 8 节确认，但尚未接入 Application Service、`ProjectToolCatalog` 和 Tool Loop。
+- `write_draft` 仍未进入实现范围。三个 RAG Tool 已通过 `KnowledgeToolService` 接入 `ProjectToolCatalog` 和 Tool Loop；Service 由 CLI Chat 生命周期创建一次并注入 `ChatService`，Tool 本身不持有 Project 或 Conversation 状态。
+- RAG Tool 结果继续作为普通 Tool Result Message 持久化；普通检索 Query、候选、排除项和排序诊断不写数据库。压缩时只保留语言、数量、页码等必要状态，不保留 Query、证据正文、Source 或 Chunk ID。
 
 ## 16. 设计依据
 

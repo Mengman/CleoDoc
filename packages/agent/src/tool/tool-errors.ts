@@ -48,3 +48,26 @@ export const HISTORY_ERRORS = [
     recovery: "使用累计摘要继续，或停止历史查询。",
   },
 ] as const satisfies readonly ToolErrorDefinition[];
+
+export const KNOWLEDGE_ERRORS = [
+  {
+    code: "MATERIAL_NOT_FOUND",
+    description: "当前项目中找不到指定资料。",
+    recovery: "调用 list_materials 重新选择资料。",
+  },
+  {
+    code: "MATERIAL_NOT_INDEXED",
+    description: "指定资料尚未完成有效索引。",
+    recovery: "等待索引完成，或要求用户重建索引。",
+  },
+  {
+    code: "KNOWLEDGE_CHUNK_NOT_FOUND",
+    description: "当前项目中找不到指定资料片段。",
+    recovery: "重新调用 search_knowledge 获取当前 Chunk ID。",
+  },
+  {
+    code: "CHUNK_SOURCE_MISMATCH",
+    description: "资料片段不属于指定资料。",
+    recovery: "使用同一搜索结果中的 source 和 chunkId。",
+  },
+] as const satisfies readonly ToolErrorDefinition[];
