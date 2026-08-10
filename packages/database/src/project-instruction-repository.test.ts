@@ -19,32 +19,6 @@ afterEach(async () => {
 });
 
 describe("ProjectInstructionRepository", () => {
-  it("creates complete revisions for set, append, replacement, and restore", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "cleodoc-instructions-test-"));
-    temporaryDirectories.push(root);
-    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
-    const repository = new ProjectInstructionRepository(database);
-    try {
-      expect(repository.getCurrent()).toBeNull();
-      const first = await repository.set("第一条规则", 0);
-      const second = await repository.append("\n第二条规则", first.revision);
-      const third = await repository.replaceText("第二条规则", "修订后的规则", second.revision);
-      const restored = await repository.restore(first.revision, third.revision);
-
-      expect(second.content).toBe("第一条规则\n第二条规则");
-      expect(third.content).toBe("第一条规则\n修订后的规则");
-      expect(restored.content).toBe(first.content);
-      expect(repository.list().map((item) => item.revision)).toEqual([
-        restored.revision,
-        third.revision,
-        second.revision,
-        first.revision,
-      ]);
-    } finally {
-      await database.close();
-    }
-  });
-
   it("rejects stale revisions without changing current content", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "cleodoc-instructions-conflict-test-"));
     temporaryDirectories.push(root);

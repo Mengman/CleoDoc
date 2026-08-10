@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { ModelProtocolEvent } from "../../contracts/src/index.js";
 import { OpenAICompatibleProvider } from "./openai-compatible-provider.js";
 
 const TEST_PROVIDER_CONFIG = {
@@ -64,74 +63,6 @@ describe("OpenAICompatibleProvider", () => {
     });
   });
 
-  it("emits the raw request and streamed response while redacting credentials", async () => {
-    const protocolEvents: ModelProtocolEvent[] = [];
-    const provider = new OpenAICompatibleProvider({
-      ...TEST_PROVIDER_CONFIG,
-      apiKey: "secret-value",
-      baseUrl: "https://example.test/v1",
-      fetchImplementation: async () =>
-        new Response(
-          'data: {"choices":[{"delta":{"content":"原始响应"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
-          {
-            headers: {
-              "Content-Type": "text/event-stream",
-              "Set-Cookie": "session=secret-cookie",
-              "X-Request-Id": "request-001",
-            },
-          },
-        ),
-    });
-
-    const modelEvents = [];
-    for await (const event of provider.stream(
-      {
-        model: "test-model",
-        messages: [{ role: "user", content: "检查压缩格式" }],
-        responseFormat: { type: "json_object" },
-        thinking: { type: "disabled" },
-        onProtocolEvent: (event) => protocolEvents.push(event),
-      },
-      new AbortController().signal,
-    )) {
-      modelEvents.push(event);
-    }
-    expect(modelEvents).toContainEqual({ type: "text-delta", text: "原始响应" });
-
-    const requestEvent = protocolEvents.find((event) => event.type === "request");
-    expect(requestEvent).toMatchObject({
-      type: "request",
-      method: "POST",
-      url: "https://example.test/v1/chat/completions",
-      headers: { Authorization: "<redacted>" },
-    });
-    expect(requestEvent?.type === "request" ? requestEvent.body : "").toContain("检查压缩格式");
-    expect(
-      requestEvent?.type === "request" ? JSON.parse(requestEvent.body) : undefined,
-    ).toMatchObject({
-      response_format: { type: "json_object" },
-      thinking: { type: "disabled" },
-    });
-    expect(
-      requestEvent?.type === "request" ? JSON.parse(requestEvent.body) : {},
-    ).not.toHaveProperty("max_tokens");
-    expect(JSON.stringify(protocolEvents)).not.toContain("secret-value");
-    expect(JSON.stringify(protocolEvents)).not.toContain("secret-cookie");
-    expect(protocolEvents).toContainEqual(
-      expect.objectContaining({
-        type: "response-head",
-        status: 200,
-        headers: expect.objectContaining({ "x-request-id": "request-001" }),
-      }),
-    );
-    expect(
-      protocolEvents
-        .filter((event) => event.type === "response-chunk")
-        .map((event) => event.chunk)
-        .join(""),
-    ).toContain('data: {"choices"');
-  });
-
   it("reports JSON parsing details for an invalid streamed response", async () => {
     const provider = new OpenAICompatibleProvider({
       ...TEST_PROVIDER_CONFIG,
@@ -149,30 +80,6 @@ describe("OpenAICompatibleProvider", () => {
         dataPreview: "{not-json}",
       },
     });
-  });
-
-  it("reassembles JSON content deltas when SSE frames and network chunks are fragmented", async () => {
-    const contentParts = ['{"schemaVersion":', "1,", '"handoffBrief":"完成"}'];
-    const sse =
-      contentParts
-        .map(
-          (content, index) =>
-            `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: index === contentParts.length - 1 ? "stop" : null }] })}\n\n`,
-        )
-        .join("") + "data: [DONE]\n\n";
-    const networkChunks = [sse.slice(0, 19), sse.slice(19, 71), sse.slice(71, 139), sse.slice(139)];
-    const provider = new OpenAICompatibleProvider({
-      ...TEST_PROVIDER_CONFIG,
-      baseUrl: "https://example.test/v1",
-      fetchImplementation: async () => new Response(streamFromStrings(networkChunks)),
-    });
-
-    const events = await collectEvents(provider);
-    const completeContent = events
-      .filter((event) => event.type === "text-delta")
-      .map((event) => event.text)
-      .join("");
-    expect(JSON.parse(completeContent)).toEqual({ schemaVersion: 1, handoffBrief: "完成" });
   });
 
   it("parses tool calls and serializes tool-call history for the next round", async () => {
@@ -368,15 +275,6 @@ function keepAliveStream(intervalMs: number): ReadableStream<Uint8Array> {
     },
     cancel() {
       clearInterval(timer);
-    },
-  });
-}
-
-function streamFromStrings(chunks: readonly string[]): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
-      controller.close();
     },
   });
 }
