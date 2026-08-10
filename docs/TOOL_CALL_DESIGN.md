@@ -2,7 +2,7 @@
 
 状态：v0.1 Tool 契约、ProjectToolCatalog 与 Conversation 级 Runtime 已实现
 适用范围：CleoDoc Core、CLI 和未来桌面端
-最后更新：2026-08-03
+最后更新：2026-08-10
 
 ## 1. Tool Call 设计原则
 
@@ -10,7 +10,7 @@ Tool 是非确定性的 LLM 与确定性的 CleoDoc Core 之间的操作契约�
 
 ### 1.1 面向领域任务，不映射底层 API
 
-Tool 应表达主笔能够理解的创作动作，例如 `search_knowledge`、`read_document`、`write_draft` 和 `propose_canon_change`，不得把 SQLite 表操作、文件系统细节或 Repository CRUD 直接暴露给模型。始终连续发生且没有独立决策价值的底层操作应由一个 Tool 在内部完成。
+Tool 应表达主笔能够理解的创作动作，例如 `search_knowledge`、`read_project_document`、`write_draft` 和 `propose_canon_change`，不得把 SQLite 表操作、文件系统细节或 Repository CRUD 直接暴露给模型。始终连续发生且没有独立决策价值的底层操作应由一个 Tool 在内部完成。
 
 ### 1.2 少量、清晰、互不混淆
 
@@ -47,6 +47,10 @@ Tool Call 表示 Agent 继续行动，Tool Result 表示环境观察；模型不
 ### 1.10 通过真实任务评测 Tool，而不是凭直觉定稿
 
 Tool 名称、描述、粒度、参数和结果格式都需要使用真实模型与真实创作任务评测。至少记录 Tool 选择正确率、参数校验失败率、任务完成率、冗余调用次数、错误恢复率、Token 消耗、延迟和副作用事故。设计变更必须通过保留测试集验证，避免只针对单个案例或单一 Provider 调优。
+
+### 1.11 LLM 可见 JSON 必须简单直接
+
+发送给 LLM 的 JSON 应优先保证小参数模型也能正确理解。字段应尽量少、命名直观、层次尽量浅；不得因为 CleoDoc 内部已经拥有某项数据，就默认把它加入 Tool Result。多个结果可以使用数组，但应避免没有独立业务语义的单对象包装层、重复回显输入、固定不变的状态字段和重复数据。内部诊断、审计与 Debug 数据必须和 LLM 可见结果分离。
 
 ## 2. 对 CleoDoc 的直接约束
 
@@ -237,12 +241,12 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 - `contentHash` 可继续用于增量索引、缓存失效、数据校验和内部版本比较，但不进入模型上下文、Tool 定义、Tool Result 或压缩投影。
 - 文档使用可理解且唯一的项目相对路径作为引用，不向模型返回文档数据库 ID。
 - `message_rowid`、Session 内部 Sequence、FTS Rank 等数据库实现字段不向模型返回。
-- 只有后续 Tool 必须使用的稳定引用才可以返回。目前唯一保留的是不可变历史消息的 `messageId`。
+- 只有后续 Tool 或正式文档引用必须使用的稳定公开引用才可以返回。当前已实现的是不可变历史消息的 `messageId`；RAG Tool 设计允许返回 CDM Reference 使用的 `source + chunkId`。SQLite Row ID 始终不得暴露。
 - LLM 需要判断资源是否更新时返回 `updatedAt`。底层仍可使用 Hash 和 Revision 保证可靠性，不把一致性责任交给模型。
 
 ## 4. Tool 清单与披露等级
 
-目标设计包含 8 个业务 Tool，以及作为组合 Tool 暴露的 `ProjectToolCatalog`：
+目标设计包含 11 个业务 Tool，以及作为组合 Tool 暴露的 `ProjectToolCatalog`：
 
 | 类名 | Tool name | Exposure | Approval | 状态 |
 |---|---|---|---|---|
@@ -254,9 +258,12 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `SetProjectInstructionsTool` | `set_project_instructions` | `catalog` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `catalog` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `catalog` | `auto` | 已实现 |
+| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | 已设计，待实现 |
+| `ListMaterialsTool` | `list_materials` | `full` | `auto` | 已设计，待实现 |
+| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | 已设计，待实现 |
 | `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
-`write_draft`、RAG 检索和资料管理 CLI 命令尚未成为已实现的 LLM Tool，不计入本清单。
+`write_draft` 尚未成为已实现的 LLM Tool，不计入本清单。三个 RAG Tool 已进入目标清单，但尚未接入 `ProjectToolCatalog` 和 Tool Loop。
 
 两个披露等级含义：
 
@@ -264,6 +271,27 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 - `catalog`：不进入请求顶层 `tools`，也不通过 System Context 发送名称或描述；模型通过始终可用的 `project_tool_catalog` 执行 `list` 发现，再通过 `get` 加载完整定义。
 
 Runtime 必须先根据当前项目、AgentJob、作品阶段、授权和 Provider 能力过滤 Tool。未授权 Tool 不得通过元 Tool 泄露或加载。
+
+### 4.1 LLM 可见 JSON 简化审查
+
+按照 [1.11](#111-llm-可见-json-必须简单直接) 对现有和已设计 Tool 进行审查。标记为“待简化”的项目当前仍保持 v1 兼容；实现修改时必须提升对应 Tool 版本并更新测试，不能只改文档或静默改变历史协议。
+
+| Tool | 结论 | 审查说明 |
+|---|---|---|
+| `list_project_documents` | 符合 | `documents` 数组是多结果必要层级；路径、大小和更新时间都有后续读取决策价值。 |
+| `read_project_document` | **待简化** | 成功 Data 只有一份文档，却额外使用 `document` 单对象包装层；v2 应把文档字段提升到 Data 根级。 |
+| `write_project_document` | **待简化** | 成功 Data 的 `document` 单对象包装没有独立业务语义；v2 应直接返回路径、大小、更新时间和创建状态。 |
+| `read_project_instructions` | 符合 | 只返回正文和必要更新时间，没有内部 Revision。 |
+| `append_project_instructions` | 符合 | 不重复输入正文，只返回更新时间和更新后字符数。 |
+| `set_project_instructions` | 符合 | 不重复输入正文，与追加 Tool 使用同一简单结果。 |
+| `search_conversation_history` | 符合 | `results` 是多命中必要数组；每项字段均服务于判断和后续精读。 |
+| `read_conversation_message` | **待简化** | 成功 Data 只有一条消息，却额外使用 `message` 单对象包装层；v2 应把消息字段提升到 Data 根级。 |
+| `project_tool_catalog` | **部分待简化** | `action` 是组合 Tool 判别所必需；`list` 结果重复返回 `pageSize`、`get` 固定返回 `callableNextRound: true` 的必要性不足，入口协议下次升级时删除。 |
+| `search_knowledge` | 符合（设计） | 单一根对象加必要的 `results` 数组；不返回内部检索诊断。 |
+| `list_materials` | 符合（设计） | 只返回选择资料所需的 Source、标题、格式、语言和索引状态。 |
+| `read_material_context` | 符合（设计） | 同一 Source 信息只返回一次，Chunk 数组保持原文顺序。 |
+
+公共 `ToolResult` 的 `ok + tool + data/error` 信封用于统一成功/失败判断、Tool 身份和版本，不属于可以逐 Tool 删除的冗余包装。该信封是否需要整体调整只能作为公共协议单独评审。
 
 ## 5. 文档 Tool
 
@@ -312,6 +340,8 @@ Output Schema 字段：
 | `document.nextOffset` | integer 或 null | 下一段起点 |
 | `document.totalCharacters` | nonnegative integer | 当前完整文档字符数 |
 
+> JSON 简化标记：v1 的 `document` 单对象包装层没有独立业务语义。后续实现 v2 时将以上字段提升到成功 Data 根级；当前代码和历史结果保持不变。
+
 压缩投影只保留路径、更新时间和读取范围，不保留 `content`：
 
 ```json
@@ -352,6 +382,8 @@ Output Schema 字段：
 | `document.size` | nonnegative integer | UTF-8 文件字节数 |
 | `document.updatedAt` | datetime string | 保存完成时间 |
 | `document.created` | boolean | true 为新建，false 为覆盖 |
+
+> JSON 简化标记：v1 的 `document` 单对象包装层待在 v2 删除，结果直接返回 `path`、`size`、`updatedAt` 和 `created`。
 
 压缩投影不复制 `content`，只保留名称、版本、状态、`document_created/document_updated`、路径和更新时间。
 
@@ -482,13 +514,248 @@ Output Schema：
 | `message.nextOffset` | integer 或 null | 下一片段起点 |
 | `message.totalCharacters` | nonnegative integer | 完整消息字符数 |
 
+> JSON 简化标记：v1 的 `message` 单对象包装层待在 v2 删除，消息字段提升到成功 Data 根级。
+
 逻辑目标是读取完整消息，但必须保留分段机制，防止一条超长模型回复一次占满 Context。压缩投影不保留 Message ID 和正文，只记录名称、版本、状态、读取字符数及是否仍有后续。
 
 原 `read_conversation_history` 按 Session 分页读取的设计废弃。
 
-## 8. ProjectToolCatalog 组合 Tool
+## 8. 本地 RAG Tool
 
-### 8.1 定位与生命周期
+### 8.1 设计目标与公共约束
+
+本地 RAG Tool 将已经实现的资料 Exact、FTS、Vector 混合检索接入 LLM Tool Loop。首版只检索导入资料；正文尚未进入同一索引，因此 `search_knowledge` v1 不提前接受无效的 `scope` 参数。正文索引实现后再评审是否扩展该 Tool 并提升版本。
+
+LLM 可见 JSON 优先保证小参数模型也能稳定理解：字段尽量少、命名直接、层次浅，不因为 CleoDoc 内部已经拥有某项诊断数据就默认返回。内部 `HybridRetrievalResult`、CLI Explain 和安全 Debug 可以保留完整运行诊断，但不得直接作为 Tool Result。
+
+三个 RAG Tool 都是当前项目内的只读操作，固定 `approval = "auto"`。Project 范围由 `ToolExecutionContext.projectId` 注入；模型不能提供或切换 Project ID。其他项目中的 Source 或 Chunk 对模型统一表现为“当前项目中不存在”，不能泄露其实际存在状态。
+
+以下内部信息不向 LLM 返回：
+
+- SQLite Row ID、Source Hash、Revision、项目路径和临时 CDM 信息。
+- Embedding 模型名称和版本、Exact/FTS/Vector 候选数量及耗时。
+- FTS Rank、Vector Distance、RRF Score、字符预算、排除项和排除原因。
+- 原始资料字节范围和索引错误堆栈。
+
+Embedding 或 sqlite-vec 不可用时，CleoDoc 在内部降级为 Exact + FTS；只要文本检索成功就返回正常结果，不要求 LLM 理解降级机制。
+
+### 8.2 search_knowledge
+
+用途描述：
+
+> 在当前项目已经建立索引的资料中执行混合检索。query 必须使用目标资料的语言：搜索英文资料时使用英文 query，搜索中文资料时使用中文 query。目标包含多种语言时，分别使用相应语言调用本 Tool。若不清楚资料语言，先调用 list_materials。
+
+Input Schema：
+
+```ts
+const searchKnowledgeInputSchema = z
+  .object({
+    query: z.string().trim().min(1).max(500),
+    limit: z.number().int().min(1).max(10).optional(),
+    source: z.string().trim().min(1).optional(),
+  })
+  .strict();
+```
+
+- `query` 是实际用于 Exact、FTS 和 Embedding 的文本。
+- `limit` 默认 5，最大 10。
+- `source` 是可选的公开 Source 标识，用于把搜索限制到一份资料。
+- 不提供 `language` 参数。CleoDoc 根据 query 的实际语言选择 Embedding 模型，避免模型声明英文却提交中文 query。
+
+Output Schema 直接内联结果项，不再创建独立的 `Evidence` 输出层：
+
+```ts
+const searchKnowledgeOutputSchema = z
+  .object({
+    queryLanguage: z.enum(["zh", "en"]),
+    sourceLanguages: z.array(z.enum(["zh", "en"])),
+    languageWarning: z.string().nullable(),
+    results: z.array(
+      z
+        .object({
+          source: z.string(),
+          chunkId: z.string(),
+          title: z.string(),
+          content: z.string(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+```
+
+`source` 与 `chunkId` 是 CDM `<reference>` 使用的稳定公开标识，不是数据库 Row ID。结果数组顺序已经表示最终相关性，LLM 不需要内部排名字段。
+
+正常结果示例：
+
+```json
+{
+  "queryLanguage": "en",
+  "sourceLanguages": ["en"],
+  "languageWarning": null,
+  "results": [
+    {
+      "source": "src_triton",
+      "chunkId": "chk_8r2v5x9m",
+      "title": "Triton Programming Guide",
+      "content": "Triton is a language and compiler for writing efficient GPU kernels."
+    }
+  ]
+}
+```
+
+### 8.3 检索语言判断
+
+`queryLanguage` 复用当前 Query 主语言检测逻辑，v1 只返回 `zh` 或 `en`，并据此选择 Embedding 模型。`sourceLanguages` 来自当前项目、`material` 类型、`ready` 状态且满足可选 `source` 限制的资料语言并集；指定 `source` 时就是该资料的语言列表。
+
+只在明确不匹配时生成非阻断警告：
+
+```ts
+const mismatch =
+  sourceLanguages.length > 0 &&
+  !sourceLanguages.includes(queryLanguage);
+```
+
+示例：
+
+```json
+{
+  "queryLanguage": "zh",
+  "sourceLanguages": ["en"],
+  "languageWarning": "资料是英文的，请使用英文 query 重新搜索。",
+  "results": []
+}
+```
+
+警告不阻止检索，因为专有名称仍可能通过 Exact 或 FTS 命中。搜索范围同时存在中文和英文资料时不发出警告，因为 CleoDoc 无法判断模型真正想查哪份资料；模型应先调用 `list_materials`，再按目标资料语言分别检索。CleoDoc 不在内部静默翻译 query。
+
+Source 语言目前是资料级信息，不精确到每个 Chunk。Chunk 级语言与多模型 Embedding 待出现真实需求后再设计。
+
+### 8.4 list_materials
+
+用途描述：
+
+> 列出当前项目导入资料的标题、格式、语言、公开 Source 标识和索引状态。需要确认有哪些资料、资料属于什么格式、使用什么语言或者选择 search_knowledge 的 source 时调用。本 Tool 不读取资料正文。
+
+Input Schema：
+
+```ts
+const listMaterialsInputSchema = z
+  .object({
+    page: z.number().int().positive().optional(),
+    pageSize: z.number().int().min(1).max(20).optional(),
+  })
+  .strict();
+```
+
+`page` 默认 1，`pageSize` 默认 10。Output 不重复返回模型已经提交的 `pageSize`：
+
+```ts
+const listMaterialsOutputSchema = z
+  .object({
+    materials: z.array(
+      z
+        .object({
+          source: z.string(),
+          title: z.string(),
+          format: z.enum(["text", "markdown"]),
+          languages: z.array(z.enum(["zh", "en"])),
+          indexStatus: z.enum(["pending", "ready", "stale", "failed"]),
+        })
+        .strict(),
+    ),
+    page: z.number().int().positive(),
+    totalPages: z.number().int().nonnegative(),
+  })
+  .strict();
+```
+
+当前资料还没有 Tag 功能，因此不返回 `tags`；`updatedAt` 对模型的检索决策没有直接帮助，也不返回。保留 `format`，以支持“查询 PDF 中的信息”一类按资料格式表达的用户要求。v0.1 只允许 `text` 和 `markdown`；真正支持 PDF、DOCX 等格式时扩展枚举并提升 Tool 版本，不能提前让模型误以为已经支持。
+
+### 8.5 read_material_context
+
+用途描述：
+
+> 根据 search_knowledge 返回的 source 和 chunkId，读取目标 Chunk 以及有限的相邻 Chunk。只在搜索结果缺少必要前后文时调用。返回结果始终包含指定的目标 Chunk。
+
+Input Schema：
+
+```ts
+const readMaterialContextInputSchema = z
+  .object({
+    source: z.string().trim().min(1),
+    chunkId: z.string().trim().min(1),
+    before: z.number().int().min(0).max(3).optional(),
+    after: z.number().int().min(0).max(3).optional(),
+  })
+  .strict();
+```
+
+`before` 和 `after` 默认都是 1。即使都为 0，也必须返回 `chunkId` 指定的目标 Chunk。
+
+相邻 Chunk 属于同一 Source，因此 Source 信息只返回一次：
+
+```ts
+const readMaterialContextOutputSchema = z
+  .object({
+    source: z.string(),
+    title: z.string(),
+    targetChunkId: z.string(),
+    chunks: z.array(
+      z
+        .object({
+          chunkId: z.string(),
+          content: z.string(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+```
+
+`chunks` 固定按照原文顺序返回：前置 Chunk、目标 Chunk、后置 Chunk；不得按照检索相关性重新排序。Service 必须校验 Source 属于当前项目且处于 `ready` 状态、目标 Chunk 存在并属于该 Source、相邻读取没有超过限制。
+
+### 8.6 多语言调用流程
+
+```text
+用户用中文提出问题
+→ LLM 调用 list_materials
+→ 发现目标资料 languages = ["en"]
+→ LLM 将问题改写为英文 query
+→ 调用 search_knowledge
+→ 必要时调用 read_material_context
+→ 使用证据以中文回答用户
+```
+
+需要同时检索中文和英文资料时，模型分别调用两次 `search_knowledge`。v1 每次调用只接受一个 query，不增加多 Query 嵌套结构。
+
+### 8.7 持久化、压缩与代码边界
+
+不创建 RetrievalRun、RetrievalContext 或候选审计表。实际发送给模型的证据已经包含在版本化 Tool Result Message 中，不再复制保存普通 Query、候选、排除项和排序诊断。
+
+Session 压缩不得包含资料正文或 Chunk Content。允许的压缩投影为：
+
+| Tool | 允许进入压缩的信息 |
+|---|---|
+| `search_knowledge` | Query 语言、结果数量、来源数量、语言警告 |
+| `list_materials` | 当前页资料数量、页码、总页数 |
+| `read_material_context` | 返回 Chunk 数量 |
+
+建议在 `packages/agent/src/tool/knowledge-tools.ts` 实现三个无执行状态的 Tool 和 `createKnowledgeTools()`。Tool 只持有稳定的 Application Service，不持有 Project ID、Conversation ID 或 Session ID，也不直接访问 SQLite Repository。资料/RAG Application Service 负责 `searchKnowledge()`、`listMaterials()` 和 `readMaterialContext()`。
+
+### 8.8 验收标准
+
+- LLM 可以主动检索当前项目资料，并在同一任务中执行多轮及多语言检索。
+- 中文对话搜索英文资料时，模型使用英文 query；明显不匹配时得到简单的非阻断提示。
+- `read_material_context` 始终包含目标 Chunk，相邻 Chunk 保持原文顺序。
+- 所有返回的 `source + chunkId` 都能回溯到当前项目资料。
+- Tool 不泄露 Hash、Row ID、绝对路径和内部检索算法信息。
+- Embedding 不可用时仍可通过 Exact + FTS 返回结果。
+- Session 压缩不包含证据正文，普通检索不产生额外数据库审计记录。
+
+## 9. ProjectToolCatalog 组合 Tool
+
+### 9.1 定位与生命周期
 
 `ProjectToolCatalog` 是项目中全部业务 Tool 的唯一目录，同时自身实现公共 `Tool` 接口，以 `project_tool_catalog` 暴露给模型。它在应用启动并完成当前项目的 Service/Repository 初始化后创建一次，之后注入该项目的所有 `ProjectToolRuntime`；不能在每次消息发送时重复实例化全部 Tool 或重复生成 JSON Schema。
 
@@ -535,12 +802,13 @@ const catalog = new ProjectToolCatalog([
   ...createDocumentTools(documentService),
   ...createProjectInstructionTools(projectInstructionRepository),
   ...createConversationHistoryTools(sessionRepository),
+  ...createKnowledgeTools(materialService),
 ]);
 ```
 
-以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
+其中 `createKnowledgeTools()` 属于步骤 9 的待实现设计。以后新增一个功能域只增加一个集合创建函数；Catalog 构造时一次性完成名称校验、Schema 转换和定义缓存。Tool 构造函数不得执行模型调用、文档解析或其他重任务，真正昂贵的资源由底层 Service 管理。
 
-### 8.2 Catalog Input
+### 9.2 Catalog Input
 
 原来的 `list_tools` 和 `get_tool` 合并为同一个组合 Tool 的两种操作。Input 使用 `action` 区分操作。Provider Function Tool 要求参数 Schema 顶层必须是 `type: "object"`，因此不直接把 Zod 判别联合生成的顶层 `oneOf` 作为公开 Schema：
 
@@ -579,7 +847,7 @@ const projectToolCatalogInputSchema = z
 
 `projectId`、`conversationId`、`sessionId`、披露等级和授权范围均不属于模型 Input。
 
-### 8.3 list 操作
+### 9.3 list 操作
 
 调用示例：
 
@@ -606,7 +874,9 @@ const projectToolCatalogInputSchema = z
 
 `list` 始终返回全部已授权 Tool，不因 `exposure` 或当前是否加载而过滤。结果按 `name` 稳定排序；超出总页数时返回空 `tools`，不自动修改页码。调用 `list` 不改变 Runtime 的动态加载状态。
 
-### 8.4 get 操作
+> JSON 简化标记：`pageSize` 已由模型在 Input 中给出，Output 再次返回的决策价值有限。下次升级 Catalog 入口协议时删除该字段。
+
+### 9.4 get 操作
 
 调用示例：
 
@@ -632,6 +902,8 @@ const projectToolCatalogInputSchema = z
 | `callableNextRound` | literal true | 当前版本已加入后续模型请求 |
 
 Catalog 只查找和返回 Tool 定义，不保存当前 Conversation 已加载哪些 Tool。`get` 成功后，`ProjectToolRuntime` 把返回的 `name + version` 加入自己的 `loadedToolVersions`；重复查询保持幂等。查询不存在或未授权的名称统一返回 `TOOL_NOT_FOUND`。
+
+> JSON 简化标记：`callableNextRound` 当前只能为 `true`，没有提供额外状态信息。下次升级 Catalog 入口协议时删除该字段，并由 Tool 描述说明成功加载后的调用时机。
 
 Catalog Output 使用与 Input 相同的 `action` 判别：
 
@@ -677,7 +949,7 @@ async execute(
 
 `loadedToolVersions` 的更新发生在 Runtime 收到成功 Outcome 之后，不允许 Catalog 修改 Conversation 状态。
 
-### 8.5 ChatService 调用链
+### 9.5 ChatService 调用链
 
 开始或恢复 Conversation 时：
 
@@ -706,7 +978,7 @@ LLM 调用业务 Tool
 → Tool.execute(input, ToolExecutionContext)
 ```
 
-## 9. 审批与退出前临时授权
+## 10. 审批与退出前临时授权
 
 `approval` 是 Tool 固定规则：
 
@@ -731,7 +1003,7 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 
 `ApprovalRequest` 不需要 `projectId` 或 `conversationId`。审批处理器由当前 Runtime 调用，作用域已经由 Runtime 隔离；CLI/GUI 只需要展示 Tool 身份和已校验 Input。
 
-## 10. 压缩投影
+## 11. 压缩投影
 
 `getCompactionMessage()` 只根据当次 Input 和 Outcome 生成高信号、低 Token 的投影，不重新执行 Tool，不包含 Reasoning。
 
@@ -772,13 +1044,16 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 | `set_project_instructions` | 操作、更新时间、更新后字符数 |
 | `search_conversation_history` | 命中数量 |
 | `read_conversation_message` | 读取字符数、是否截断 |
+| `search_knowledge` | Query 语言、结果数量、来源数量、语言警告 |
+| `list_materials` | 当前页资料数量、页码、总页数 |
+| `read_material_context` | 返回 Chunk 数量 |
 | `project_tool_catalog` 的 `list/get` | `null` |
 
-正文、项目指令全文、历史消息、搜索 Query、Excerpt、Message ID、Tool 参数中的大文本、Reasoning 和 `contentHash` 均不得进入压缩投影。
+正文、项目指令全文、历史消息、搜索 Query、RAG 证据正文、Chunk ID、Excerpt、Message ID、Tool 参数中的大文本、Reasoning 和 `contentHash` 均不得进入压缩投影。
 
 `ProjectToolCatalog.getCompactionMessage()` 对 `list` 和 `get` 都固定返回 `null`。压缩投影器通过 `catalog.getToolOrSelf(toolName)` 统一解析 Catalog 自身和业务 Tool：Catalog 调用直接忽略，业务 Tool 委托其 `getCompactionMessage()`，未知或已删除的历史 Tool 才降级为通用状态事件。这样不需要保留 `ListToolsTool`、`GetToolTool` 类，也不会把“已知但应忽略”的 Catalog 调用误判为未知 Tool。
 
-## 11. 错误与恢复
+## 12. 错误与恢复
 
 可预期错误必须由 Tool 返回稳定错误码和恢复建议；意外异常由 Runtime 转换为 `TOOL_EXECUTION_FAILED`。不得向模型返回堆栈。
 
@@ -793,13 +1068,17 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 | `USER_REJECTED` | `ask` Tool | 停止修改，不得绕过审批 |
 | `HISTORY_MESSAGE_NOT_FOUND` | 历史读取 | 重新搜索历史并使用当前 Message ID |
 | `HISTORY_UNAVAILABLE` | 历史 Tool | 使用累计摘要继续，或结束查询 |
+| `MATERIAL_NOT_FOUND` | RAG 搜索/上下文读取 | 调用 `list_materials` 重新选择资料 |
+| `MATERIAL_NOT_INDEXED` | RAG 搜索/上下文读取 | 等待索引完成或要求用户重建索引 |
+| `KNOWLEDGE_CHUNK_NOT_FOUND` | RAG 上下文读取 | 重新调用 `search_knowledge` |
+| `CHUNK_SOURCE_MISMATCH` | RAG 上下文读取 | 使用同一搜索结果中的 `source + chunkId` |
 | `TOOL_EXECUTION_FAILED` | 意外内部故障 | 不自动重试有副作用 Tool，向用户报告 |
 
 项目指令数据库 Revision 冲突由 Runtime 和 Repository 内部处理，不作为要求 LLM 恢复的 Tool 错误。
 
-## 12. ProjectToolRuntime
+## 13. ProjectToolRuntime
 
-### 12.1 定位与生命周期
+### 13.1 定位与生命周期
 
 `ProjectToolRuntime` 是一个 Conversation 的 Tool 执行环境，不是单次 `send()` 的临时对象，也不是跨 Conversation 的应用全局对象。`ChatService` 为每个已打开的 Conversation 缓存一个 Runtime：
 
@@ -830,7 +1109,7 @@ class ChatService {
 
 Runtime 不持有 `sessionId`。Session 是消息组装、上下文预算、摘要继承和压缩的边界，由 `ChatService`、`ContextBuilder`、`SessionRepository` 与 `CompactionService` 管理；当前所有 Tool 的业务范围只需要 Project 或 Conversation。未来只有在出现真实的 Session 级 Tool 后，才为那次调用单独设计可信 Session 参数。
 
-### 12.2 Runtime 状态
+### 13.2 Runtime 状态
 
 每个 Runtime 持有：
 
@@ -855,13 +1134,13 @@ class ProjectToolRuntime {
 
 Runtime 不持有数据库连接之外的 Tool 实例，不逐个注册业务 Tool，也不重复生成 JSON Schema。审批处理器属于当前 CLI/GUI 交互，由 `ChatService` 在执行调用时提供；Runtime 只保存用户已经批准的结果，不能保留上一次 `send()` 的回调。
 
-### 12.3 Conversation 隔离与恢复
+### 13.3 Conversation 隔离与恢复
 
 `conversationApprovalsUntilExit` 只存在于当前进程内，不能从 Conversation A 继承到 Conversation B，也不能在应用重启后恢复。用户回到同一 Conversation 且应用尚未退出时，继续复用原 Runtime，因此授权仍有效。
 
 `loadedToolVersions` 是模型已经获得的协议能力，必须按 Conversation 恢复。应用重启后创建 Runtime 时，从该 Conversation 已保存的成功 Catalog `get` 结果恢复精确的 `name + version`；旧版本记录不能加载新版本 Tool。Session 压缩不销毁 Runtime，也不改变这两组 Conversation 级状态。
 
-### 12.4 Tool 信息与模型请求
+### 13.4 Tool 信息与模型请求
 
 `ProjectToolRuntime.toolInfo` 是 `ChatService` 获取当前模型 Tool 定义的唯一入口：
 
@@ -875,7 +1154,7 @@ ProjectToolRuntime.toolInfo
 
 每次真实模型请求都通过 `ProjectToolRuntime.toolInfo` 从当前 Catalog 重新取得公开定义，并写入请求顶层 `tools` 字段。`project_tool_catalog` 的 `exposure = "full"`，所以应用重启或 Tool 版本更新后，模型会随下一次正常请求直接收到当前入口定义；这里不需要额外的对话消息、System 公告或数据库版本状态。
 
-### 12.5 执行顺序
+### 13.5 执行顺序
 
 ```text
 完整拼接流式 Tool 参数
@@ -897,7 +1176,7 @@ Tool Call ID、审批状态、Conversation 内退出前授权、Catalog 动态�
 
 取消信号代表终止当前 Agent 回合，但不进入 `ToolExecutionContext`。取消后不再启动新的 Tool 或模型调用；已经进入 SQLite 事务、原子文件替换或其他短时一致性边界的操作必须完成或回滚。未来出现长时间 Tool 时，先让底层 Service 支持协作取消，再按真实需求扩展接口。
 
-## 13. UML 类图
+## 14. UML 类图
 
 ```mermaid
 classDiagram
@@ -948,11 +1227,13 @@ classDiagram
     class DocumentToolGroup
     class ProjectInstructionsToolGroup
     class ConversationHistoryToolGroup
+    class KnowledgeToolGroup
 
     ProjectToolCatalog ..|> Tool
     ProjectToolCatalog o-- DocumentToolGroup
     ProjectToolCatalog o-- ProjectInstructionsToolGroup
     ProjectToolCatalog o-- ConversationHistoryToolGroup
+    ProjectToolCatalog o-- KnowledgeToolGroup
     ProjectToolRuntime --> ProjectToolCatalog : shared catalog
     ProjectToolRuntime --> ToolExecutionContext : injects
     ProjectToolRuntime --> Tool : executes
@@ -961,7 +1242,7 @@ classDiagram
     ToolCompactionProjector --> ProjectToolCatalog : resolves tool or self
 ```
 
-## 14. 实现状态与重构边界
+## 15. 实现状态与重构边界
 
 本文件定义的 v0.1 Tool Runtime 已完成：
 
@@ -976,9 +1257,9 @@ classDiagram
 - `loadedToolVersions` 按精确 `name + version` 恢复，版本变化后必须重新通过 Catalog `get` 加载。
 - OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。
 - SQLite 中的文档 Hash 和项目指令 Revision 不进入 LLM 可见 Tool Result。
-- `write_draft`、RAG 检索和资料管理 Tool 仍不在本轮实现范围。
+- `write_draft` 仍未进入实现范围。三个 RAG Tool 的公开契约已经在第 8 节确认，但尚未接入 Application Service、`ProjectToolCatalog` 和 Tool Loop。
 
-## 15. 设计依据
+## 16. 设计依据
 
 这些原则综合了生产框架和代表性研究中的共同结论：
 

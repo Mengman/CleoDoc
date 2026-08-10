@@ -554,7 +554,7 @@ cleo search <query> --hybrid --explain
 
 工作内容：
 
-- 向模型暴露 `search_knowledge`、`read_document` 和 `list_materials`。
+- 向模型暴露 `search_knowledge`、`list_materials` 和 `read_material_context`；正文继续使用已经实现的 `read_project_document`。
 - 实现受限制的 Tool Loop。
 - Tool 只能访问当前项目和允许的作用域。
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
