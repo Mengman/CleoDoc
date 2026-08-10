@@ -81,6 +81,14 @@ export const softwareConfigSchema = z
       .strict(),
     rag: z
       .object({
+        retrieval: z
+          .object({
+            candidateLimit: positiveInteger.max(100),
+            rrfK: positiveInteger,
+            contextMaxCharacters: positiveInteger,
+            maxSourceRatio: positiveRatio,
+          })
+          .strict(),
         languageDetection: z.object({ minBlockUnits: positiveInteger }).strict(),
         embedding: z
           .object({

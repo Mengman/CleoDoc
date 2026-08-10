@@ -113,7 +113,6 @@ export const CURRENT_SCHEMA_SQL = `
     origin TEXT NOT NULL CHECK (origin IN ('file', 'paste')),
     format TEXT NOT NULL CHECK (format IN ('text', 'markdown')),
     title TEXT NOT NULL,
-    source_label TEXT,
     original_file_name TEXT,
     tags_json TEXT NOT NULL,
     languages_json TEXT NOT NULL DEFAULT '["zh"]',

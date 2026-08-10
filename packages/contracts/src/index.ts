@@ -5,5 +5,6 @@ export * from "./knowledge-chunk.js";
 export * from "./model.js";
 export * from "./project.js";
 export * from "./project-instructions.js";
+export * from "./retrieval.js";
 export * from "./session.js";
 export * from "./vector-index.js";

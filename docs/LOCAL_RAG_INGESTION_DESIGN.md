@@ -54,7 +54,7 @@ flowchart TD
     EMBEDDER --> VECTORS["SQLite chunk_embeddings"]
     FTS --> FUSION["混合召回与 RRF"]
     VECTORS --> FUSION
-    FUSION --> EVIDENCE["证据包与 ContextManifest"]
+    FUSION --> EVIDENCE["证据包与 RetrievalContext"]
 ```
 
 数据职责如下：
@@ -328,14 +328,18 @@ flowchart LR
     VECTOR --> RRF
     RRF --> RERANK["任务相关重排"]
     RERANK --> BUDGET["上下文预算装箱"]
-    BUDGET --> MANIFEST["ContextManifest"]
+    BUDGET --> CONTEXT["RetrievalContext"]
 ```
 
 - 精确名称、FTS 和向量召回是并列能力，不用向量检索替代全文检索。
 - 融合默认使用 RRF，避免直接比较 BM25 分数和余弦距离。
 - 去重只合并重复展示，不删除不同来源的证据关系。
-- 只有最终进入模型上下文的 Chunk 才记录为 ContextManifest 使用项。
+- 只有最终进入上下文候选区的 Chunk 才进入内存 `RetrievalContext.items`。
 - 检索失败不得阻止用户查看原始资料；只有显式选中的证据可以发送给远程模型。
+
+当前实现采用 `research` Profile：在同一项目与 `material` 范围内并列执行完整字符串 Exact、基于 trigram 的 FTS 和当前查询语言的 Vector 召回。默认每路最多召回 20 条，使用 `Σ 1 / (60 + rank)` 进行 RRF；融合结果按公开 `chunk_id` 合并通道，排除同一 Source 中范围重合度不低于 80% 的低排名 Chunk，再执行单一来源占比、12,000 字符上下文预算和调用方结果数量限制。以上参数均来自软件 YAML 的 `rag.retrieval`。向量路径不可用时返回错误码并继续 Exact + FTS，不静默伪造向量结果。
+
+普通检索不持久化 Query、候选排名、排除项或结果快照。`HybridRetrievalResult` 只包含运行诊断和一个内存 `RetrievalContext`；后者只包含最终采用的 `RetrievalCandidate[]` 与正文字符总数，调用方统一读取 `retrievalContext.items`。未采用候选只对 RAG Debug 有价值，当前不进入公共结果。当前预算单位明确为 Unicode 字符，不冒充 LLM Token；步骤 9 接入 Provider Tokenizer 后再由模型调用层提供精确 Token 预算及模型调用证据审计。
 
 ### 9.1 RAG Tool Result
 
@@ -406,7 +410,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和完整 Schema v9 的 `sources.languages_json`。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 已实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；重复切片保留未变化 Row ID 与有效向量，局部变化通过 Hash 不一致使旧向量失效。Embedding Worker 已实现一次任务一次模型加载、Chunk 任务分批、逐项进度、取消和 Transferable 向量回传，且不访问 SQLite。安全写回编排已经按 Source 主语言选择模型，冻结 Source/Chunk Hash 与切片配置，并在每批短事务中重新校验后写入 Float32 Little-Endian BLOB；过期结果直接丢弃，再次运行只补齐缺失或失效向量。逐 Chunk 输入只传递 Chunk ID 和正文，模型 ID 与 Hash 留在主线程。`SqliteVectorIndex` 已通过锁定版本的 sqlite-vec 0.1.9 对普通向量表执行精确余弦检索，并在距离计算前落实项目、Source 状态、模型和 Hash 过滤。`cleo index embed/status` 已提供增量生成、进度、完整度与失败恢复，`cleo search --semantic` 已根据短 Query 的汉字/英文词占比路由中英文模型并返回距离和原文范围；安全 Debug 日志不保存 Query、资料正文或向量。步骤 7.9 已补齐编码、级联、重启恢复和扩展失败测试，并通过 `cleo embedding benchmark` 固化真实中英文 Q8_0 CPU/GPU 推理、sqlite-vec 查询、固定近义语料召回及结果回溯 Baseline；当前 AMD GPU 实际使用 Vulkan 并完成模型层卸载，首份结果见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
+当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和数据库投影。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 包含 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；混合检索不增加数据库表。Embedding Worker、安全写回编排和 sqlite-vec 0.1.9 精确余弦检索均已完成。`cleo index embed/status`、`cleo search --semantic` 与 `cleo search --hybrid [--explain]` 已形成离线检索闭环；安全 Debug 日志不保存 Query、资料正文或向量。固定中英文语料同时检查 Vector 与 Hybrid Top-1/Top-5 Recall，真实 Q8_0 CPU/GPU 首份结果见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
 
 ### v0.1
 
@@ -415,7 +419,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 实现 FTS 与向量的混合召回、RAG Tool 和 ContextManifest。
+- 已实现 FTS 与向量的混合召回和 RetrievalContext；下一步接入 RAG Tool。
 - 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 
@@ -449,7 +453,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 ### 检索
 
 - 精确名称、两字人物名、近义描述和正文片段都能命中相应证据。
-- 关键设定测试集 Top-10 召回率不低于 90%。
+- 当前固定正确性语料同时报告 Vector 与 Hybrid Top-1/Top-5；中文均为 100%，英文 Hybrid Top-1 为 75%、Top-5 为 100%。该数据只作为程序回归基线，正式质量基准延后建设。
 - 10–15 万字正文加常规资料库保持交互级响应。
 - 项目检索不返回未显式链接的其他项目资料。
 - Embedding 不可用时 FTS5 仍可工作。
@@ -467,6 +471,6 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 ### 向量后端评测
 
 - 使用同一 Chunk、模型、查询和金标准比较所有后端。
-- 同时记录 Recall@10、MRR、P50/P95 延迟、索引时间、峰值内存、磁盘空间和安装包增量。
+- 当前正确性基准记录 Top-1/Top-5 Recall 与 P50/P95 延迟；正式质量基准再增加 MRR、索引时间、峰值内存、磁盘空间和安装包增量。
 - 桌面和未来移动端分别测量，不能用服务器成绩替代终端设备成绩。
 - 新后端必须能够全量重建并随时回退到基础精确实现。

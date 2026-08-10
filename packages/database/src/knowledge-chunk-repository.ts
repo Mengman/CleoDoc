@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type {
   KnowledgeChunk,
-  KnowledgeSearchResult,
+  KnowledgeSearchFilter,
   KnowledgeSourceIndexStatus,
+  RetrievedChunk,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
 import type { ProjectDatabase } from "./project-database.js";
@@ -47,7 +48,8 @@ interface ExistingChunkRow extends ChunkRow {
 
 interface SearchRow extends ChunkRow {
   source_title: string;
-  source_label: string | null;
+  source_revision: string;
+  source_updated_at: string;
 }
 
 export class KnowledgeChunkRepository {
@@ -204,35 +206,83 @@ export class KnowledgeChunkRepository {
     });
   }
 
-  search(projectId: string, query: string, limit: number): KnowledgeSearchResult[] {
-    const characters = Array.from(query).length;
+  search(projectId: string, query: string, limit: number): RetrievedChunk[] {
+    const filter = { projectId, sourceType: "material" as const };
+    return Array.from(query).length < 3
+      ? this.searchExact(filter, query, limit)
+      : this.searchFts(filter, query, limit);
+  }
+
+  searchExact(filter: KnowledgeSearchFilter, query: string, limit: number): RetrievedChunk[] {
+    validateSearch(filter, limit);
     const rows = this.projectDatabase.read((database) => {
-      if (characters < 3) {
-        return database
-          .prepare(
-            `SELECT kc.*, s.title AS source_title, s.source_label
-             FROM knowledge_chunks kc
-             JOIN sources s ON s.id = kc.source_id
-             WHERE s.project_id = ? AND s.index_status = 'ready'
-               AND instr(kc.content, ?) > 0
-             ORDER BY s.updated_at DESC, kc.ordinal
-             LIMIT ?`,
-          )
-          .all(projectId, query, limit) as unknown as SearchRow[];
-      }
       return database
         .prepare(
-          `SELECT kc.*, s.title AS source_title, s.source_label
-           FROM knowledge_chunk_fts fts
-           JOIN knowledge_chunks kc ON kc.chunk_rowid = fts.rowid
+          `SELECT kc.*, s.title AS source_title,
+                  s.content_hash AS source_revision, s.updated_at AS source_updated_at
+           FROM knowledge_chunks kc
            JOIN sources s ON s.id = kc.source_id
-           WHERE knowledge_chunk_fts MATCH ?
-             AND s.project_id = ? AND s.index_status = 'ready'
-           ORDER BY bm25(knowledge_chunk_fts), s.updated_at DESC, kc.ordinal
+           WHERE s.project_id = ? AND s.source_type = ? AND s.index_status = 'ready'
+             AND (? IS NULL OR s.id = ?)
+             AND (? IS NULL OR s.content_hash = ?)
+             AND (instr(kc.content, ?) > 0 OR instr(s.title, ?) > 0)
+           ORDER BY CASE
+                      WHEN s.title = ? THEN 0
+                      WHEN instr(s.title, ?) > 0 THEN 1
+                      ELSE 2
+                    END,
+                    instr(kc.content, ?), s.updated_at DESC, kc.ordinal
            LIMIT ?`,
         )
-        .all(quotedFtsQuery(query), projectId, limit) as unknown as SearchRow[];
+        .all(
+          filter.projectId,
+          filter.sourceType,
+          filter.sourceId ?? null,
+          filter.sourceId ?? null,
+          filter.sourceRevision ?? null,
+          filter.sourceRevision ?? null,
+          query,
+          query,
+          query,
+          query,
+          query,
+          limit,
+        ) as unknown as SearchRow[];
     });
+    return rows.map(mapSearchResult);
+  }
+
+  searchFts(filter: KnowledgeSearchFilter, query: string, limit: number): RetrievedChunk[] {
+    validateSearch(filter, limit);
+    const ftsQuery = buildFtsQuery(query);
+    if (ftsQuery === null) return [];
+    const rows = this.projectDatabase.read(
+      (database) =>
+        database
+          .prepare(
+            `SELECT kc.*, s.title AS source_title,
+                    s.content_hash AS source_revision, s.updated_at AS source_updated_at
+             FROM knowledge_chunk_fts fts
+             JOIN knowledge_chunks kc ON kc.chunk_rowid = fts.rowid
+             JOIN sources s ON s.id = kc.source_id
+             WHERE knowledge_chunk_fts MATCH ?
+               AND s.project_id = ? AND s.source_type = ? AND s.index_status = 'ready'
+               AND (? IS NULL OR s.id = ?)
+               AND (? IS NULL OR s.content_hash = ?)
+             ORDER BY bm25(knowledge_chunk_fts), s.updated_at DESC, kc.ordinal
+             LIMIT ?`,
+          )
+          .all(
+            ftsQuery,
+            filter.projectId,
+            filter.sourceType,
+            filter.sourceId ?? null,
+            filter.sourceId ?? null,
+            filter.sourceRevision ?? null,
+            filter.sourceRevision ?? null,
+            limit,
+          ) as unknown as SearchRow[],
+    );
     return rows.map(mapSearchResult);
   }
 
@@ -339,23 +389,54 @@ function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-function quotedFtsQuery(query: string): string {
-  return `"${query.replaceAll('"', '""')}"`;
+function buildFtsQuery(query: string): string | null {
+  const terms: string[] = [];
+  const seen = new Set<string>();
+  for (const segment of query.match(/[\p{Script=Han}A-Za-z0-9]+/gu) ?? []) {
+    const characters = Array.from(segment);
+    if (characters.length < 3) continue;
+    if (/^[A-Za-z0-9]+$/u.test(segment)) {
+      addFtsTerm(terms, seen, segment.toLocaleLowerCase("en-US"));
+      continue;
+    }
+    for (let index = 0; index <= characters.length - 3 && terms.length < 64; index += 1) {
+      addFtsTerm(terms, seen, characters.slice(index, index + 3).join(""));
+    }
+  }
+  return terms.length === 0 ? null : terms.map(quoteFtsTerm).join(" OR ");
 }
 
-function mapSearchResult(row: SearchRow): KnowledgeSearchResult {
+function addFtsTerm(target: string[], seen: Set<string>, term: string): void {
+  if (!seen.has(term)) {
+    seen.add(term);
+    target.push(term);
+  }
+}
+
+function quoteFtsTerm(term: string): string {
+  return `"${term.replaceAll('"', '""')}"`;
+}
+
+function mapSearchResult(row: SearchRow): RetrievedChunk {
   return {
     chunkId: row.chunk_id,
     sourceId: row.source_id,
-    ordinal: Number(row.ordinal),
     content: row.content,
     startOffset: Number(row.start_offset),
     endOffset: Number(row.end_offset),
-    chunkerVersion: row.chunker_version,
-    createdAt: row.created_at,
     sourceTitle: row.source_title,
-    sourceLabel: row.source_label,
+    sourceRevision: row.source_revision,
+    sourceUpdatedAt: row.source_updated_at,
   };
+}
+
+function validateSearch(filter: KnowledgeSearchFilter, limit: number): void {
+  if (filter.projectId.trim() === "" || filter.sourceType !== "material") {
+    throw new AppError("VALIDATION_ERROR", "资料检索缺少有效的项目或资料类型范围。");
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    throw new AppError("VALIDATION_ERROR", "检索结果数量必须为 1–100。");
+  }
 }
 
 function nullableString(value: unknown): string | null {

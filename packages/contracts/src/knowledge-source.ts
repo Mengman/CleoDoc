@@ -12,7 +12,6 @@ export const knowledgeSourceSchema = z.object({
   origin: z.enum(["file", "paste"]),
   format: z.enum(["text", "markdown"]),
   title: z.string().trim().min(1).max(200),
-  sourceLabel: z.string().trim().min(1).max(2_000).nullable(),
   originalFileName: z.string().trim().min(1).max(500).nullable(),
   tags: z.array(z.string().trim().min(1).max(100)).max(100),
   languages: z

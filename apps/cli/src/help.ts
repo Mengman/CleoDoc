@@ -30,7 +30,7 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo document save-last <path> [--overwrite] [--project <directory>]
   cleo document delete <document-id|path> [--project <directory>]
 
-  cleo material add <file> [--title <标题>] [--source <来源>] [--tags <标签列表>]
+  cleo material add <file> [--title <标题>] [--tags <标签列表>]
     [--encoding <utf-8|gb2312|gbk|gb18030>]
   cleo material add --stdin [--title <标题>] [--format <text|markdown>]
   cleo material list [--project <directory>]
@@ -43,6 +43,7 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo index embed [--debug] [--project <directory>]
   cleo search <query> [--scope material] [--limit <数量>] [--project <directory>]
   cleo search <query> --semantic [--debug] [--limit <数量>] [--project <directory>]
+  cleo search <query> --hybrid [--explain] [--debug] [--limit <数量>] [--project <directory>]
 
   cleo embedding model
   cleo embedding test <zh|en> <text> [--query]

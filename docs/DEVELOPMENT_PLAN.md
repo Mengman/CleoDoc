@@ -43,11 +43,12 @@ v0.1 的核心闭环是：
 | 9a. LLM 本地文档 Tool | 已完成 | 项目文档列出/分段读取/确认写入、版本化 Tool 消息持久化、8 轮上限、路径隔离和 CLI 审批 |
 | 6a. CDM 最小 Core | 已完成 | 严格 XML、`draft-1` Schema、Node/Mark 校验、10 位 Node ID、基础序列化和树遍历 |
 | 6b. TXT/Markdown 资料解析 | 已完成 | UTF-8/GB 系导入、UTF-8 规范化、TXT 逐行成段、临时 CDM、样式展平、CommonMark + GFM 表格、解析警告、Node 原文字节范围及资料导入连接 |
+| 8. 混合 RAG | 已完成 | Exact/FTS/Vector、项目/类型/Revision 过滤、RRF、范围去重、来源与字符预算、内存 RetrievalContext、CLI Explain 和固定语料回归 |
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 7. 本地 Embedding 与向量检索 | 进行中 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索及 CLI 诊断恢复已完成；下一步执行测试与基准 |
-| 8、9b–10 | 未开始 | 混合 RAG、ContextManifest、RAG Tool 和 CLI 发布 |
+| 9b–10 | 未开始 | RAG Tool 和 CLI 发布 |
 
 ## 2. 开发原则
 
@@ -72,7 +73,7 @@ packages/
 ├─ database/            # node:sqlite、当前 Schema 基线和 Repository
 ├─ model-providers/     # OpenAI-compatible、Ollama 等
 ├─ knowledge/           # 文档、资料和 Chunk
-├─ rag/                 # 检索、融合和 ContextManifest
+├─ rag/                 # 检索、融合和 RetrievalContext
 ├─ agent/               # LLM Tool Loop；v0.2 扩展为持久化 AgentJob
 ├─ versioning/          # v0.2 Git 版本管理
 ├─ diff/                # v0.2 文档语义 Diff
@@ -235,7 +236,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。当前完整 Schema v9 包含已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；统一 `ContextManifest` 审计将在步骤 7–9b 随 RAG 基础设施接入。
+实施状态：已完成当前范围。当前完整 Schema v9 包含已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；资料检索 `RetrievalContext` 已在步骤 8 以内存值落地，与 ModelCall 的证据审计方案留到步骤 9。
 
 工作内容：
 
@@ -370,14 +371,14 @@ CLI 命令：
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
 - 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。
-- 完整 Schema v8 项目升级到 v9 时，只新增资料索引结构，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
+- 完整 Schema v8 项目升级到 v9 时，只新增资料索引与向量结构，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
 - 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 并发规则。
 
 ### 步骤 6：统一知识模型与 FTS5
 
 统一内部文档格式见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)；TXT/Markdown 解析、临时 CDM、结构切片和原文定位见[资料解析与切片设计](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)；Chunk、External Content FTS 和检索见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-实施状态：CDM、资料解析、Baseline 结构切片、Chunk 入库和资料 FTS 已完成，并接入 `MaterialService`。文件导入后在数据库事务外生成临时 CDM 与 ChunkDraft，再以短事务切换 `knowledge_chunks`、External Content FTS 和 Source 索引状态。开发期仍写入 `.cleo/derived/documents/<source-id>.cdm.xml` 与 `.cleo/derived/chunks/<source-id>.chunks.json` 供检查。CLI 已提供 `index status`、`index rebuild` 和仅限资料范围的 `search`；正文索引、Embedding 和混合检索尚未实现。
+实施状态：CDM、资料解析、Baseline 结构切片、Chunk 入库、资料 FTS、Embedding 与混合检索已完成，并接入 `MaterialService`。文件导入后在数据库事务外生成临时 CDM 与 ChunkDraft，再以短事务切换 `knowledge_chunks`、External Content FTS 和 Source 索引状态。开发期仍写入 `.cleo/derived/documents/<source-id>.cdm.xml` 与 `.cleo/derived/chunks/<source-id>.chunks.json` 供检查。CLI 已提供 `index status`、`index rebuild`、`index embed`、单路检索和混合检索；正文索引仍未实现。
 
 工作内容：
 
@@ -409,7 +410,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test/benchmark` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与完整 Schema v9 数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 已提供模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；步骤 7.9 的完整测试与 CPU/GPU 基准已经完成，下一步进入步骤 8 混合 RAG。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test/benchmark` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与当前数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 引入模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；步骤 7.9 的完整测试与 CPU/GPU 基准已经完成。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -527,8 +528,8 @@ cleo search <query> --semantic
 - 实现 Exact、FTS 和 Vector Retriever。
 - 实现项目、资料类型和 revision 过滤。
 - 使用 RRF 融合结果。
-- 实现去重、来源平衡和上下文预算。
-- 保存 `RetrievalRun` 与 `ContextManifest`。
+- 按 Chunk ID 和重合范围去重，并执行来源平衡与上下文字符预算。
+- 在内存中组装 `RetrievalContext`，不持久化普通检索过程。
 - 提供可解释检索输出。
 
 命令：
@@ -543,18 +544,20 @@ cleo search <query> --hybrid --explain
 - 每个结果可以追溯命中方式、来源和 revision。
 - 不发生跨项目召回。
 - 单一资料不能占满全部上下文。
-- 固定基准集的关键资料 Top-10 Recall 不低于 90%。
+- 当前固定正确性语料同时报告 Vector 与 Hybrid Top-1/Top-5：中文均为 100%；英文 Vector 均为 100%，Hybrid Top-1 为 75%、Top-5 为 100%。正式质量 Benchmark 延后建设。
+
+实施状态：已完成。`MaterialService.searchHybrid()` 在当前项目和 `material` 范围内并列执行 Exact、trigram FTS 与当前语言模型的 Vector 召回，使用 `score = Σ 1 / (60 + rank)` 做确定性 RRF；融合后按 Chunk ID 合并通道，排除同一 Source 高度重合的范围，并按来源占比、字符预算和最终数量限制组装证据。向量模型或 sqlite-vec 不可用时保留 Exact + FTS 并返回明确错误码。普通检索不保存 Query、候选、排除项或结果快照；`HybridRetrievalResult` 只返回运行诊断和内存 `RetrievalContext`，调用方统一读取 `retrievalContext.items`。CLI 已提供 `--hybrid`、`--explain` 和安全 Debug 元数据；现有中英文固定语料同时报告 Vector 与 Hybrid Top-1/Top-5 Recall。
 
 ### 步骤 9：LLM 本地 RAG Tool
 
-其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。基于 CDM Node ID 的读取、插入、内容替换、删除、移动以及未来批注元数据的后续设计见[文档处理设计](./文档处理设计.md)，这些扩展尚未实现。以下知识检索与 `ContextManifest` 工作仍等待步骤 5–8：
+其中不依赖 RAG 索引的本地文档 Tool 子阶段已提前完成：`list_project_documents`、`read_project_document` 和 `write_project_document`。读取被限制在当前项目，所有写入需要用户逐次批准；Tool Call 与 Tool 结果随对话持久化。基于 CDM Node ID 的读取、插入、内容替换、删除、移动以及未来批注元数据的后续设计见[文档处理设计](./文档处理设计.md)，这些扩展尚未实现。步骤 8 已提供混合检索与内存 `RetrievalContext`；本步骤负责把它们接入 LLM Tool Loop，并设计实际发送证据的还原方式：
 
 工作内容：
 
 - 向模型暴露 `search_knowledge`、`read_document` 和 `list_materials`。
 - 实现受限制的 Tool Loop。
 - Tool 只能访问当前项目和允许的作用域。
-- 将每次 Tool Call、检索结果和实际上下文写入 ContextManifest。
+- 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
 
 ```ts
@@ -595,7 +598,7 @@ v0.1 发布条件：
 - 资料 CRUD 完整可用。
 - 正文和资料支持全文、语义和混合检索。
 - LLM 能调用本地 RAG Tool。
-- ContextManifest 可以还原所有发送给模型的资料。
+- RetrievalContext 可以还原所有发送给模型的检索资料。
 - 项目重启后数据、索引和对话上下文保持一致。
 - 没有可复现的跨项目检索泄漏或项目文件损坏。
 - Windows、macOS 和 Linux 提供可运行 CLI 包。
@@ -631,7 +634,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 - 项目树、资料中心、正文阅读和主笔对话。
 - 提供独立的项目指令页面，从 SQLite 读取当前 Revision，并使用与 CLI 相同的冲突检查和恢复服务。
 - 将 CLI 命令映射为可视化操作。
-- 展示流式生成、Tool Call、证据和 ContextManifest。
+- 展示流式生成、Tool Call、证据和 RetrievalContext。
 
 ### 步骤 3：TipTap 编辑器
 

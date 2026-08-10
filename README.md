@@ -2,7 +2,7 @@
 
 CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
 
-当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索和 CLI 语义搜索已经接入；混合 RAG、`ContextManifest` 和 RAG Tool 尚未实现。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext` 和 CLI 可解释检索已经接入；正文索引和 RAG Tool 尚未实现。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
@@ -158,7 +158,7 @@ npm run cleo -- document delete manuscript/notes.md
 当前资料管理支持粘贴文本以及 UTF-8、GB2312、GBK、GB18030 编码的 TXT、Markdown 文件。文件导入默认先严格检查 UTF-8，失败后尝试 GB18030；判断错误时可用 `--encoding` 明确指定：
 
 ```powershell
-npm run cleo -- material add .\references\railway.md --title "铁路资料" --source "地方志" --tags "历史,铁路"
+npm run cleo -- material add .\references\railway.md --title "铁路资料" --tags "历史,铁路"
 npm run cleo -- material add .\references\old-book.txt --encoding gb2312
 Get-Content .\notes.txt | npm run cleo -- material add --stdin --title "访谈笔记"
 npm run cleo -- material list

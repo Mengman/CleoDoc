@@ -1,12 +1,16 @@
-import type { KnowledgeSearchResult } from "./knowledge-chunk.js";
+import type { RetrievedChunk } from "./knowledge-chunk.js";
 
 export interface VectorSearchFilter {
   readonly projectId: string;
+  readonly sourceType: "material";
+  readonly sourceId?: string;
+  readonly sourceRevision?: string;
   readonly embeddingModelName: string;
   readonly embeddingModelRevision: string;
 }
 
-export interface VectorSearchHit extends KnowledgeSearchResult {
+export interface VectorSearchHit {
+  readonly chunk: RetrievedChunk;
   readonly distance: number;
 }
 

@@ -19,5 +19,6 @@ export type RagMaterialService = Pick<
   | "rebuildFts"
   | "rebuildIndex"
   | "search"
+  | "searchHybrid"
   | "searchSemantic"
 >;

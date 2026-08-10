@@ -15,14 +15,12 @@ const REQUIRED_SQLITE_VEC_VERSION = "v0.1.9";
 interface VectorSearchRow {
   chunk_id: string;
   source_id: string;
-  ordinal: number;
   content: string;
   start_offset: number;
   end_offset: number;
-  chunker_version: string;
-  created_at: string;
   source_title: string;
-  source_label: string | null;
+  source_revision: string;
+  source_updated_at: string;
   distance: number;
 }
 
@@ -71,17 +69,19 @@ export class SqliteVectorIndex implements VectorIndex {
 
         const rows = database
           .prepare(
-            `SELECT kc.chunk_id, kc.source_id, kc.ordinal, kc.content,
-                    kc.start_offset, kc.end_offset, kc.chunker_version, kc.created_at,
-                    s.title AS source_title, s.source_label,
+            `SELECT kc.chunk_id, kc.source_id, kc.content,
+                    kc.start_offset, kc.end_offset, s.title AS source_title,
+                    s.content_hash AS source_revision, s.updated_at AS source_updated_at,
                     vec_distance_cosine(vec_f32(ce.embedding), vec_f32(?)) AS distance
              FROM chunk_embeddings ce
              JOIN embedding_models em
                ON em.embedding_model_rowid = ce.embedding_model_rowid
              JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
              JOIN sources s ON s.id = kc.source_id
-             WHERE s.project_id = ? AND s.source_type = 'material'
+             WHERE s.project_id = ? AND s.source_type = ?
                AND s.index_status = 'ready'
+               AND (? IS NULL OR s.id = ?)
+               AND (? IS NULL OR s.content_hash = ?)
                AND em.model_name = ? AND em.revision = ?
                AND ce.content_hash = kc.content_hash
                AND length(ce.embedding) = ?
@@ -91,6 +91,11 @@ export class SqliteVectorIndex implements VectorIndex {
           .all(
             queryBytes,
             filter.projectId,
+            filter.sourceType,
+            filter.sourceId ?? null,
+            filter.sourceId ?? null,
+            filter.sourceRevision ?? null,
+            filter.sourceRevision ?? null,
             filter.embeddingModelName,
             filter.embeddingModelRevision,
             expectedDimensions * 4,
@@ -132,20 +137,31 @@ function findExpectedDimensions(
          ON em.embedding_model_rowid = ce.embedding_model_rowid
        JOIN knowledge_chunks kc ON kc.chunk_rowid = ce.chunk_rowid
        JOIN sources s ON s.id = kc.source_id
-       WHERE s.project_id = ? AND s.source_type = 'material'
+       WHERE s.project_id = ? AND s.source_type = ?
          AND s.index_status = 'ready'
+         AND (? IS NULL OR s.id = ?)
+         AND (? IS NULL OR s.content_hash = ?)
          AND em.model_name = ? AND em.revision = ?
          AND ce.content_hash = kc.content_hash
        LIMIT 1`,
     )
-    .get(filter.projectId, filter.embeddingModelName, filter.embeddingModelRevision) as
-    { dimensions: number } | undefined;
+    .get(
+      filter.projectId,
+      filter.sourceType,
+      filter.sourceId ?? null,
+      filter.sourceId ?? null,
+      filter.sourceRevision ?? null,
+      filter.sourceRevision ?? null,
+      filter.embeddingModelName,
+      filter.embeddingModelRevision,
+    ) as { dimensions: number } | undefined;
   return row === undefined ? undefined : Number(row.dimensions);
 }
 
 function validateSearch(filter: VectorSearchFilter, limit: number): void {
   if (
     filter.projectId.trim() === "" ||
+    filter.sourceType !== "material" ||
     filter.embeddingModelName.trim() === "" ||
     filter.embeddingModelRevision.trim() === ""
   ) {
@@ -162,16 +178,16 @@ function mapSearchHit(row: VectorSearchRow): VectorSearchHit {
     throw new AppError("DATABASE_ERROR", "sqlite-vec 返回了无效的余弦距离。");
   }
   return {
-    chunkId: row.chunk_id,
-    sourceId: row.source_id,
-    ordinal: Number(row.ordinal),
-    content: row.content,
-    startOffset: Number(row.start_offset),
-    endOffset: Number(row.end_offset),
-    chunkerVersion: row.chunker_version,
-    createdAt: row.created_at,
-    sourceTitle: row.source_title,
-    sourceLabel: row.source_label,
+    chunk: {
+      chunkId: row.chunk_id,
+      sourceId: row.source_id,
+      content: row.content,
+      startOffset: Number(row.start_offset),
+      endOffset: Number(row.end_offset),
+      sourceTitle: row.source_title,
+      sourceRevision: row.source_revision,
+      sourceUpdatedAt: row.source_updated_at,
+    },
     distance,
   };
 }

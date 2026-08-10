@@ -12,27 +12,18 @@ import {
 } from "../../../../packages/database/src/index.js";
 import { AppError } from "../../../../packages/contracts/src/index.js";
 import type {
-  EmbeddingLanguage,
   EmbeddingResult,
   ResolvedEmbeddingModelDefinition,
 } from "../../../../packages/rag/src/index.js";
-import { NodeLlamaCppEmbeddingRuntime } from "../../../../packages/rag/src/index.js";
-
-interface BenchmarkDocument {
-  readonly key: string;
-  readonly title: string;
-  readonly content: string;
-}
-
-interface BenchmarkQuery {
-  readonly text: string;
-  readonly expectedDocumentKey: string;
-}
-
-interface BenchmarkCorpus {
-  readonly documents: readonly BenchmarkDocument[];
-  readonly queries: readonly BenchmarkQuery[];
-}
+import {
+  fuseAndSelectHybridResults,
+  NodeLlamaCppEmbeddingRuntime,
+} from "../../../../packages/rag/src/index.js";
+import {
+  corpusFor,
+  type BenchmarkDocument,
+  type BenchmarkQuery,
+} from "./embedding-benchmark-corpus.js";
 
 export interface EmbeddingBenchmarkOptions {
   readonly definition: ResolvedEmbeddingModelDefinition;
@@ -100,9 +91,13 @@ export async function runEmbeddingBenchmark(options: EmbeddingBenchmarkOptions):
     );
 
     const vectorIndex = SqliteVectorIndex.open(database);
+    const chunks = new KnowledgeChunkRepository(database);
     const searchDurations: number[] = [];
-    let recalledAt1 = 0;
-    let recalledAt5 = 0;
+    const hybridSearchDurations: number[] = [];
+    let vectorRecalledAt1 = 0;
+    let vectorRecalledAt5 = 0;
+    let hybridRecalledAt1 = 0;
+    let hybridRecalledAt5 = 0;
     let traceable = true;
     for (const { query, result } of queryResults) {
       let firstResults: Awaited<ReturnType<SqliteVectorIndex["search"]>> | undefined;
@@ -112,6 +107,7 @@ export async function runEmbeddingBenchmark(options: EmbeddingBenchmarkOptions):
           result.vector,
           {
             projectId,
+            sourceType: "material",
             embeddingModelName: options.definition.modelName,
             embeddingModelRevision: options.definition.revision,
           },
@@ -123,14 +119,66 @@ export async function runEmbeddingBenchmark(options: EmbeddingBenchmarkOptions):
       if (firstResults === undefined) {
         throw new Error("Embedding benchmark requires at least one query run");
       }
-      if (firstResults[0]?.sourceId === query.expectedDocumentKey) recalledAt1 += 1;
-      if (firstResults.some((hit) => hit.sourceId === query.expectedDocumentKey)) recalledAt5 += 1;
+      if (firstResults[0]?.chunk.sourceId === query.expectedDocumentKey) vectorRecalledAt1 += 1;
+      if (firstResults.some((hit) => hit.chunk.sourceId === query.expectedDocumentKey)) {
+        vectorRecalledAt5 += 1;
+      }
       traceable &&= firstResults.every(
         (hit) =>
-          hit.sourceId !== "" &&
-          hit.chunkId !== "" &&
-          hit.startOffset >= 0 &&
-          hit.endOffset > hit.startOffset,
+          hit.chunk.sourceId !== "" &&
+          hit.chunk.chunkId !== "" &&
+          hit.chunk.startOffset >= 0 &&
+          hit.chunk.endOffset > hit.chunk.startOffset,
+      );
+
+      let firstHybrid: ReturnType<typeof fuseAndSelectHybridResults> | undefined;
+      for (let run = 0; run < options.queryRuns; run += 1) {
+        const startedAt = performance.now();
+        const filter = { projectId, sourceType: "material" as const };
+        const exact = firstHitPerSource(
+          chunks.searchExact(filter, query.text, 100),
+          (hit) => hit.sourceId,
+        );
+        const fts = firstHitPerSource(
+          chunks.searchFts(filter, query.text, 100),
+          (hit) => hit.sourceId,
+        );
+        const vector = firstHitPerSource(
+          await vectorIndex.search(
+            result.vector,
+            {
+              ...filter,
+              embeddingModelName: options.definition.modelName,
+              embeddingModelRevision: options.definition.revision,
+            },
+            100,
+          ),
+          (hit) => hit.chunk.sourceId,
+        );
+        const hybrid = fuseAndSelectHybridResults(
+          { exact, fts, vector },
+          {
+            rrfK: 60,
+            resultLimit: 5,
+            contextMaxCharacters: 12_000,
+            maxSourceRatio: 0.6,
+          },
+        );
+        hybridSearchDurations.push(performance.now() - startedAt);
+        firstHybrid ??= hybrid;
+      }
+      if (firstHybrid === undefined) throw new Error("Missing hybrid benchmark results");
+      if (firstHybrid.results[0]?.chunk.sourceId === query.expectedDocumentKey) {
+        hybridRecalledAt1 += 1;
+      }
+      if (firstHybrid.results.some((hit) => hit.chunk.sourceId === query.expectedDocumentKey)) {
+        hybridRecalledAt5 += 1;
+      }
+      traceable &&= firstHybrid.results.every(
+        (hit) =>
+          hit.chunk.sourceId !== "" &&
+          hit.chunk.chunkId !== "" &&
+          hit.chunk.endOffset > hit.chunk.startOffset,
       );
     }
 
@@ -144,9 +192,12 @@ export async function runEmbeddingBenchmark(options: EmbeddingBenchmarkOptions):
       documentTotalMs,
       queryEmbeddingDurations,
       searchDurations,
+      hybridSearchDurations,
       candidateChunks,
-      recallAt1: recalledAt1 / corpus.queries.length,
-      recallAt5: recalledAt5 / corpus.queries.length,
+      vectorRecallAt1: vectorRecalledAt1 / corpus.queries.length,
+      vectorRecallAt5: vectorRecalledAt5 / corpus.queries.length,
+      hybridRecallAt1: hybridRecalledAt1 / corpus.queries.length,
+      hybridRecallAt5: hybridRecalledAt5 / corpus.queries.length,
       traceable,
       dimensions: runtime.info.embeddingDimensions,
       gpuBackend: runtime.info.gpuBackend,
@@ -168,9 +219,12 @@ interface BenchmarkReport {
   readonly documentTotalMs: number;
   readonly queryEmbeddingDurations: readonly number[];
   readonly searchDurations: readonly number[];
+  readonly hybridSearchDurations: readonly number[];
   readonly candidateChunks: number;
-  readonly recallAt1: number;
-  readonly recallAt5: number;
+  readonly vectorRecallAt1: number;
+  readonly vectorRecallAt5: number;
+  readonly hybridRecallAt1: number;
+  readonly hybridRecallAt5: number;
   readonly traceable: boolean;
   readonly dimensions: number;
   readonly gpuBackend: string | false;
@@ -182,6 +236,7 @@ function writeReport(options: EmbeddingBenchmarkOptions, report: BenchmarkReport
   const documentStats = summarizeDurations(report.documentDurations);
   const queryStats = summarizeDurations(report.queryEmbeddingDurations);
   const searchStats = summarizeDurations(report.searchDurations);
+  const hybridSearchStats = summarizeDurations(report.hybridSearchDurations);
   const seconds = report.documentTotalMs / 1_000;
   const cpu = cpus()[0]?.model ?? "unknown";
   const write = (line: string): void => void options.output.write(`${line}\n`);
@@ -210,8 +265,13 @@ function writeReport(options: EmbeddingBenchmarkOptions, report: BenchmarkReport
   write(
     `SQLite 精确查询：avg ${formatMs(searchStats.average)} / p50 ${formatMs(searchStats.p50)} / p95 ${formatMs(searchStats.p95)}`,
   );
-  write(`固定语料 Top-1 Query Recall：${(report.recallAt1 * 100).toFixed(1)}%`);
-  write(`固定语料 Top-5 Query Recall：${(report.recallAt5 * 100).toFixed(1)}%`);
+  write(
+    `混合检索：avg ${formatMs(hybridSearchStats.average)} / p50 ${formatMs(hybridSearchStats.p50)} / p95 ${formatMs(hybridSearchStats.p95)}`,
+  );
+  write(`固定语料 Vector Top-1 Recall：${(report.vectorRecallAt1 * 100).toFixed(1)}%`);
+  write(`固定语料 Vector Top-5 Recall：${(report.vectorRecallAt5 * 100).toFixed(1)}%`);
+  write(`固定语料 Hybrid Top-1 Recall：${(report.hybridRecallAt1 * 100).toFixed(1)}%`);
+  write(`固定语料 Hybrid Top-5 Recall：${(report.hybridRecallAt5 * 100).toFixed(1)}%`);
   write(`结果可追溯性：${report.traceable ? "通过" : "失败"}`);
 }
 
@@ -289,6 +349,16 @@ function requireResult(
   return result;
 }
 
+function firstHitPerSource<T>(hits: readonly T[], getSourceId: (hit: T) => string): T[] {
+  const seen = new Set<string>();
+  return hits.filter((hit) => {
+    const sourceId = getSourceId(hit);
+    if (seen.has(sourceId)) return false;
+    seen.add(sourceId);
+    return true;
+  });
+}
+
 function summarizeDurations(values: readonly number[]): {
   average: number;
   p50: number;
@@ -318,107 +388,3 @@ function formatMs(value: number): string {
 function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
-
-function corpusFor(language: EmbeddingLanguage): BenchmarkCorpus {
-  return language === "zh" ? CHINESE_CORPUS : ENGLISH_CORPUS;
-}
-
-const CHINESE_CORPUS: BenchmarkCorpus = {
-  documents: [
-    {
-      key: "city-gate",
-      title: "城门值守记录",
-      content: "守城士兵每天深夜封闭城门，核对通行凭证后才允许旅人进出城市。",
-    },
-    {
-      key: "railway-lighting",
-      title: "铁路照明记录",
-      content: "蒸汽列车抵达小站时，站务员会点亮煤油灯，为夜班列车照明并检查信号。",
-    },
-    {
-      key: "medical-treatment",
-      title: "诊疗记录",
-      content: "医生确认患者受到细菌感染后使用青霉素治疗，并持续观察体温和伤口变化。",
-    },
-    {
-      key: "village-water",
-      title: "村庄供水记录",
-      content: "旱季河流干涸以后，村民从山脚的深井提取饮用水，再运送到各户储存。",
-    },
-    {
-      key: "observatory",
-      title: "天文台记录",
-      content: "天文学家使用射电望远镜接收遥远星系的信号，研究恒星诞生和宇宙演化。",
-    },
-    {
-      key: "merchant-credit",
-      title: "商会信用记录",
-      content: "商人凭借仓单向银行申请短期贷款，以便在货物售出以前支付运输费用。",
-    },
-  ],
-  queries: [
-    { text: "夜间什么时候停止人员从城市入口通行？", expectedDocumentKey: "city-gate" },
-    { text: "火车站怎样为深夜到达的车辆提供光线？", expectedDocumentKey: "railway-lighting" },
-    { text: "患者感染以后使用了哪一种抗生素？", expectedDocumentKey: "medical-treatment" },
-    { text: "河水枯竭时居民从哪里取得饮用水？", expectedDocumentKey: "village-water" },
-  ],
-};
-
-const ENGLISH_CORPUS: BenchmarkCorpus = {
-  documents: [
-    {
-      key: "city-gate",
-      title: "City gate record",
-      content:
-        "The guards close the city gate late every night and inspect travel permits before allowing anyone to enter or leave.",
-    },
-    {
-      key: "railway-lighting",
-      title: "Railway lighting record",
-      content:
-        "When the steam train reaches the rural station, workers light kerosene lamps for the night service and inspect the signals.",
-    },
-    {
-      key: "medical-treatment",
-      title: "Medical record",
-      content:
-        "After confirming a bacterial infection, the physician treats the patient with penicillin and monitors the fever and wound.",
-    },
-    {
-      key: "village-water",
-      title: "Village water record",
-      content:
-        "When the river dries during the drought, villagers draw drinking water from a deep well near the mountain and carry it home.",
-    },
-    {
-      key: "observatory",
-      title: "Observatory record",
-      content:
-        "Astronomers use a radio telescope to receive signals from distant galaxies and study the formation of stars.",
-    },
-    {
-      key: "merchant-credit",
-      title: "Merchant credit record",
-      content:
-        "The merchant uses warehouse receipts to obtain a short-term bank loan and pay transport costs before the goods are sold.",
-    },
-  ],
-  queries: [
-    {
-      text: "When is passage through the town entrance stopped?",
-      expectedDocumentKey: "city-gate",
-    },
-    {
-      text: "How does the station illuminate trains arriving after dark?",
-      expectedDocumentKey: "railway-lighting",
-    },
-    {
-      text: "Which antibiotic is given for the infection?",
-      expectedDocumentKey: "medical-treatment",
-    },
-    {
-      text: "Where do residents obtain drinking water after the river dries?",
-      expectedDocumentKey: "village-water",
-    },
-  ],
-};

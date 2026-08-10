@@ -7,12 +7,13 @@ import type { MaterialInputEncoding } from "./text-decoding.js";
 import type {
   KnowledgeSourceIndexStatus,
   KnowledgeSourceLanguage,
+  HybridRetrievalResult,
+  RetrievalFilter,
   VectorSearchHit,
 } from "../../contracts/src/index.js";
 
 interface MaterialMetadataOptions {
   title?: string;
-  sourceLabel?: string;
   tags?: readonly string[];
 }
 
@@ -122,11 +123,26 @@ export interface MaterialSemanticSearchResult {
   readonly results: readonly VectorSearchHit[];
 }
 
+export interface MaterialHybridSearchOptions {
+  readonly limit?: number;
+  readonly filter?: Omit<RetrievalFilter, "sourceType">;
+}
+
+export interface MaterialRetrievalOptions {
+  readonly candidateLimit: number;
+  readonly rrfK: number;
+  readonly contextMaxCharacters: number;
+  readonly maxSourceRatio: number;
+}
+
+export type MaterialHybridSearchResult = HybridRetrievalResult;
+
 export interface MaterialServiceOptions {
   readonly database: { busyTimeoutMs: number };
   readonly maxImportBytes: number;
   readonly chunking: ChunkDocumentOptions;
   readonly languageDetection: LanguageDetectionOptions;
   readonly embeddingChunkBatchSize: number;
+  readonly retrieval: MaterialRetrievalOptions;
   readonly embeddingModels: Readonly<Record<"zh" | "en", MaterialEmbeddingModel>>;
 }

@@ -36,7 +36,7 @@ SQLite 负责：
 
 - 文档和设定的规范化投影。
 - FTS5 全文索引、Embedding 和关系图。
-- 候选事实、冲突、AgentJob、ChangeSet 和 ContextManifest。
+- 候选事实、冲突、AgentJob、ChangeSet 和 RetrievalContext。
 - 可重建的 Diff、检索和展示缓存。
 
 ### 2.4 Git 对用户不可见
@@ -45,7 +45,7 @@ Git 被映射为“修改记录、命名版本、比较、撤销和恢复”。�
 
 ### 2.5 自研 RAG 薄层
 
-RAG 核心不依赖 LangChain.js、LlamaIndex.TS、CDM 或 CleoDoc 业务对象。RAG 项目维护 Source、Chunk、索引、检索和证据定位协议；CleoDoc 在其上叠加项目权限、知识权威、关系图、ContextManifest、CDM Reference 和用户审批。
+RAG 核心不依赖 LangChain.js、LlamaIndex.TS、CDM 或 CleoDoc 业务对象。RAG 项目维护 Source、Chunk、索引、检索、RetrievalContext 和证据定位协议；CleoDoc 在其上叠加项目权限、知识权威、关系图、CDM Reference 和用户审批。
 
 ### 2.6 所有异步结果绑定版本
 
@@ -277,7 +277,7 @@ MyNovel.cleo/
 | 知识投影 | Chunk、实体、事实、关系 | SQLite | 否，可重建 |
 | 检索索引 | FTS、Embedding | SQLite | 否，可重建 |
 | 运行状态 | AgentJob、ChangeSet、索引任务 | SQLite | 否，不可随意删除 |
-| 审计记录 | 批准记录、精简 ContextManifest | JSON + SQLite | 精简版本进入 Git |
+| 审计记录 | 批准记录、实际发送给模型的证据 | JSON + SQLite | 只在明确业务需要时保存；普通检索不持久化 |
 | 缓存 | Diff、检索结果 | SQLite | 否，可回收 |
 
 个人资料库存放于应用数据目录下的 `personal-library.sqlite`。项目必须将用户明确链接的个人资料复制为带哈希的快照后再参与项目检索。
@@ -356,9 +356,7 @@ PRAGMA synchronous = FULL;
 检索
 ├─ chunk_fts
 ├─ chunk_embeddings
-├─ embedding_models
-├─ retrieval_runs
-└─ context_manifest_items
+└─ embedding_models
 
 知识图
 ├─ entities
@@ -376,7 +374,6 @@ Agent
 ├─ agent_job_steps
 ├─ change_sets
 ├─ change_set_items
-├─ context_manifests
 └─ knowledge_candidates
 
 版本投影
@@ -401,7 +398,7 @@ Agent
 
 ### 7.5 v0.1 资料事实源与投影
 
-步骤 5 将资料正文保存为 `materials/<material-id>.txt|md`，并将对应的 `KnowledgeSource` 元数据保存为 `sources/metadata/<material-id>.json`。元数据包含项目 ID、标题、来源标签、原文件名、标签、格式、相对路径、内容哈希、字节数和时间。
+步骤 5 将资料正文保存为 `materials/<material-id>.txt|md`，并将对应的 `KnowledgeSource` 元数据保存为 `sources/metadata/<material-id>.json`。元数据包含项目 ID、标题、原文件名、标签、格式、相对路径、内容哈希、字节数和时间。
 
 SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialService` 打开时读取并校验元数据、项目归属、路径、UTF-8 内容、字节数和哈希，然后同步 SQLite。添加、重命名和删除采用原子文件写入并在数据库失败时回滚当前操作；进程在文件与数据库更新之间中断时，下次打开以文件事实源校准投影。
 
@@ -419,7 +416,7 @@ SQLite `sources` 表只作为管理和后续索引使用的投影。`MaterialSer
 
 ## 8. 自研 RAG 架构
 
-> 实现状态：上游 TXT/Markdown Document Ingestion、Baseline 结构切片、资料 Chunk 入库和资料 FTS 已实现；切片结果仍按 Source 写入 `.cleo/derived/chunks` 供人工检查。正文 FTS、本地 Embedding、混合检索和 `ContextManifest` 尚未实现。`conversation_message_fts` 继续只服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
+> 实现状态：上游 TXT/Markdown Document Ingestion、Baseline 结构切片、资料 Chunk 入库、资料 FTS、本地 Embedding、Exact/FTS/Vector 混合检索和 `RetrievalContext` 已实现；切片结果仍按 Source 写入 `.cleo/derived/chunks` 供人工检查。正文 FTS 与 LLM RAG Tool 尚未实现。`conversation_message_fts` 继续只服务于同一 Conversation 的已关闭 Session 历史回查，不是作品知识 RAG。
 
 ### 8.1 独立项目目标与模块边界
 
@@ -501,7 +498,7 @@ interface ContextAssembler {
     request: RetrievalRequest,
     candidates: RetrievalHit[],
     budget: ContextBudget
-  ): Promise<ContextManifest>;
+  ): Promise<RetrievalContext>;
 }
 ```
 
@@ -576,7 +573,7 @@ flowchart LR
     GRAPH --> FUSION
     FUSION --> RULES["权威与时序规则"]
     RULES --> PACK["上下文装箱"]
-    PACK --> MANIFEST["ContextManifest"]
+    PACK --> CONTEXT["RetrievalContext"]
 ```
 
 预置 `RetrievalProfile`：
@@ -601,27 +598,20 @@ score = Σ weight(source) / (60 + rank)
 - 冲突证据同时保留并显式标记。
 - 单个来源不得耗尽整个上下文预算。
 
-### 8.8 ContextManifest
+当前 v0.1 已实现 `research` Profile 的资料检索子集：Exact、trigram FTS 与 Vector 并列召回，默认每路 20 条、`rrfK = 60`，随后按 Chunk ID 合并通道，排除同一 Source 中高度重合的范围，并应用来源占比、12,000 字符预算和最终结果数量。项目、`material` 类型、可选 Source ID 和 Source Revision 均在每路 SQL 中过滤。向量不可用时明确降级为 Exact + FTS。Graph、权威与时序规则、任务重排仍属于后续范围。
 
-所有模型调用必须保存：
+### 8.8 RetrievalContext
+
+步骤 8 的每次混合检索都会在内存中生成 `RetrievalContext`。普通检索不创建数据库审计记录；步骤 9 再设计实际发送给模型的证据如何随 ModelCall 还原。当前结构为：
 
 ```ts
-interface ContextManifest {
-  id: string;
-  agentJobId: string;
-  projectRevision: string;
-  profile: RetrievalProfile;
-  originalQuery: string;
-  rewrittenQueries: string[];
-  embeddingModelId: string;
-  items: ContextManifestItem[];
-  excludedItems: ExcludedContextItem[];
-  tokenEstimate: number;
-  createdAt: string;
+interface RetrievalContext {
+  items: RetrievalCandidate[];
+  contentCharacterCount: number;
 }
 ```
 
-Manifest 记录纳入和排除依据，使 Agent 生成结果能够审计和复现。
+`RetrievalCandidate` 通过组合持有一个 `RetrievedChunk`，并附加 RRF 分数、各通道排名和可选向量距离；它不继承数据库存储对象。`HybridRetrievalResult` 只保存本次运行诊断和一个 `RetrievalContext`，不返回未采用候选、排除原因或重复的最终结果数组。当前字符预算不声明为 Token 估算，Provider Tokenizer 接入后由模型调用层完成精确 Token 装箱。
 
 ### 8.9 物理拆分路线
 
@@ -741,7 +731,7 @@ interface DocumentDiff {
 
 Project、Conversation 与 Session 的归属和语义边界见 [6.3](#63-projectconversation-与-session-归属模型)。Tool 的领域边界、Schema、结果、副作用和运行规则统一遵循 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md)。自动上下文压缩和同 Conversation 内的历史回查见 [SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)。项目指令现在以 SQLite 追加式 Revision 为事实源，Session 不保存文件路径或文件快照，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
 
-v0.1 的完整 Schema v9 包含既有会话、资料 Chunk、FTS、`sources.languages_json`、Chunk 内容 Hash、Embedding 模型与向量表。会话部分包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
+v0.1 的完整 Schema v9 包含既有会话、资料 Chunk、FTS、`sources.languages_json`、Chunk 内容 Hash、Embedding 模型与向量表；普通混合检索不持久化 Query、候选或结果。会话部分包含 `conversations`、`conversation_sessions`、单一 Markdown 正文的 `session_summaries`、`compaction_jobs`、不可变 `messages`、逐次 `model_calls`、External Content `conversation_message_fts` 与数据库项目指令 Revision。一个 Project 可以保存多个 Conversation；`ChatService` 只组装当前 Conversation 的 active Session，并按该 Session 的 `inherited_summary_id` 精确读取一份累计摘要，不自动注入其他 Conversation、旧 Session 或按时间猜测的摘要。普通主笔调用将 Provider 暴露的 Reasoning 与最终 Content 分流显示和保存；Assistant Tool Call 的 Reasoning 按 Provider 协议在下一轮回传，普通历史 Reasoning 不默认重发，也不进入压缩、FTS 或作品文档。`CompactionService` 使用同一 Provider/模型发起无 Tool 的独立调用。`session-compaction-v7` 的普通、分段和归并请求只发送明确投影的 Message `role/content`；Tool Result 通过具体 Tool 的 `getCompactionMessage()` 投影为名称、版本、状态、更新时间、数量和读取范围等必要元数据，文档 Hash、正文、历史片段、项目指令内容、Message ID 与未知 Tool 原文不会进入压缩请求。超大 Session 使用 `session-compaction-v8-turn-segmentation` 编排：优先按完整用户回合分段，以压缩请求安全输入上限 `M` 的 80% 作为 Segment 装箱目标，并在发送前校验最终 Payload 不超过 `M`；单条超长正文只在 Unicode 安全语义边界降级切分，Tool Call 与对应 Tool Result 保持原子性。压缩调用显式关闭 Thinking，不启用 JSON Mode，也不设置 Provider 输出 Token 上限；流式 `text-delta` 完整拼接为 Markdown `summary` 后，在最低校验前写入显式 Debug 文件。每次普通、Tool Loop、分段和归并 Provider 请求都有独立 ModelCall，并通过业务映射表关联 Generation 或 CompactionJob。摘要成功后，服务从 CompactionJob 冻结快照取得来源 Session、消息边界、Prompt、Provider 和模型，在一个事务中保存摘要、关闭旧 Session、创建继承该摘要的新 Session 并完成 Job；进程中断后未完成任务会被标记失败，旧 Session 恢复为 active。
 
 模型上下文窗口的全局默认值为 1,000,000 Token；默认预留 384,000 Token 模型输出、32,768 Token 下一次用户输入和 5% 安全余量，软压缩比例/硬阻塞比例为 75%/90%。由此得到 566,000 Token 安全输入容量，当前 Payload 触发点分别约为 391,732 Token 和 476,632 Token；压缩请求安全输入上限 `M` 约为 565,424 Token，最终累计摘要长度建议目标为 8,000 Token。CLI 的 `--context-window-tokens` 和环境变量 `CLEODOC_MODEL_CONTEXT_TOKENS` 可以显式覆盖；较小窗口按比例缩放固定预留上限。预算值只用于本地触发与分段检查，不会作为 Provider 输出长度参数发送。
 
@@ -749,7 +739,7 @@ v0.1 的完整 Schema v9 包含既有会话、资料 Chunk、FTS、`sources.lang
 
 v0.1 在 CLI 前台执行单任务 Tool Loop。应用/项目初始化时创建一个 `ProjectToolCatalog`，一次性持有所有无执行状态的业务 Tool 并缓存 Schema；Catalog 自身以 `project_tool_catalog` 组合 Tool 暴露 `list/get` 操作。`ProjectToolRuntime` 按 Conversation 创建和缓存，同一 Conversation 的多次发送及 Session 压缩复用同一个 Runtime；Runtime 只持有不可变的 `projectId + conversationId`、当前 Conversation 的退出前临时审批和已加载 `name + version`，不持有 `sessionId`。业务 Tool 通过 `ToolExecutionContext` 获得可信执行范围，构造函数只保存稳定 Service/Repository。动态加载状态可从当前 Conversation 的成功 Catalog `get` 结果恢复且不跨 Conversation，版本变化后必须重新加载。每次普通模型请求都从当前 Catalog 重新组装顶层 `tools`；`full` Tool 直接发送，`catalog` Tool 只通过 Catalog `list/get` 发现和加载，不向 System Context 注入独立 Tool 摘要。因此 Catalog 入口不需要独立公告或数据库版本追踪。详细实现见 [Tool Call 技术设计](./TOOL_CALL_DESIGN.md#14-实现状态与重构边界)。
 
-模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；目标协议改为直接读取 CDM，并通过 Node ID 插入、替换内容、删除和移动节点，视觉行号不再属于文档协议，详见[文档处理设计](./文档处理设计.md)。该能力尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理项目指令的内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际上下文还要写入 `ContextManifest`。
+模型可以通过 `list_project_documents`、`read_project_document` 列出和分段读取当前项目正文，也可以通过 `write_project_document` 请求保存总结、大纲或正文。当前读取仍使用字符偏移，写入只支持创建和全文替换；目标协议改为直接读取 CDM，并通过 Node ID 插入、替换内容、删除和移动节点，视觉行号不再属于文档协议，详见[文档处理设计](./文档处理设计.md)。该能力尚未实现。项目指令提供读取、尾部追加和整体替换，不提供精确片段替换；LLM 不处理项目指令的内部 Revision。历史回查先用 `search_conversation_history` 在当前 Conversation 的已关闭 Session 中搜索关键字，再用 `read_conversation_message` 按 Message ID 分段精读。Core 校验参数和项目作用域；写入显示目标和内容预览，用户可以拒绝、仅允许本次或允许到进程退出。覆盖仍要求模型显式声明覆盖意图。循环最多执行 8 轮，并沿用模型请求的超时和取消信号。后续接入 RAG 后，检索结果及实际使用的证据要关联到 `RetrievalContext`。
 
 Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下一轮模型请求和应用重启后准确恢复。非交互式调用没有审批处理器，因此模型发起的写入默认被拒绝；脚本化保存继续使用显式的 `--save`。
 
@@ -757,7 +747,7 @@ Tool Call、Tool 结果和最终回答全部写入同一对话历史，以便下
 
 CLI 的 `--debug` 只开启本次进程的 LLM 协议诊断：Provider 在解析前逐次发出实际 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header 和原始 SSE/NDJSON 数据块，Agent 再为日志标注主笔、普通压缩、分段压缩、归并压缩及调用轮次。每次响应结束后记录 API 返回的输入 Token，缺少 usage 时记录本地保守估算，并记录输出 Token、结束原因、完整拼接摘要和最低完整性校验错误。CLI 将这些信息按 UTF-8 写入 `<项目根目录>/.cleo/logs/` 下本次进程独立的日志文件，终端只显示文件路径；日志不得写入 SQLite，并由现有 `.cleo/` 忽略规则排除在 Git 之外。API Key、Authorization、Cookie 等鉴权 Header 必须脱敏。由于请求 body 包含发送给模型的作品内容，CLI 文档必须明确提示用户仅在排障时开启并在分享前检查日志。
 
-CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料和对话记录必须保持一致。RAG 落地后，`ContextManifest` 也必须遵守相同的一致性要求。
+CLI 退出时不保证恢复正在执行的模型调用，但已经保存的文档、资料和对话记录必须保持一致。步骤 8 的内存 `RetrievalContext` 随检索调用结束释放，不属于恢复数据。
 
 ### 12.2 Draft 写入与文本统计（设计，未实现）
 
@@ -784,7 +774,6 @@ interface AgentJob {
   baseRevision: string;
   modelConfig: ModelSelection;
   status: AgentJobStatus;
-  contextManifestId?: string;
   changeSetId?: string;
   createdAt: string;
   updatedAt: string;
@@ -797,7 +786,7 @@ interface AgentJob {
 创建 AgentJob
 → 创建可恢复步骤
 → 执行 RAG
-→ 保存 ContextManifest
+→ 在内存中组装 RetrievalContext
 → 调用指定模型
 → 校验结构化输出
 → 执行一致性检查
@@ -919,7 +908,7 @@ interface DocumentIndexState {
 - 所有 SQL 使用参数绑定；FTS 查询单独解析和转义。
 - 只加载应用签名并随包分发的 SQLite 扩展。
 - 导入文档只作为数据解析，不执行宏、脚本或嵌入对象。
-- 远程模型只接收 ContextManifest 选中的片段。
+- 远程模型只接收 RetrievalContext 选中的片段。
 - 用户可在发送前后查看实际上下文。
 - 日志默认不记录正文、资料原文、Prompt 或模型响应。
 - 项目依赖操作系统磁盘加密；v0.1 和 v0.2 均不承诺应用级全项目加密。
@@ -961,7 +950,7 @@ interface DocumentIndexState {
 ### 18.2 集成测试
 
 - 文件修改到 FTS、Embedding 和关系投影的完整链路。
-- AgentJob 到 ContextManifest、ChangeSet、Git revision 的完整链路。
+- AgentJob 到 RetrievalContext、ChangeSet、Git revision 的完整链路。
 - Git 恢复后只重建 changed paths。
 - 项目与个人资料库显式链接及跨项目隔离。
 - Core 或 Worker 异常退出后的恢复。
@@ -1013,7 +1002,8 @@ v0.2 在此基础上增加：
 - 已实现：锁定 `sqlite-vec` 0.1.9 的延迟加载和精确余弦 `VectorIndex`；扩展加载后立即关闭任意加载入口，检索会排除其他项目、非 `ready` Source、不同模型及 Hash 失效向量。
 - 已实现：`index embed/status` 的增量补齐、进度、完整度、部分失败恢复与取消，以及按 Query 语言选择模型的 `search --semantic`；RAG Debug 日志只保存安全的运行元数据。
 - 已实现：Embedding 步骤 7.9 的编码、级联、恢复、失败隔离测试，以及固定中英文近义语料和真实 Q8_0 CPU/GPU 模型的可重复基准命令；GPU 模式会报告实际后端和卸载层数，首份加载、首次与稳态推理、吞吐、SQLite 查询、Top-1/Top-5 Query Recall 和回溯结果记录在 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
-- 尚未实现：正文 FTS、混合 RAG、`ContextManifest`、RAG Tool 和 CLI 发布验收。
+- 已实现：资料 Exact、trigram FTS、Vector 三路召回，项目/类型/Source Revision 过滤、RRF、范围去重、来源与字符预算、内存 RetrievalContext 和可解释 CLI；普通检索不写审计表。
+- 尚未实现：正文 FTS、RAG Tool 和 CLI 发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

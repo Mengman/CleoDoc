@@ -77,6 +77,12 @@ export function createTestMaterialOptions(
     maxImportBytes: 10 * 1024 * 1024,
     chunking: { splitSearchWindowRatio: 0.75 },
     languageDetection: { minBlockUnits: 50 },
+    retrieval: {
+      candidateLimit: 20,
+      rrfK: 60,
+      contextMaxCharacters: 12_000,
+      maxSourceRatio: 0.6,
+    },
     embeddingChunkBatchSize: 16,
     embeddingModels: { zh: embeddingModel("zh"), en: embeddingModel("en") },
   };

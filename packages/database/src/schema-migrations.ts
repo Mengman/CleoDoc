@@ -9,6 +9,7 @@ export const SCHEMA_V8_TO_V9_SQL = `
     CHECK (index_status IN ('pending', 'ready', 'stale', 'failed'));
   ALTER TABLE sources ADD COLUMN index_error_code TEXT;
   ALTER TABLE sources ADD COLUMN indexed_at TEXT;
+  ALTER TABLE sources DROP COLUMN source_label;
 
   ${KNOWLEDGE_INDEX_SCHEMA_SQL}
 `;

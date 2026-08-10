@@ -31,6 +31,20 @@ export type RagDebugEvent =
       readonly tokenCount: number | null;
       readonly resultCount: number | null;
       readonly errorCode: string | null;
+    }
+  | {
+      readonly operation: "hybrid-search";
+      readonly status: "completed" | "failed";
+      readonly modelId: string | null;
+      readonly language: "zh" | "en" | null;
+      readonly durationMs: number;
+      readonly embeddingDurationMs: number | null;
+      readonly exactCandidateCount: number | null;
+      readonly ftsCandidateCount: number | null;
+      readonly vectorCandidateCount: number | null;
+      readonly resultCount: number | null;
+      readonly vectorErrorCode: string | null;
+      readonly errorCode: string | null;
     };
 
 export class RagDebugFileLogger {

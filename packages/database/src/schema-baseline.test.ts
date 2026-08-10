@@ -248,6 +248,7 @@ describe("current database schema baseline", () => {
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("chunk_id");
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("content_hash");
       expect(getColumnNames(reopened, "sources")).toContain("index_status");
+      expect(getColumnNames(reopened, "sources")).not.toContain("source_label");
       expect(
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT index_status FROM sources WHERE id = 'source-1'").get(),
@@ -303,6 +304,7 @@ async function createTemporaryProject(prefix: string): Promise<string> {
 
 function v8SchemaSql(): string {
   return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
+    .replace(`    title TEXT NOT NULL,\n`, `    title TEXT NOT NULL,\n    source_label TEXT,\n`)
     .replace(`    languages_json TEXT NOT NULL DEFAULT '["zh"]',\n`, "")
     .replace(
       `    parser_version TEXT,

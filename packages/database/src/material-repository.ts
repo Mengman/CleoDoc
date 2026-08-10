@@ -9,7 +9,6 @@ interface SourceRow {
   origin: KnowledgeSource["origin"];
   format: KnowledgeSource["format"];
   title: string;
-  source_label: string | null;
   original_file_name: string | null;
   tags_json: string;
   languages_json: string;
@@ -58,17 +57,16 @@ export class MaterialRepository {
       database
         .prepare(
           `INSERT INTO sources
-           (id, project_id, source_type, origin, format, title, source_label,
-            original_file_name, tags_json, languages_json, relative_path, content_hash, size,
+           (id, project_id, source_type, origin, format, title, original_file_name,
+            tags_json, languages_json, relative_path, content_hash, size,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              project_id = excluded.project_id,
              source_type = excluded.source_type,
              origin = excluded.origin,
              format = excluded.format,
              title = excluded.title,
-             source_label = excluded.source_label,
              original_file_name = excluded.original_file_name,
              tags_json = excluded.tags_json,
              languages_json = excluded.languages_json,
@@ -97,7 +95,6 @@ export class MaterialRepository {
           source.origin,
           source.format,
           source.title,
-          source.sourceLabel,
           source.originalFileName,
           JSON.stringify(source.tags),
           JSON.stringify(source.languages),
@@ -133,17 +130,16 @@ export class MaterialRepository {
 
       const upsert = database.prepare(
         `INSERT INTO sources
-         (id, project_id, source_type, origin, format, title, source_label,
-          original_file_name, tags_json, languages_json, relative_path, content_hash, size,
+         (id, project_id, source_type, origin, format, title, original_file_name,
+          tags_json, languages_json, relative_path, content_hash, size,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            project_id = excluded.project_id,
            source_type = excluded.source_type,
            origin = excluded.origin,
            format = excluded.format,
            title = excluded.title,
-           source_label = excluded.source_label,
            original_file_name = excluded.original_file_name,
            tags_json = excluded.tags_json,
            languages_json = excluded.languages_json,
@@ -173,7 +169,6 @@ export class MaterialRepository {
           source.origin,
           source.format,
           source.title,
-          source.sourceLabel,
           source.originalFileName,
           JSON.stringify(source.tags),
           JSON.stringify(source.languages),
@@ -207,7 +202,6 @@ function mapSource(row: SourceRow): KnowledgeSource {
     origin: row.origin,
     format: row.format,
     title: row.title,
-    sourceLabel: row.source_label,
     originalFileName: row.original_file_name,
     tags,
     languages: languages as KnowledgeSource["languages"],

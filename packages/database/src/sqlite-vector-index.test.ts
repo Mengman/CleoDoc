@@ -60,12 +60,13 @@ describe("SqliteVectorIndex", () => {
         Float32Array.from([1, 0]),
         {
           projectId: "project-1",
+          sourceType: "material",
           embeddingModelName: MODEL_NAME,
           embeddingModelRevision: MODEL_REVISION,
         },
         10,
       );
-      expect(results.map((result) => result.sourceId)).toEqual(["target", "near"]);
+      expect(results.map((result) => result.chunk.sourceId)).toEqual(["target", "near"]);
       expect(results[0]?.distance).toBeCloseTo(0);
       expect(results[1]?.distance).toBeGreaterThan(0);
     } finally {
@@ -96,12 +97,13 @@ describe("SqliteVectorIndex", () => {
         Float32Array.from([1, 0]),
         {
           projectId: "project-1",
+          sourceType: "material",
           embeddingModelName: MODEL_NAME,
           embeddingModelRevision: MODEL_REVISION,
         },
         10,
       );
-      expect(results.map((result) => result.sourceId)).toEqual(["valid"]);
+      expect(results.map((result) => result.chunk.sourceId)).toEqual(["valid"]);
     } finally {
       await database.close();
     }
@@ -117,6 +119,7 @@ describe("SqliteVectorIndex", () => {
           Float32Array.from([1, 0, 0]),
           {
             projectId: "project-1",
+            sourceType: "material",
             embeddingModelName: MODEL_NAME,
             embeddingModelRevision: MODEL_REVISION,
           },

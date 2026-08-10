@@ -37,7 +37,6 @@ describe("MaterialService", () => {
     try {
       const imported = await service.addFile(inputPath, {
         title: "铁路照明资料",
-        sourceLabel: "地方志摘录",
         tags: ["历史", "铁路", "历史"],
       });
       expect(imported.created).toBe(true);
@@ -46,7 +45,6 @@ describe("MaterialService", () => {
         origin: "file",
         format: "markdown",
         title: "铁路照明资料",
-        sourceLabel: "地方志摘录",
         originalFileName: "民国铁路.md",
         tags: ["历史", "铁路"],
       });
@@ -434,10 +432,12 @@ describe("MaterialService", () => {
         writtenChunks: 0,
       });
       expect((await reopened.searchSemantic("夜间关闭入口")).results[0]).toMatchObject({
-        sourceId: source.source.id,
-        chunkId: expect.any(String),
-        startOffset: 0,
-        endOffset: expect.any(Number),
+        chunk: {
+          sourceId: source.source.id,
+          chunkId: expect.any(String),
+          startOffset: 0,
+          endOffset: expect.any(Number),
+        },
       });
     } finally {
       await reopened.close();
@@ -567,7 +567,7 @@ describe("MaterialService", () => {
         language: "zh",
         modelId: "test-zh-tokenizer",
       });
-      expect(chineseResults.results.map((result) => result.sourceId)).toEqual([
+      expect(chineseResults.results.map((result) => result.chunk.sourceId)).toEqual([
         chineseSource.source.id,
       ]);
       expect(englishResults).toMatchObject({
@@ -575,7 +575,7 @@ describe("MaterialService", () => {
         modelId: "test-en-tokenizer",
       });
       expect(englishResults.results.length).toBeGreaterThan(0);
-      expect(new Set(englishResults.results.map((result) => result.sourceId))).toEqual(
+      expect(new Set(englishResults.results.map((result) => result.chunk.sourceId))).toEqual(
         new Set([englishSource.source.id]),
       );
       expect(await service.getIndexStatus()).toEqual(
@@ -592,6 +592,49 @@ describe("MaterialService", () => {
           }),
         ]),
       );
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("combines exact, FTS, and vector retrieval into an in-memory context", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const service = await MaterialService.open(project.root, createTestMaterialOptions());
+    try {
+      const target = await service.addText("夜间列车使用煤油灯照明，站务员随后检查信号。", {
+        title: "铁路照明记录",
+      });
+      await service.addText("村民在旱季从山脚的深井提取饮用水。", { title: "村庄供水记录" });
+      await service.embedIndex();
+
+      const result = await service.searchHybrid("煤油灯", {
+        limit: 5,
+        filter: {
+          sourceId: target.source.id,
+          sourceRevision: target.source.contentHash,
+        },
+      });
+      expect(result).toMatchObject({
+        vectorErrorCode: null,
+        exactCandidateCount: 1,
+        ftsCandidateCount: 1,
+        vectorCandidateCount: 1,
+      });
+      expect(result.retrievalContext.items).toHaveLength(1);
+      expect(result.retrievalContext.items[0]).toMatchObject({
+        chunk: {
+          sourceId: target.source.id,
+          sourceRevision: target.source.contentHash,
+        },
+        ranks: [
+          { method: "exact", rank: 1 },
+          { method: "fts", rank: 1 },
+          { method: "vector", rank: 1 },
+        ],
+      });
     } finally {
       await service.close();
     }

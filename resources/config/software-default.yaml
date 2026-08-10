@@ -49,6 +49,11 @@ agent:
     resultTargetMultiplier: 4
 
 rag:
+  retrieval:
+    candidateLimit: 20
+    rrfK: 60
+    contextMaxCharacters: 12000
+    maxSourceRatio: 0.6
   languageDetection:
     minBlockUnits: 50
   embedding:

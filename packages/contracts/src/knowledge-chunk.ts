@@ -22,7 +22,20 @@ export interface KnowledgeSourceIndexStatus {
   readonly errorCode: string | null;
 }
 
-export interface KnowledgeSearchResult extends KnowledgeChunk {
+export interface RetrievedChunk {
+  readonly chunkId: string;
+  readonly sourceId: string;
+  readonly content: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
   readonly sourceTitle: string;
-  readonly sourceLabel: string | null;
+  readonly sourceRevision: string;
+  readonly sourceUpdatedAt: string;
+}
+
+export interface KnowledgeSearchFilter {
+  readonly projectId: string;
+  readonly sourceType: "material";
+  readonly sourceId?: string;
+  readonly sourceRevision?: string;
 }

@@ -103,7 +103,7 @@ describe("RAG CLI commands", () => {
           dimensions: 384,
           embeddingDurationMs: 12,
           searchDurationMs: 3,
-          results: [{ ...searchHit("private material text"), distance: 0.25 }],
+          results: [{ chunk: searchHit("private material text"), distance: 0.25 }],
         };
       },
     });
@@ -134,6 +134,33 @@ describe("RAG CLI commands", () => {
       expect(log).not.toContain("private material text");
     }
   });
+
+  it("prints explainable hybrid ranks without logging content", async () => {
+    const root = await createTemporaryDirectory();
+    const output = createOutput();
+    const privateResult = hybridSearchResult();
+    const service = createService({
+      async searchHybrid() {
+        return privateResult;
+      },
+    });
+
+    await executeSearchCommand(
+      parseArguments(["search", "private hybrid query", "--hybrid", "--explain", "--debug"]),
+      {
+        ...dependencies(output, service),
+        resolveProjectRoot: async () => root,
+      },
+    );
+
+    expect(output.content).toContain("exact#1, fts#1, vector#1");
+    expect(output.content).toContain("上下文字符数：");
+    const [logName] = await readdir(path.join(root, ".cleo", "logs"));
+    const log = await readFile(path.join(root, ".cleo", "logs", logName!), "utf8");
+    expect(log).toContain('"operation":"hybrid-search"');
+    expect(log).not.toContain("private hybrid query");
+    expect(log).not.toContain("hybrid evidence");
+  });
 });
 
 function createService(overrides: Partial<RagMaterialService> = {}): RagMaterialService {
@@ -151,6 +178,9 @@ function createService(overrides: Partial<RagMaterialService> = {}): RagMaterial
     },
     async search() {
       return [];
+    },
+    async searchHybrid() {
+      return hybridSearchResult();
     },
     async searchSemantic() {
       return {
@@ -225,15 +255,41 @@ function embeddingResult() {
 function searchHit(content: string) {
   return {
     sourceTitle: "Source",
-    sourceLabel: null,
+    sourceRevision: "source-revision",
+    sourceUpdatedAt: "2026-08-09T00:00:00.000Z",
     sourceId: "source-1",
     chunkId: "chunk-1",
-    ordinal: 0,
     content,
     startOffset: 0,
     endOffset: content.length,
-    chunkerVersion: "chunker-v1",
-    createdAt: "2026-08-09T00:00:00.000Z",
+  };
+}
+
+function hybridSearchResult() {
+  const hit = {
+    chunk: searchHit("hybrid evidence"),
+    score: 0.05,
+    ranks: [
+      { method: "exact" as const, rank: 1 },
+      { method: "fts" as const, rank: 1 },
+      { method: "vector" as const, rank: 1 },
+    ],
+    vectorDistance: 0.1,
+  };
+  return {
+    language: "zh" as const,
+    embeddingModelId: "model-zh",
+    queryTokenCount: 3,
+    exactCandidateCount: 1,
+    ftsCandidateCount: 1,
+    vectorCandidateCount: 1,
+    embeddingDurationMs: 1,
+    retrievalDurationMs: 2,
+    vectorErrorCode: null,
+    retrievalContext: {
+      items: [hit],
+      contentCharacterCount: hit.chunk.content.length,
+    },
   };
 }
 

@@ -184,7 +184,7 @@ CDM、领域 JSON 和导入的原始资料是目标事实源；索引可以安�
 1. 根据项目、创作阶段、资料类型、人物、时间和权威等级过滤。
 2. 并行执行 FTS5 全文检索、向量语义检索和关系图遍历。
 3. 融合排序、去重，并按当前任务加权。
-4. 在模型上下文预算内组装证据包，生成不可变的 `ContextManifest`。
+4. 在模型上下文预算内组装证据包，生成不可变的 `RetrievalContext`。
 
 预置检索策略：
 
@@ -395,7 +395,7 @@ MyNovel.cleo/
 - 工作目标和当前创作阶段。
 - 允许读取的知识空间。
 - 检索策略和上下文预算。
-- 使用过的 `ContextManifest`。
+- 使用过的 `RetrievalContext`。
 - 模型、参数和用量估算。
 - 生成结果、检查结果和 `ChangeSet`。
 - 基准 revision、暂停、取消、重试和恢复状态。
@@ -411,7 +411,7 @@ MyNovel.cleo/
 - `KnowledgeCandidate`：尚未确认的自动抽取事实或关系。
 - `KnowledgeConflict`：冲突双方、证据、影响范围和处理状态。
 - `RetrievalProfile`：任务的过滤、召回、排序和预算配置。
-- `ContextManifest`：模型调用最终使用的知识块和选取原因。
+- `RetrievalContext`：一次检索最终采用的知识块及正文字符总数；普通检索不持久化候选轨迹。
 - `AgentJob`：可恢复的 Agent 工作单元。
 - `ChangeSet`：正文或设定补丁、基准版本、影响对象和验证结果。
 - `Checkpoint`：阶段交付物、用户决定和可恢复版本。
@@ -423,11 +423,11 @@ MyNovel.cleo/
 
 开发任务、依赖、顺序和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，PRD 不再保存重复的实施计划。
 
-截至 2026-08-08：
+截至 2026-08-10：
 
 - v0.1 已完成 CLI 与项目基础、LLM Provider、多轮对话与内容保存、资料管理、Session 压缩与历史回查、Reasoning/ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool。
 - v0.1 已完成 CDM 最小 Core 和独立 TXT/Markdown 资料解析，能够输出临时 CDM、解析警告及 Node 原文字节范围。
-- v0.1 尚未实现统一知识索引、本地 Embedding、混合 RAG、`ContextManifest`、RAG Tool 和 CLI 发布验收。
+- v0.1 已实现资料 Chunk、FTS、本地 Embedding、sqlite-vec 精确向量检索、Exact/FTS/Vector 混合 RAG、可解释输出和 `RetrievalContext`；正文索引、RAG Tool 和 CLI 发布验收尚未完成。
 - v0.2 Electron、React、TipTap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和阶段 Agent 工作流尚未开始；Draft 写入协议已经完成设计。
 
 ## 10. 验收标准
@@ -453,7 +453,7 @@ MyNovel.cleo/
 - 关键设定测试集的 Top-10 召回率不低于 90%。
 - 项目检索不会返回未显式链接的其他作品内容。
 - 离线状态下仍可导入、索引、搜索和浏览证据。
-- 每次模型调用都能还原其 `ContextManifest`。
+- 每次模型调用都能还原其关联的 `RetrievalContext`。
 - 索引损坏不会破坏原始作品，并可安全重建。
 
 ### 10.3 创作闭环

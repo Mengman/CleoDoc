@@ -27,6 +27,12 @@ describe("SoftwareConfigService", () => {
     expect(result.config.rag.chunking).toEqual({
       splitSearchWindowRatio: 0.75,
     });
+    expect(result.config.rag.retrieval).toEqual({
+      candidateLimit: 20,
+      rrfK: 60,
+      contextMaxCharacters: 12_000,
+      maxSourceRatio: 0.6,
+    });
     expect(result.config.rag.languageDetection.minBlockUnits).toBe(50);
     expect(result.config.rag.embedding.worker.chunkBatchSize).toBe(16);
     expect(result.config.gpuAcceleration).toBe(true);

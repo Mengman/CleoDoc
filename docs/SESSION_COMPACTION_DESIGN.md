@@ -910,7 +910,7 @@ type CompactionEvent =
 
 - Segment Summary 的递归多层归并；目前 Reduce Payload 超过 `M` 时返回 `PROVIDER_CONTEXT_LIMIT`。
 - 推荐 Markdown 标题缺失时的非阻断质量警告；当前只执行空内容、截断、长度和非法 Tool Call 等最低完整性校验。
-- 跨 Conversation 历史回查和统一 `ContextManifest`；前者需要独立产品设计，后者随本地 RAG 基础设施实现。
+- 跨 Conversation 历史回查，以及把 `RetrievalContext` 接入模型调用；前者需要独立产品设计，后者由本地 RAG Tool 阶段实现。
 
 ## 18. 验收标准
 

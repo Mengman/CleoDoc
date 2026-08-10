@@ -1,7 +1,7 @@
 # CleoDoc 数据库设计与当前实现
 
 > 状态：v0.1 Schema v9 当前基线
-> 更新日期：2026-08-09
+> 更新日期：2026-08-10
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
 
@@ -12,7 +12,7 @@
 本文严格区分：
 
 - **当前实现**：完整 Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及唯一保留的 v8→v9 前向迁移。
-- **尚未实现范围**：技术架构中规划但尚未落地的混合 RAG、ContextManifest、知识图、版本和 ChangeSet 数据结构。
+- **尚未实现范围**：技术架构中规划但尚未落地的知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
 
@@ -102,7 +102,7 @@ PRAGMA busy_timeout = 5000;
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
 - 当前数据库基线是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
 - 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放旧 DDL。
-- 完整 v8 数据库执行一次 v8→v9 前向迁移，直接增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表。
+- 完整 v8 数据库执行一次 v8→v9 前向迁移，增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表，并删除已停止使用的 `sources.source_label`。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动删除它们。
 - 当前代码不恢复 v1–v8 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
@@ -215,7 +215,6 @@ UNIQUE(conversation_id, sequence)
 | `origin` | TEXT | NOT NULL、CHECK | `file` 或 `paste` |
 | `format` | TEXT | NOT NULL、CHECK | 当前只允许 `text` 或 `markdown` |
 | `title` | TEXT | NOT NULL | 用户可见的资料标题 |
-| `source_label` | TEXT | 可空 | 书名、访谈对象、网站等来源说明 |
 | `original_file_name` | TEXT | 可空 | 导入前的原始文件名 |
 | `tags_json` | TEXT | NOT NULL | 标签字符串数组 JSON |
 | `languages_json` | TEXT | NOT NULL、默认 `["zh"]` | 检测出的有序语言列表 JSON；当前允许 `zh`、`en`，第一项是主语言 |
@@ -570,10 +569,9 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ## 12. RAG 数据库范围
 
-Schema v9 已实现资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS，以及 Embedding 模型和向量存储表。以下能力仍未进入当前 Schema：
+Schema v9 已实现资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS，以及 Embedding 模型和向量存储表。混合检索在内存中生成结果和 `RetrievalContext`，不保存 Query、候选、排除项或证据快照。以下能力仍未进入当前 Schema：
 
-- 正文 FTS、Embedding 任务/索引代次；本地精确向量检索已经实现，混合召回尚未实现。
-- RetrievalRun、ContextManifest 及证据项。
+- 正文 FTS、Embedding 任务/索引代次；资料本地精确向量和混合召回已经实现。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
 - AgentJob、ChangeSet、候选事实和审批。
 - Git Revision、命名版本和 Diff 缓存。

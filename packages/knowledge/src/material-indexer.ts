@@ -1,18 +1,21 @@
 import { performance } from "node:perf_hooks";
 
 import type {
-  KnowledgeSearchResult,
   KnowledgeSource,
   KnowledgeSourceLanguage,
+  HybridRetrievalResult,
+  RetrievalFilter,
+  RetrievedChunk,
   VectorSearchHit,
 } from "../../contracts/src/index.js";
-import { AppError, asAppError } from "../../contracts/src/index.js";
+import { AppError, asAppError, type AppErrorCode } from "../../contracts/src/index.js";
 import {
   ChunkEmbeddingRepository,
   KnowledgeChunkRepository,
   SqliteVectorIndex,
   type ProjectDatabase,
 } from "../../database/src/index.js";
+import { fuseAndSelectHybridResults } from "../../rag/src/index.js";
 import {
   chunkDocument,
   DOCUMENT_CHUNKER_VERSION,
@@ -31,6 +34,8 @@ import type {
   MaterialEmbeddingIndexOptions,
   MaterialEmbeddingIndexResult,
   MaterialEmbeddingModel,
+  MaterialHybridSearchOptions,
+  MaterialRetrievalOptions,
   MaterialIndexDiagnostic,
   MaterialSemanticSearchResult,
 } from "./material-types.js";
@@ -63,6 +68,7 @@ export class MaterialIndexer {
       Record<KnowledgeSourceLanguage, MaterialEmbeddingModel>
     >,
     embeddingChunkBatchSize: number,
+    private readonly retrieval: MaterialRetrievalOptions,
   ) {
     this.repository = new KnowledgeChunkRepository(database);
     this.embeddingRepository = new ChunkEmbeddingRepository(database);
@@ -111,7 +117,7 @@ export class MaterialIndexer {
     });
   }
 
-  search(query: string, limit = 10): KnowledgeSearchResult[] {
+  search(query: string, limit = 10): RetrievedChunk[] {
     const normalized = query.trim();
     if (normalized === "" || normalized.length > 500) {
       throw new AppError("VALIDATION_ERROR", "检索关键词长度必须为 1–500 个字符。");
@@ -126,12 +132,14 @@ export class MaterialIndexer {
     language: KnowledgeSourceLanguage,
     query: Float32Array,
     limit = 10,
+    filter: RetrievalFilter = { sourceType: "material" },
   ): Promise<readonly VectorSearchHit[]> {
     this.vectorIndex ??= SqliteVectorIndex.open(this.database);
     return await this.vectorIndex.search(
       query,
       {
         projectId: this.projectId,
+        ...filter,
         embeddingModelName: this.embeddingModels[language].modelName,
         embeddingModelRevision: this.embeddingModels[language].modelRevision,
       },
@@ -159,6 +167,68 @@ export class MaterialIndexer {
       embeddingDurationMs,
       searchDurationMs: performance.now() - searchStartedAt,
       results,
+    };
+  }
+
+  async searchHybrid(
+    query: string,
+    options: MaterialHybridSearchOptions = {},
+  ): Promise<HybridRetrievalResult> {
+    const normalized = query.trim();
+    if (normalized === "" || normalized.length > 500) {
+      throw new AppError("VALIDATION_ERROR", "混合检索内容长度必须为 1–500 个字符。");
+    }
+    const limit = options.limit ?? 10;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new AppError("VALIDATION_ERROR", "检索结果数量必须为 1–100。");
+    }
+    const candidateLimit = Math.max(limit, this.retrieval.candidateLimit);
+    const filter: RetrievalFilter = { sourceType: "material", ...options.filter };
+    const databaseFilter = { projectId: this.projectId, ...filter };
+    const language = detectQueryLanguage(normalized);
+    const model = this.embeddingModels[language];
+    const retrievalStartedAt = performance.now();
+    const exact = this.repository.searchExact(databaseFilter, normalized, candidateLimit);
+    const fts = this.repository.searchFts(databaseFilter, normalized, candidateLimit);
+    let vector: readonly VectorSearchHit[] = [];
+    let queryTokenCount: number | null = null;
+    let embeddingDurationMs = 0;
+    let vectorErrorCode: string | null = null;
+    try {
+      const embeddingStartedAt = performance.now();
+      const embedding = await model.embedQuery(normalized);
+      embeddingDurationMs = performance.now() - embeddingStartedAt;
+      queryTokenCount = embedding.tokenCount;
+      vector = await this.searchVector(language, embedding.vector, candidateLimit, filter);
+    } catch (error) {
+      const applicationError = asAppError(error);
+      if (!isRecoverableVectorError(applicationError.code)) throw error;
+      vectorErrorCode = applicationError.code;
+    }
+
+    const selection = fuseAndSelectHybridResults(
+      { exact, fts, vector },
+      {
+        rrfK: this.retrieval.rrfK,
+        resultLimit: limit,
+        contextMaxCharacters: this.retrieval.contextMaxCharacters,
+        maxSourceRatio: this.retrieval.maxSourceRatio,
+      },
+    );
+    return {
+      language,
+      embeddingModelId: model.modelId,
+      queryTokenCount,
+      exactCandidateCount: exact.length,
+      ftsCandidateCount: fts.length,
+      vectorCandidateCount: vector.length,
+      embeddingDurationMs,
+      retrievalDurationMs: performance.now() - retrievalStartedAt,
+      vectorErrorCode,
+      retrievalContext: {
+        items: selection.results,
+        contentCharacterCount: selection.contentCharacterCount,
+      },
     };
   }
 
@@ -265,4 +335,13 @@ export function detectQueryLanguage(query: string): KnowledgeSourceLanguage {
   const hanCharacters = query.match(/\p{Script=Han}/gu)?.length ?? 0;
   const englishWords = query.match(/[A-Za-z]+(?:['’][A-Za-z]+)*/gu)?.length ?? 0;
   return englishWords > hanCharacters ? "en" : "zh";
+}
+
+function isRecoverableVectorError(code: AppErrorCode): boolean {
+  return (
+    code === "EMBEDDING_MODEL_NOT_FOUND" ||
+    code === "EMBEDDING_MODEL_LOAD_FAILED" ||
+    code === "EMBEDDING_GENERATION_FAILED" ||
+    code === "VECTOR_INDEX_UNAVAILABLE"
+  );
 }

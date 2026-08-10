@@ -287,17 +287,7 @@ describe("CleoDoc CLI", () => {
     expect((await runCli(["init", projectDirectory], environment)).exitCode).toBe(0);
 
     const added = await runCli(
-      [
-        "material",
-        "add",
-        inputFile,
-        "--title",
-        "铁路时刻资料",
-        "--source",
-        "旧报纸",
-        "--tags",
-        "历史,铁路",
-      ],
+      ["material", "add", inputFile, "--title", "铁路时刻资料", "--tags", "历史,铁路"],
       environment,
     );
     expect(added.exitCode, JSON.stringify(added)).toBe(0);
@@ -343,7 +333,6 @@ describe("CleoDoc CLI", () => {
 
     const shown = await runCli(["material", "show", materialId!], environment);
     expect(shown.exitCode).toBe(0);
-    expect(shown.stdout).toContain("来源：旧报纸");
     expect(shown.stdout).toContain("末班车在午夜到站");
 
     const renamed = await runCli(["material", "rename", materialId!, "铁路历史资料"], environment);

@@ -34,7 +34,8 @@ GPU 基准会输出 llama.cpp 实际选择的后端和实际卸载层数。如�
 - 吞吐：用稳态 6 条文档的总 Chunk 数和实际 Token 数除以总推理时间。
 - Query Embedding：先预热 4 条与原文措辞不同的固定查询，再记录平均值、P50 和 P95。
 - SQLite 查询：每篇文档复制为指定数量的 Chunk，使用普通 `chunk_embeddings` 表和 sqlite-vec 精确余弦距离查询 Top-5。
-- Query Recall：分别统计 4 条查询的 Top-1 和 Top-5 Recall；这是小型回归语料，不替代步骤 8 的正式 RAG 召回测试集。
+- 混合查询：在同一临时数据库执行 Exact、trigram FTS、Vector 与 RRF，记录平均值、P50 和 P95。`--copies` 产生的同一 Source 性能副本在每个召回通道只保留最高排名项，避免人为副本重复增加 RRF 权重。
+- Query Recall：分别报告 Vector 和 Hybrid 的 Top-1、Top-5 Recall；这是小型程序正确性回归语料，不代表真实项目检索质量。
 - 可追溯性：检查所有返回项都具有公开 Source ID、Chunk ID 和有效的原文字节范围。
 
 模型加载时间容易受到运行顺序、操作系统文件缓存和动态库冷启动影响。稳态延迟适合判断持续索引吞吐，首次推理则更接近用户首次使用的等待。两者必须同时保留。
@@ -65,8 +66,11 @@ GPU 基准会输出 llama.cpp 实际选择的后端和实际卸载层数。如�
 | Token 吞吐 | 973.0 tokens/s | 9505.0 tokens/s | 9.77× |
 | Query Embedding 平均 | 35.89 ms | 3.44 ms | 10.43× |
 | SQLite 查询平均 | 0.44 ms | 0.23 ms | 不适用 |
-| Top-1 Query Recall | 100.0% | 100.0% | 一致 |
-| Top-5 Query Recall | 100.0% | 100.0% | 一致 |
+| 混合查询平均 | 0.68 ms | 0.79 ms | 不适用 |
+| Vector Top-1 Recall | 100.0% | 100.0% | 一致 |
+| Vector Top-5 Recall | 100.0% | 100.0% | 一致 |
+| Hybrid Top-1 Recall | 100.0% | 100.0% | 一致 |
+| Hybrid Top-5 Recall | 100.0% | 100.0% | 一致 |
 | 结果可追溯性 | 通过 | 通过 | 一致 |
 
 ### 3.2 英文 `bge-small-en-v1.5-q8_0`
@@ -84,8 +88,11 @@ GPU 基准会输出 llama.cpp 实际选择的后端和实际卸载层数。如�
 | Token 吞吐 | 595.1 tokens/s | 4394.6 tokens/s | 7.38× |
 | Query Embedding 平均 | 34.55 ms | 5.67 ms | 6.09× |
 | SQLite 查询平均 | 0.34 ms | 0.37 ms | 不适用 |
-| Top-1 Query Recall | 100.0% | 100.0% | 一致 |
-| Top-5 Query Recall | 100.0% | 100.0% | 一致 |
+| 混合查询平均 | 1.07 ms | 1.06 ms | 不适用 |
+| Vector Top-1 Recall | 100.0% | 100.0% | 一致 |
+| Vector Top-5 Recall | 100.0% | 100.0% | 一致 |
+| Hybrid Top-1 Recall | 75.0% | 75.0% | 一致 |
+| Hybrid Top-5 Recall | 100.0% | 100.0% | 一致 |
 | 结果可追溯性 | 通过 | 通过 | 一致 |
 
 ## 4. 当前结论
@@ -95,3 +102,4 @@ GPU 基准会输出 llama.cpp 实际选择的后端和实际卸载层数。如�
 - 中文约在 48 个 Chunk、英文约在 45 个 Chunk 后，按本次单次测量的模型加载、首次推理和稳态耗时估算，GPU 才开始取得总耗时优势。该交叉点只用于产品策略参考，需要多轮独立进程测量后再固化。
 - SQLite 查询不使用 Embedding GPU；CPU/GPU 两组查询差异属于运行噪声。
 - CPU 与 GPU 的固定语料召回和回溯结果一致，当前没有观察到量化模型在不同后端上的功能差异。
+- 当前英文 Hybrid Top-1 为 75%、Top-5 为 100%；这说明三路检索和融合工作正常，但固定 RRF 对个别 Query 的第一名排序仍弱于纯 Vector。当前阶段保留该结果作为真实回归基线，不为追求 100% 对四条样本过拟合参数。

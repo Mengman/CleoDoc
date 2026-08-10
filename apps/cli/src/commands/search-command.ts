@@ -23,12 +23,20 @@ export async function executeSearchCommand(
   parsed: ParsedArguments,
   dependencies: RagCommandDependencies,
 ): Promise<void> {
-  assertOnlyOptions(parsed, ["project", "limit", "scope", "semantic", "debug"]);
+  assertOnlyOptions(parsed, [
+    "project",
+    "limit",
+    "scope",
+    "semantic",
+    "hybrid",
+    "explain",
+    "debug",
+  ]);
   const [query] = parsed.positionals;
   if (query === undefined || parsed.positionals.length !== 1) {
     throw new AppError(
       "VALIDATION_ERROR",
-      "用法：cleo search <query> [--semantic] [--limit <数量>]",
+      "用法：cleo search <query> [--semantic|--hybrid] [--explain] [--limit <数量>]",
     );
   }
   const scope = optionString(parsed, "scope") ?? "material";
@@ -36,16 +44,28 @@ export async function executeSearchCommand(
     throw new AppError("VALIDATION_ERROR", "当前检索只支持 --scope material。");
   }
   const semantic = optionBoolean(parsed, "semantic");
-  const explicitDebug = parsed.options.has("debug");
-  if (explicitDebug && !semantic) {
-    throw new AppError("VALIDATION_ERROR", "--debug 当前只用于 --semantic 检索。");
+  const hybrid = optionBoolean(parsed, "hybrid");
+  const explain = optionBoolean(parsed, "explain");
+  if (semantic && hybrid) {
+    throw new AppError("VALIDATION_ERROR", "--semantic 和 --hybrid 不能同时使用。");
   }
-  const debug = semantic && resolveDebug(parsed, dependencies);
+  if (explain && !hybrid) {
+    throw new AppError("VALIDATION_ERROR", "--explain 只能与 --hybrid 一起使用。");
+  }
+  const explicitDebug = parsed.options.has("debug");
+  if (explicitDebug && !semantic && !hybrid) {
+    throw new AppError("VALIDATION_ERROR", "--debug 当前只用于 --semantic 或 --hybrid 检索。");
+  }
+  const debug = (semantic || hybrid) && resolveDebug(parsed, dependencies);
   const limit = positiveIntegerOption(parsed, "limit") ?? 10;
   if (limit > 100) throw new AppError("VALIDATION_ERROR", "--limit 不能超过 100。");
   const root = await dependencies.resolveProjectRoot(optionString(parsed, "project"));
   const materials = await dependencies.openMaterials(root);
   try {
+    if (hybrid) {
+      await hybridSearch(materials, root, query, limit, explain, debug, dependencies.output);
+      return;
+    }
     if (!semantic) {
       printResults(await materials.search(query, limit), dependencies.output);
       return;
@@ -53,6 +73,69 @@ export async function executeSearchCommand(
     await semanticSearch(materials, root, query, limit, debug, dependencies.output);
   } finally {
     await materials.close();
+  }
+}
+
+async function hybridSearch(
+  materials: RagMaterialService,
+  projectRoot: string,
+  query: string,
+  limit: number,
+  explain: boolean,
+  debug: boolean,
+  output: RagCommandDependencies["output"],
+): Promise<void> {
+  const logger = debug ? await RagDebugFileLogger.create(projectRoot) : null;
+  if (logger !== null) output.write(`RAG Debug 日志：${logger.filePath}\n`);
+  const startedAt = performance.now();
+  try {
+    const search = await materials.searchHybrid(query, { limit });
+    output.write(
+      `混合检索：${search.language}\t${search.embeddingModelId}` +
+        `\texact ${search.exactCandidateCount}` +
+        `\tfts ${search.ftsCandidateCount}` +
+        `\tvector ${search.vectorCandidateCount}\n`,
+    );
+    if (search.vectorErrorCode !== null) {
+      output.write(`向量检索不可用，已使用 Exact + FTS：${search.vectorErrorCode}\n`);
+    }
+    printHybridResults(search.retrievalContext.items, output, explain);
+    if (explain) {
+      output.write(`上下文字符数：${search.retrievalContext.contentCharacterCount}\n`);
+    }
+    await logger?.write({
+      operation: "hybrid-search",
+      status: "completed",
+      modelId: search.embeddingModelId,
+      language: search.language,
+      durationMs: performance.now() - startedAt,
+      embeddingDurationMs: search.embeddingDurationMs,
+      exactCandidateCount: search.exactCandidateCount,
+      ftsCandidateCount: search.ftsCandidateCount,
+      vectorCandidateCount: search.vectorCandidateCount,
+      resultCount: search.retrievalContext.items.length,
+      vectorErrorCode: search.vectorErrorCode,
+      errorCode: null,
+    });
+  } catch (error) {
+    const applicationError = asAppError(error);
+    await logger?.write({
+      operation: "hybrid-search",
+      status: "failed",
+      modelId: null,
+      language: null,
+      durationMs: performance.now() - startedAt,
+      embeddingDurationMs: null,
+      exactCandidateCount: null,
+      ftsCandidateCount: null,
+      vectorCandidateCount: null,
+      resultCount: null,
+      vectorErrorCode: null,
+      errorCode: applicationError.code,
+    });
+    throw error;
+  } finally {
+    await logger?.close();
   }
 }
 
@@ -73,7 +156,7 @@ async function semanticSearch(
       `语义检索：${search.language}\t${search.modelId}\t${search.tokenCount} tokens` +
         `\t${search.dimensions} dimensions\n`,
     );
-    printResults(search.results, output, true);
+    printVectorResults(search.results, output);
     await logger?.write({
       operation: "semantic-search",
       status: "completed",
@@ -116,10 +199,8 @@ function printResults(
     content: string;
     startOffset: number;
     endOffset: number;
-    distance?: number;
   }[],
   output: RagCommandDependencies["output"],
-  includeDistance = false,
 ): void {
   if (results.length === 0) {
     output.write("没有找到匹配的资料。\n");
@@ -128,9 +209,49 @@ function printResults(
   for (const [index, result] of results.entries()) {
     output.write(
       `[${index + 1}] ${result.sourceTitle}` +
-        `${includeDistance && result.distance !== undefined ? `\tdistance: ${result.distance.toFixed(6)}` : ""}\n` +
+        `\n` +
         `source: ${result.sourceId}\nchunk: ${result.chunkId}\n` +
         `range: ${result.startOffset}-${result.endOffset}\n${snippet(result.content)}\n\n`,
+    );
+  }
+}
+
+function printVectorResults(
+  results: Awaited<ReturnType<RagMaterialService["searchSemantic"]>>["results"],
+  output: RagCommandDependencies["output"],
+): void {
+  if (results.length === 0) {
+    output.write("没有找到匹配的资料。\n");
+    return;
+  }
+  for (const [index, result] of results.entries()) {
+    const chunk = result.chunk;
+    output.write(
+      `[${index + 1}] ${chunk.sourceTitle}\tdistance: ${result.distance.toFixed(6)}\n` +
+        `source: ${chunk.sourceId}\nchunk: ${chunk.chunkId}\n` +
+        `range: ${chunk.startOffset}-${chunk.endOffset}\n${snippet(chunk.content)}\n\n`,
+    );
+  }
+}
+
+function printHybridResults(
+  results: Awaited<ReturnType<RagMaterialService["searchHybrid"]>>["retrievalContext"]["items"],
+  output: RagCommandDependencies["output"],
+  explain: boolean,
+): void {
+  if (results.length === 0) {
+    output.write("没有找到匹配的资料。\n");
+    return;
+  }
+  for (const [index, result] of results.entries()) {
+    const chunk = result.chunk;
+    const ranks = result.ranks.map((rank) => `${rank.method}#${rank.rank}`).join(", ");
+    output.write(
+      `[${index + 1}] ${chunk.sourceTitle}\tscore: ${result.score.toFixed(6)}\n` +
+        `source: ${chunk.sourceId}\nchunk: ${chunk.chunkId}\n` +
+        `range: ${chunk.startOffset}-${chunk.endOffset}\n` +
+        (explain ? `命中：${ranks}\n资料版本时间：${chunk.sourceUpdatedAt}\n` : "") +
+        `${snippet(chunk.content)}\n\n`,
     );
   }
 }

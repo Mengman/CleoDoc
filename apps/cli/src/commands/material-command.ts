@@ -30,7 +30,7 @@ export async function runMaterialCommand(
 ): Promise<void> {
   const config = getSoftwareConfig();
   const [subcommand, reference, value] = parsed.positionals;
-  assertOnlyOptions(parsed, ["project", "stdin", "title", "source", "tags", "format", "encoding"]);
+  assertOnlyOptions(parsed, ["project", "stdin", "title", "tags", "format", "encoding"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
   const materials = await MaterialService.open(root, createMaterialServiceOptions());
   try {
@@ -84,7 +84,6 @@ async function addMaterial(
 ): Promise<void> {
   const fromStdin = optionBoolean(parsed, "stdin");
   const title = optionString(parsed, "title");
-  const sourceLabel = optionString(parsed, "source");
   const tags = parseTags(optionString(parsed, "tags"));
   const requestedFormat = optionString(parsed, "format");
   const requestedEncoding = optionString(parsed, "encoding");
@@ -100,7 +99,6 @@ async function addMaterial(
     }
     const result = await materials.addText(await readStandardInput(context, maxImportBytes), {
       ...(title === undefined ? {} : { title }),
-      ...(sourceLabel === undefined ? {} : { sourceLabel }),
       ...(tags.length === 0 ? {} : { tags }),
       ...(requestedFormat === undefined ? {} : { format: requestedFormat as "text" | "markdown" }),
     });
@@ -115,7 +113,6 @@ async function addMaterial(
   }
   const result = await materials.addFile(reference, {
     ...(title === undefined ? {} : { title }),
-    ...(sourceLabel === undefined ? {} : { sourceLabel }),
     ...(tags.length === 0 ? {} : { tags }),
     ...(requestedEncoding === undefined
       ? {}
@@ -193,7 +190,7 @@ function printMaterialMetadata(
 ): void {
   context.output.write(`资料：${source.title}\n`);
   context.output.write(`资料 ID：${source.id}\n`);
-  context.output.write(`格式：${source.format}\n来源：${source.sourceLabel ?? "未指定"}\n`);
+  context.output.write(`格式：${source.format}\n`);
   context.output.write(`语言：${source.languages.join(", ")}\n`);
   context.output.write(`标签：${source.tags.length === 0 ? "无" : source.tags.join(", ")}\n`);
   context.output.write(`路径：${source.relativePath}\n内容哈希：${source.contentHash}\n`);
@@ -208,6 +205,7 @@ export function createMaterialServiceOptions(): MaterialServiceOptions {
     maxImportBytes: config.materials.maxImportBytes,
     chunking: config.rag.chunking,
     languageDetection: config.rag.languageDetection,
+    retrieval: config.rag.retrieval,
     embeddingChunkBatchSize: config.rag.embedding.worker.chunkBatchSize,
     embeddingModels: {
       zh: createEmbeddingModel(

@@ -1,20 +1,16 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { lstat, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
 import type {
-  KnowledgeSearchResult,
   KnowledgeSource,
   MaterialImportResult,
   MaterialWithContent,
   KnowledgeSourceLanguage,
+  RetrievedChunk,
   VectorSearchHit,
 } from "../../contracts/src/index.js";
-import {
-  AppError,
-  KNOWLEDGE_SOURCE_SCHEMA_VERSION,
-  knowledgeSourceSchema,
-} from "../../contracts/src/index.js";
+import { AppError, KNOWLEDGE_SOURCE_SCHEMA_VERSION } from "../../contracts/src/index.js";
 import { MaterialRepository, ProjectDatabase } from "../../database/src/index.js";
 import { detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import {
@@ -31,12 +27,24 @@ import {
   readStoredUtf8Text,
 } from "./material-files.js";
 import { MaterialIndexer, type MaterialIndexRebuildResult } from "./material-indexer.js";
+import {
+  assertMaterialContent,
+  defaultPastedTitle,
+  hashContent,
+  materialFormatFromPath,
+  materialNotFound,
+  normalizeTags,
+  normalizeTitle,
+  parseKnowledgeSource,
+} from "./material-validation.js";
 import type {
   AddFileMaterialOptions,
   AddTextMaterialOptions,
   MaterialEmbeddingIndexOptions,
   MaterialEmbeddingIndexResult,
   MaterialIndexDiagnostic,
+  MaterialHybridSearchOptions,
+  MaterialHybridSearchResult,
   MaterialSemanticSearchResult,
   MaterialServiceOptions,
 } from "./material-types.js";
@@ -54,6 +62,7 @@ export class MaterialService {
     chunking: MaterialServiceOptions["chunking"],
     embeddingModels: MaterialServiceOptions["embeddingModels"],
     embeddingChunkBatchSize: number,
+    retrieval: MaterialServiceOptions["retrieval"],
   ) {
     this.repository = new MaterialRepository(database);
     this.indexer = new MaterialIndexer(
@@ -63,6 +72,7 @@ export class MaterialService {
       chunking,
       embeddingModels,
       embeddingChunkBatchSize,
+      retrieval,
     );
   }
 
@@ -82,6 +92,7 @@ export class MaterialService {
       options.chunking,
       options.embeddingModels,
       options.embeddingChunkBatchSize,
+      options.retrieval,
     );
     try {
       await service.synchronizeProjection();
@@ -119,7 +130,6 @@ export class MaterialService {
       format,
       inputEncoding: decoded.inputEncoding,
       title: options.title ?? path.basename(originalFileName, path.extname(originalFileName)),
-      sourceLabel: options.sourceLabel ?? originalFileName,
       originalFileName,
       tags: options.tags,
     });
@@ -134,7 +144,6 @@ export class MaterialService {
       format: options.format ?? "text",
       inputEncoding: "utf-8",
       title: options.title ?? defaultPastedTitle(),
-      sourceLabel: options.sourceLabel ?? null,
       originalFileName: null,
       tags: options.tags,
     });
@@ -172,7 +181,7 @@ export class MaterialService {
     }
   }
 
-  async search(query: string, limit = 10): Promise<KnowledgeSearchResult[]> {
+  async search(query: string, limit = 10): Promise<RetrievedChunk[]> {
     await this.synchronizeProjection();
     await this.indexer.markOutdated(this.repository.list());
     return this.indexer.search(query, limit);
@@ -192,6 +201,14 @@ export class MaterialService {
     await this.synchronizeProjection();
     await this.indexer.markOutdated(this.repository.list());
     return await this.indexer.searchSemantic(query, limit);
+  }
+
+  async searchHybrid(
+    query: string,
+    options: MaterialHybridSearchOptions = {},
+  ): Promise<MaterialHybridSearchResult> {
+    await this.synchronizeProjection();
+    return await this.indexer.searchHybrid(query, options);
   }
 
   async getIndexStatus(): Promise<MaterialIndexDiagnostic[]> {
@@ -273,7 +290,6 @@ export class MaterialService {
       format: KnowledgeSource["format"];
       inputEncoding: MaterialInputEncoding;
       title: string;
-      sourceLabel: string | null;
       originalFileName: string | null;
       tags?: readonly string[];
     },
@@ -301,7 +317,6 @@ export class MaterialService {
       origin: input.origin,
       format: input.format,
       title: normalizeTitle(input.title),
-      sourceLabel: normalizeOptionalLabel(input.sourceLabel),
       originalFileName: input.originalFileName,
       tags: normalizeTags(input.tags ?? []),
       languages,
@@ -405,91 +420,4 @@ export class MaterialService {
   private async resolveDerivedChunksPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `.cleo/derived/chunks/${id}.chunks.json`);
   }
-}
-
-function materialFormatFromPath(filePath: string): KnowledgeSource["format"] {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".txt") {
-    return "text";
-  }
-  if (extension === ".md" || extension === ".markdown") {
-    return "markdown";
-  }
-  throw new AppError("VALIDATION_ERROR", "步骤 5 仅支持 TXT、MD 和 Markdown 文件。");
-}
-
-function assertMaterialContent(content: string, maxImportBytes: number): void {
-  const size = Buffer.byteLength(content, "utf8");
-  if (size === 0) {
-    throw new AppError("VALIDATION_ERROR", "资料内容不能为空。");
-  }
-  if (size > maxImportBytes) {
-    throw new AppError("VALIDATION_ERROR", "单份资料超过了软件配置允许的大小。");
-  }
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-function normalizeTitle(title: string): string {
-  const normalized = title.trim();
-  if (normalized.length === 0 || normalized.length > 200) {
-    throw new AppError("VALIDATION_ERROR", "资料标题长度必须为 1–200 个字符。");
-  }
-  return normalized;
-}
-
-function normalizeOptionalLabel(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized === "" ? null : normalized;
-}
-
-function normalizeTags(tags: readonly string[]): string[] {
-  const normalized: string[] = [];
-  const seen = new Set<string>();
-  for (const tag of tags) {
-    const value = tag.trim();
-    if (value === "") {
-      continue;
-    }
-    if (value.length > 100) {
-      throw new AppError("VALIDATION_ERROR", "单个资料标签不能超过 100 个字符。");
-    }
-    const key = value.toLocaleLowerCase("zh-CN");
-    if (!seen.has(key)) {
-      seen.add(key);
-      normalized.push(value);
-    }
-  }
-  if (normalized.length > 100) {
-    throw new AppError("VALIDATION_ERROR", "单份资料不能超过 100 个标签。");
-  }
-  return normalized;
-}
-
-function defaultPastedTitle(): string {
-  return `粘贴资料 ${new Date().toLocaleString("zh-CN", { hour12: false })}`;
-}
-
-function materialNotFound(id: string): AppError {
-  return new AppError("MATERIAL_NOT_FOUND", "找不到指定资料。", { details: { materialId: id } });
-}
-
-function parseKnowledgeSource(value: unknown, message = "资料元数据无效。"): KnowledgeSource {
-  const parsed = knowledgeSourceSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new AppError("VALIDATION_ERROR", message, {
-      details: {
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      },
-    });
-  }
-  return parsed.data;
 }
