@@ -427,7 +427,7 @@ MyNovel.cleo/
 
 - v0.1 已完成 CLI 与项目基础、LLM Provider、多轮对话与内容保存、资料管理、Session 压缩与历史回查、Reasoning/ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool。
 - v0.1 已完成 CDM 最小 Core 和独立 TXT/Markdown 资料解析，能够输出临时 CDM、解析警告及 Node 原文字节范围。
-- v0.1 已实现资料 Chunk、FTS、本地 Embedding、sqlite-vec 精确向量检索、Exact/FTS/Vector 混合 RAG、可解释输出和 `RetrievalContext`，并已将资料列表、检索和相邻 Chunk 精读作为项目隔离的 RAG Tool 接入 LLM；正文索引和 CLI 发布验收尚未完成。
+- v0.1 已实现资料 Chunk、FTS、本地 Embedding、sqlite-vec 精确向量检索、Exact/FTS/Vector 混合 RAG、可解释输出和 `RetrievalContext`，并已将资料列表、检索和相邻 Chunk 精读作为项目隔离的 RAG Tool 接入 LLM；Windows、macOS、Linux CLI 打包已经完成，正文索引不属于 v0.1 发布门，最终手工发布验收尚未完成。
 - v0.2 Electron、React、TipTap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和阶段 Agent 工作流尚未开始；Draft 写入协议已经完成设计。
 
 ## 10. 验收标准

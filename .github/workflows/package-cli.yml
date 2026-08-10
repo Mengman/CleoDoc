@@ -1,0 +1,42 @@
+name: Package CLI
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run package:cli
+      - name: Archive Unix package
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -czf "release/cleodoc-cli-${RUNNER_OS}-${RUNNER_ARCH}.tar.gz" -C release cleodoc-cli-*
+      - name: Archive Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem release -Directory -Filter "cleodoc-cli-*" | Select-Object -First 1
+          Compress-Archive -Path $package.FullName -DestinationPath "$($package.FullName).zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cleodoc-cli-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+          if-no-files-found: error

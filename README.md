@@ -2,7 +2,7 @@
 
 CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
 
-当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext`、CLI 可解释检索和资料 RAG Tool 已经接入；正文索引和 CLI 发布验收尚未完成。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext`、CLI 可解释检索、资料 RAG Tool 和跨平台 CLI 打包已经接入；正文索引不属于 v0.1 发布门，剩余工作是手工垂直闭环与最终发布验收。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
@@ -24,6 +24,28 @@ npm run build
 ```powershell
 npm run cleo -- help
 ```
+
+## 构建 CLI 发行包
+
+在目标操作系统上运行：
+
+```powershell
+npm run package:cli
+```
+
+产物位于 `release/cleodoc-cli-<version>-<platform>-<arch>/`。发行目录包含编译后的 CLI、生产依赖、默认 YAML 配置、中英文 Q8_0 Embedding 模型，以及当前平台的 `node-llama-cpp` 和 `sqlite-vec` 原生依赖。它不会交叉编译原生模块，因此 Windows、macOS 和 Linux 包必须分别在相应系统上生成；GitHub Actions 的 `Package CLI` 工作流会在三个系统上并行生成 ZIP 或 TAR.GZ 可下载制品，Unix 制品通过 TAR 保留 `cleo` 的可执行权限。
+
+发行包仍要求目标电脑安装兼容的 Node.js。Windows 使用 `cleo.cmd`，macOS/Linux 使用 `./cleo`：
+
+```powershell
+.\release\cleodoc-cli-0.1.0-win32-x64\cleo.cmd version
+```
+
+```bash
+./release/cleodoc-cli-0.1.0-linux-x64/cleo version
+```
+
+打包过程会拒绝 Git LFS 指针或损坏的 GGUF 文件，并在完成前自动验证 CLI 启动、项目数据库、sqlite-vec 语义查询和本地 Embedding 模型加载。
 
 ## 创建项目
 

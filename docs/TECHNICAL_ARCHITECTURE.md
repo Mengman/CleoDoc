@@ -74,6 +74,14 @@ Embedding、事实抽取、Agent 生成和一致性检查都必须携带来源 H
 | 格式底层 | unified / remark、ZIP/XML/PDF 等低层解码能力 | 读取格式基础结构，不让第三方对象成为 CleoDoc 数据模型 |
 | 测试 | Vitest；v0.2 增加 React Testing Library、Playwright | v0.1 单元与 CLI 端到端；v0.2 组件与 Electron 端到端测试 |
 
+### 3.1 v0.1 CLI 发行结构
+
+v0.1 使用目标平台原生的可携带目录，不把 Node.js 运行时封装进单文件可执行程序。用户电脑仍需安装 Node.js 22.13–26；发行目录提供 Windows `cleo.cmd` 和 macOS/Linux `cleo` 启动入口。
+
+`npm run package:cli` 先编译完整模块化单体，再复制 `dist/`、`resources/` 和 README，聚合所有 workspace 的外部生产依赖，并锁定到当前已安装版本。发行目录内只安装当前平台所需的预编译原生包：Windows/Linux x64 保留 CPU 与 Vulkan 后端，macOS ARM64 保留 Metal 后端，sqlite-vec 使用相同 OS/架构的扩展。CUDA 专用包和其他架构变体不进入同一个制品，避免无关原生二进制膨胀；GPU 自动加速仍可在 Windows/Linux 通过 Vulkan、在 Apple Silicon 通过 Metal 使用。
+
+中英文 Q8_0 Embedding 模型和发行默认 YAML 属于运行时资源，必须随 CLI 包复制。打包前检查 GGUF 文件头和最小体积，防止将 Git LFS 指针作为模型发布；安装完成后使用隔离的临时 CleoDoc Home 验证 CLI 启动、项目创建、SQLite、sqlite-vec 语义检索和真实模型加载。打包不执行原生交叉编译，Windows、macOS、Linux 制品由对应 GitHub Actions runner 分别生成；Windows 上传 ZIP，macOS/Linux 上传保留启动脚本执行位的 TAR.GZ。
+
 不采用：
 
 - 独立图数据库。
@@ -1004,7 +1012,8 @@ v0.2 在此基础上增加：
 - 已实现：Embedding 步骤 7.9 的编码、级联、恢复、失败隔离测试，以及固定中英文近义语料和真实 Q8_0 CPU/GPU 模型的可重复基准命令；GPU 模式会报告实际后端和卸载层数，首份加载、首次与稳态推理、吞吐、SQLite 查询、Top-1/Top-5 Query Recall 和回溯结果记录在 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
 - 已实现：资料 Exact、trigram FTS、Vector 三路召回，项目/类型/Source Revision 过滤、RRF、范围去重、来源与字符预算、内存 RetrievalContext 和可解释 CLI；普通检索不写审计表。
 - 已实现：资料 RAG Tool 的 Application Service、项目隔离、语言提示、相邻 Chunk 精读、Catalog/Tool Loop 接入和压缩投影；检索过程不持久化，实际证据使用既有 Tool Result Message 审计。
-- 尚未实现：正文 FTS 和 CLI 发布验收。
+- 已实现：目标平台 CLI 发行目录、平台原生依赖裁剪、运行资源复制、打包冒烟验证，以及 Windows/macOS/Linux GitHub Actions 制品工作流。
+- 尚未实现：正文 FTS（不属于 v0.1 发布门）和最终手工发布验收。
 - 尚未开始：v0.2 Electron/React/Tiptap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和可恢复阶段 Agent 工作流；Draft 写入协议已经完成设计。
 
 ## 20. 已确认与延后决策

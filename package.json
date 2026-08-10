@@ -17,6 +17,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "package:cli": "npm run build && node scripts/package-cli.mjs",
     "cleo": "tsx apps/cli/src/main.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

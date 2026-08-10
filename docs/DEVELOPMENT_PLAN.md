@@ -47,9 +47,9 @@ v0.1 的核心闭环是：
 | 6c. 资料结构切片预览 | 已完成 | 可配置 Baseline 切片、标题边界、长块自然拆分、短块向上合并、纯文本 ChunkDraft、原文字节范围及单文件 JSON 检查产物 |
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
-| 7. 本地 Embedding 与向量检索 | 进行中 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索及 CLI 诊断恢复已完成；下一步执行测试与基准 |
+| 7. 本地 Embedding 与向量检索 | 已完成 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索、CLI 诊断恢复、固定语料测试及 CPU/GPU 基准 |
 | 9b. LLM 本地 RAG Tool | 已完成 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影 |
-| 10. CLI 发布 | 进行中 | 快速失败恢复测试已完成；待完成手工垂直闭环、跨平台 CLI 包和发布验收 |
+| 10. CLI 发布 | 进行中 | 快速失败恢复测试和 Windows/macOS/Linux 原生 CLI 打包已完成；待完成手工垂直闭环与最终发布验收 |
 
 ## 2. 开发原则
 
@@ -596,7 +596,9 @@ interface SearchKnowledgeInput {
 
 v0.1 的 RAG Tool 只检索导入资料；正文尚未进入统一 RAG 索引，通过 `list_project_documents` 和 `read_project_document` 受控读取。自动批准的 Tool 在 CLI 后台执行，不向用户直接展示 Tool 请求或原始 Tool Result；只有 `approval = "ask"` 的 Tool 在执行前进入用户审批。Tool Result 继续作为 Message 持久化并返回 LLM，用于当前回合决策、上下文恢复和内部审计。
 
-实施状态：快速、进程内的失败恢复测试已经完成，覆盖 Provider 超时、生成取消、无效 Tool 参数后重试、Tool 轮数上限、Embedding 查询不可用时 Exact + FTS 降级、索引过期、资料删除后的旧引用失效、文档覆盖保护、跨项目隔离，以及 Conversation、Message、Tool Result 和索引的重启恢复。自动 Tool 的请求与原始结果不再输出到普通 CLI；需要授权的写入仍显示审批界面。会重复启动真实 CLI 子进程、加载本地原生模型和等待模拟网络的长时间集成测试不进入默认 Vitest/CI；固定垂直闭环改为发布前手工验收。步骤 10 剩余工作是手工垂直闭环、跨平台打包和最终发布验收。
+实施状态：快速、进程内的失败恢复测试已经完成，覆盖 Provider 超时、生成取消、无效 Tool 参数后重试、Tool 轮数上限、Embedding 查询不可用时 Exact + FTS 降级、索引过期、资料删除后的旧引用失效、文档覆盖保护、跨项目隔离，以及 Conversation、Message、Tool Result 和索引的重启恢复。自动 Tool 的请求与原始结果不再输出到普通 CLI；需要授权的写入仍显示审批界面。会重复启动真实 CLI 子进程、加载本地原生模型和等待模拟网络的长时间集成测试不进入默认 Vitest/CI；固定垂直闭环改为发布前手工验收。
+
+跨平台 CLI 打包已经实现。`npm run package:cli` 在当前系统生成自包含生产依赖和中英文 Q8_0 模型的目标平台目录，验证 Git LFS 模型、CLI 启动、项目数据库、sqlite-vec 与真实 Embedding 推理。原生依赖不交叉编译：Windows x64 携带 CPU/Vulkan，macOS ARM64 携带 Metal，Linux x64 携带 CPU/Vulkan；其他受支持架构按当前 runner 安装的预编译包生成。GitHub Actions `Package CLI` 工作流在手工触发或推送 `v*` Tag 时分别上传 Windows、macOS、Linux 制品。步骤 10 剩余工作是手工垂直闭环与最终发布验收。
 
 v0.1 发布条件：
 
