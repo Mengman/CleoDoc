@@ -1,8 +1,8 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：TXT/Markdown、Baseline Chunk、SQLite Chunk 与资料 FTS 已实现；Embedding 与混合 RAG 尚未实现
+状态：Chunk、FTS、Embedding、混合 RAG 与 RAG Tool v2 已实现；v2 的唯一 title 契约改造待实现
 
-更新日期：2026-08-09
+更新日期：2026-08-10
 
 本文定义 CleoDoc 如何使用已经生成的纯文本 Chunk 建立本地全文、向量和混合检索，并把 LLM 使用的证据回溯到原始资料。重点回答三个问题：
 
@@ -171,7 +171,7 @@ countDocumentTokens(chunk.content) <= tokenizer.maxInputTokens
 - **索引重建**：从已有 Chunk 重建 FTS 或 Embedding，不影响身份。
 - **Chunk 重建**：重新解析原始资料并切片，可能影响身份，当前不实现自动迁移。
 
-Chunk 引用通过 `source + chunk_id` 找到数据库记录，再以该记录的 `start_offset`、`end_offset` 和 Source 的 `content_hash` 回到原始 TXT/Markdown。长期引用不能指向临时 CDM Node、FTS Row ID、Embedding 行或绝对文件路径。
+数据库内部通过 `sources.id + chunk_id` 找到 Chunk 记录，再以该记录的 `start_offset`、`end_offset` 和 Source 的 `content_hash` 回到原始 TXT/Markdown。`sources.id` 是内部关联身份，不进入 LLM Tool Result；长期引用不能指向临时 CDM Node、FTS Row ID、Embedding 行或绝对文件路径。
 
 ## 6. SQLite 与 FTS5
 
@@ -216,7 +216,7 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 - 普通中文片段优先使用 FTS5 trigram。
 - 两字人名、短别名、编号和精确专名不能只依赖 trigram，应使用标题、人名、别名等精确字段索引补充。
 - 查询必须先限制当前项目和允许的资料范围，再召回正文。
-- Tool Result 返回公开的 `source`、`chunk_id`、资料标题和纯文本 `content`，不返回临时 CDM、标题路径、字节范围、SQLite Row ID、内部 FTS Rank 或实现表名。
+- 修改后的 RAG Tool v2 返回项目内唯一的资料 `title`、稳定 `chunkId` 和纯文本 `content`，不返回内部 `sources.id`、`source` 字段、临时 CDM、标题路径、字节范围、SQLite Row ID、内部 FTS Rank 或实现表名。
 
 ## 7. Embedding 与向量存储
 
@@ -343,18 +343,17 @@ flowchart LR
 
 ### 9.1 RAG Tool Result
 
-RAG Tool 向 LLM 返回纯文本证据和允许公开的身份：
+修改后的 RAG Tool v2 向 LLM 返回纯文本证据和允许公开的资料选择信息：
 
 ```json
 {
-  "source": "src_triton_guide",
-  "chunk_id": "chk_8r2v5x9m",
-  "source_title": "Triton 编程指南",
+  "title": "Triton 编程指南",
+  "chunkId": "chk_8r2v5x9m",
   "content": "Triton 是一个用于编写高性能 GPU 内核的语言和编译器。"
 }
 ```
 
-默认不向 LLM 返回 Source Hash、原文字节范围、SQLite Row ID、FTS Rank、绝对路径、临时 CDM 或 Node ID。LLM 只需要复制 Tool 明确返回的 `source` 与 `chunk_id`，但模型仍可能填写不存在或不匹配的值，因此写入正式文档时必须重新验证。
+`title` 在一个项目内唯一，用户可以在导入后修改；CleoDoc 在 Tool 执行边界把 title 解析为内部 `sources.id`。默认不向 LLM 返回 Source UUID、Source Hash、原文字节范围、SQLite Row ID、FTS Rank、绝对路径、临时 CDM 或 Node ID。LLM 只需要复制 Tool 明确返回的 `title` 与 `chunkId`，但模型仍可能填写不存在或不匹配的值，因此后续写入正式文档时必须重新验证。
 
 ### 9.2 Reference 与原文回溯
 
@@ -363,6 +362,8 @@ RAG Tool 向 LLM 返回纯文本证据和允许公开的身份：
 - LLM Chunk 引用：同时存在 `source` 和 `chunk_id`。
 - LLM 文献引用：只有 `source`。
 - 用户文献引用：只有 `source`，用户不接触 Chunk 信息。
+
+本轮改动只定义 RAG Tool 的 LLM 可见字段，不修改 CDM `<reference>` 的 `source` 属性。Tool Result 到正式 CDM 引用的转换、资料改名后文献显示名称如何刷新，留到 Draft 自动写入和引用校验实现时确定；不得因此把内部 Source UUID重新暴露给模型。
 
 Chunk 引用的回溯链路为：
 
@@ -419,8 +420,8 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。
-- 实现 `source + chunk_id` 引用校验及 TXT/Markdown 原文回溯。
+- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool；当前代码中的 v2 仍使用 `sourceId`，下一次直接修改同一 v2 契约，改用唯一 `title + chunkId`，不保留旧字段兼容分支。
+- 数据库内部通过 `sources.id + chunk_id` 校验归属并回溯 TXT/Markdown 原文；内部 Source UUID 不对 LLM 公开。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 
 ### 后续版本

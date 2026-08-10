@@ -215,10 +215,10 @@ UNIQUE(conversation_id, sequence)
 | `source_type` | TEXT | NOT NULL、CHECK | 当前只允许 `material` |
 | `origin` | TEXT | NOT NULL、CHECK | `file` 或 `paste` |
 | `format` | TEXT | NOT NULL、CHECK | 当前只允许 `text` 或 `markdown` |
-| `title` | TEXT | NOT NULL | 用户可见的资料标题 |
-| `original_file_name` | TEXT | 可空 | 导入前的原始文件名 |
+| `title` | TEXT | NOT NULL；UNIQUE INDEX | 用户可见、可修改的资料名称；一个项目数据库内不得同名 |
+| `original_file_name` | TEXT | 可空 | 文件导入时的原始文件名；重命名 title 不修改该字段，粘贴资料为空 |
 | `languages_json` | TEXT | NOT NULL、默认 `["zh"]` | 检测出的有序语言列表 JSON；当前允许 `zh`、`en`，第一项是主语言 |
-| `relative_path` | TEXT | NOT NULL、UNIQUE | 资料正文在项目中的相对路径 |
+| `relative_path` | TEXT | NOT NULL、UNIQUE | 资料正文在项目中的相对路径；文件导入使用 `materials/<original_file_name>` |
 | `content_hash` | TEXT | NOT NULL、UNIQUE | SHA-256 内容哈希，用于去重和变化检测 |
 | `size` | INTEGER | NOT NULL、非负 | 资料正文 UTF-8 字节数 |
 | `parser_version` | TEXT | 可空 | 当前 Chunk 集合使用的解析器版本；尚未索引时为空 |
@@ -231,6 +231,10 @@ UNIQUE(conversation_id, sequence)
 | `updated_at` | TEXT | NOT NULL | 资料内容或元数据最近更新时间 |
 
 `MaterialService` 打开项目时会从文件事实源校准该表，因此它可以重建。
+
+Schema v9 已通过 `sources_title_unique` 唯一索引约束 title。全新数据库和 v8→v9 都直接创建该索引；既有 v9 数据库打开时也会补建。若既有数据库已经存在同名资料，打开时明确失败，不自动改名或合并。
+
+`sources.id` 继续作为内部主键以及 Chunk、FTS、Embedding 的关联身份。title 与物理文件名是两个独立概念：文件导入保存为 `materials/<original_file_name>`，用户修改 title 不移动文件；导入时还会单独检查原始文件名是否冲突。粘贴资料没有原始文件名，继续使用 UUID 内部文件名。
 
 ### 6.6.1 `knowledge_chunks`
 
@@ -610,7 +614,7 @@ Schema v9 已在 `knowledge_chunks` 包含 `content_hash`。它只校验单个 C
 |---|---|---|---|
 | `chunk_rowid` | INTEGER | PRIMARY KEY | 仅供 SQLite、FTS 和向量关联使用的内部整数，不对 LLM、CDM 或用户公开。 |
 | `chunk_id` | TEXT | NOT NULL UNIQUE | 公开、稳定、不透明的 Chunk 标识；用于 RAG Tool Result 和 `<reference chunk_id="...">`。 |
-| `source_id` | TEXT | NOT NULL, FOREIGN KEY | 关联现有 `sources.id`。Chunk 引用中的 `source` 必须与该字段一致。 |
+| `source_id` | TEXT | NOT NULL, FOREIGN KEY | 关联现有 `sources.id`，只用于数据库内部归属、级联和回溯；不向 LLM 公开。 |
 | `ordinal` | INTEGER | NOT NULL | Chunk 在同一 Source 中从零开始的稳定顺序。 |
 | `content` | TEXT | NOT NULL | 去除 CDM/XML 标签和 Markdown 格式后的规范化纯文本；不得拼入标题路径、来源 ID 或内部元数据。 |
 | `content_hash` | TEXT | NOT NULL | 当前 Chunk 纯文本的 SHA-256；无需读取正文即可判断向量是否过期。 |

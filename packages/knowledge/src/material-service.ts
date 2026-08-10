@@ -130,7 +130,7 @@ export class MaterialService {
       options.encoding,
       this.maxImportBytes,
     );
-    const originalFileName = path.basename(absoluteInputPath);
+    const originalFileName = path.basename(absoluteInputPath).trim();
     return await this.addContent(decoded.content, {
       origin: "file",
       format,
@@ -169,9 +169,17 @@ export class MaterialService {
 
   async rename(id: string, title: string): Promise<KnowledgeSource> {
     const current = await this.get(id);
+    const normalizedTitle = normalizeTitle(title);
+    if (normalizedTitle === current.source.title) {
+      return current.source;
+    }
+    const duplicate = this.repository.findByTitle(normalizedTitle);
+    if (duplicate !== null) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `已存在同名资料：${normalizedTitle}`);
+    }
     const updated = parseKnowledgeSource({
       ...current.source,
-      title: normalizeTitle(title),
+      title: normalizedTitle,
       updatedAt: new Date().toISOString(),
     });
     const metadata = await this.resolveMetadataPath(id);
@@ -308,6 +316,27 @@ export class MaterialService {
   ): Promise<MaterialImportResult> {
     assertMaterialContent(content, this.maxImportBytes);
     await this.synchronizeProjection();
+    const title = normalizeTitle(input.title);
+    const duplicateTitle = this.repository.findByTitle(title);
+    if (duplicateTitle !== null) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `已存在同名资料：${title}`);
+    }
+
+    const id = randomUUID();
+    const extension = input.format === "markdown" ? "md" : "txt";
+    const storedFileName = input.originalFileName ?? `${id}.${extension}`;
+    const relativePath = `materials/${storedFileName}`;
+    const sourcePath = await resolveInsideProject(this.projectRoot, relativePath);
+    const existingTarget = await lstat(sourcePath.absolutePath).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      },
+    );
+    if (existingTarget !== null) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `资料文件已经存在：${storedFileName}`);
+    }
+
     const contentHash = hashContent(content);
     const duplicate = this.repository.findByContentHash(contentHash);
     if (duplicate !== null) {
@@ -317,9 +346,6 @@ export class MaterialService {
     const parsedDocument = parseDocument({ format: input.format, content });
     const languages = detectDocumentLanguages(parsedDocument.cdm, this.languageDetection);
     const chunkedDocument = await this.indexer.chunk(languages[0]!, parsedDocument, content);
-    const id = randomUUID();
-    const extension = input.format === "markdown" ? "md" : "txt";
-    const relativePath = `materials/${id}.${extension}`;
     const now = new Date().toISOString();
     const source = parseKnowledgeSource({
       schemaVersion: KNOWLEDGE_SOURCE_SCHEMA_VERSION,
@@ -328,7 +354,7 @@ export class MaterialService {
       type: "material",
       origin: input.origin,
       format: input.format,
-      title: normalizeTitle(input.title),
+      title,
       originalFileName: input.originalFileName,
       languages,
       relativePath,
@@ -337,7 +363,6 @@ export class MaterialService {
       createdAt: now,
       updatedAt: now,
     });
-    const sourcePath = await resolveInsideProject(this.projectRoot, source.relativePath);
     const metadataPath = await this.resolveMetadataPath(id);
     const derivedDocumentPath = await this.resolveDerivedDocumentPath(id);
     const derivedChunksPath = await this.resolveDerivedChunksPath(id);
@@ -369,6 +394,7 @@ export class MaterialService {
     const entries = await readdir(metadataDirectory.absolutePath, { withFileTypes: true });
     const sources: KnowledgeSource[] = [];
     const hashes = new Set<string>();
+    const titles = new Set<string>();
 
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) {
@@ -400,7 +426,11 @@ export class MaterialService {
       if (hashes.has(source.contentHash)) {
         throw new AppError("MATERIAL_ALREADY_EXISTS", `存在重复的资料元数据：${source.title}`);
       }
+      if (titles.has(source.title)) {
+        throw new AppError("MATERIAL_ALREADY_EXISTS", `存在同名的资料元数据：${source.title}`);
+      }
       hashes.add(source.contentHash);
+      titles.add(source.title);
       sources.push(source);
     }
     return sources;

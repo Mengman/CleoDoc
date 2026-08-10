@@ -146,6 +146,7 @@ export class ProjectDatabase {
     }
     if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) {
       this.removeObsoleteSourceTagsColumn();
+      this.ensureSourceTitleUniqueIndex();
       return;
     }
 
@@ -210,6 +211,20 @@ export class ProjectDatabase {
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  private ensureSourceTitleUniqueIndex(): void {
+    try {
+      this.database.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS sources_title_unique ON sources(title)",
+      );
+    } catch (error) {
+      throw new AppError(
+        "DATABASE_ERROR",
+        "项目数据库中存在同名资料，无法建立资料名称唯一约束。请先处理重复资料或重建开发期数据库。",
+        { cause: error },
+      );
     }
   }
 

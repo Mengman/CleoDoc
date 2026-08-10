@@ -350,6 +350,12 @@ async function createTemporaryProject(prefix: string): Promise<string> {
 function v8SchemaSql(): string {
   return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
     .replace(
+      `  CREATE UNIQUE INDEX sources_title_unique
+    ON sources(title);
+`,
+      "",
+    )
+    .replace(
       `    title TEXT NOT NULL,\n`,
       `    title TEXT NOT NULL,\n    source_label TEXT,\n    tags_json TEXT NOT NULL,\n`,
     )

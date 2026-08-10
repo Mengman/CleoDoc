@@ -12,5 +12,8 @@ export const SCHEMA_V8_TO_V9_SQL = `
   ALTER TABLE sources DROP COLUMN source_label;
   ALTER TABLE sources DROP COLUMN tags_json;
 
+  CREATE UNIQUE INDEX sources_title_unique
+    ON sources(title);
+
   ${KNOWLEDGE_INDEX_SCHEMA_SQL}
 `;

@@ -8,7 +8,7 @@ import {
 } from "../../contracts/src/index.js";
 
 export function materialFormatFromPath(filePath: string): KnowledgeSource["format"] {
-  const extension = path.extname(filePath).toLowerCase();
+  const extension = path.extname(path.basename(filePath).trim()).toLowerCase();
   if (extension === ".txt") {
     return "text";
   }

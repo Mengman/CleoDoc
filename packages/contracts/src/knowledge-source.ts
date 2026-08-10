@@ -19,7 +19,7 @@ export const knowledgeSourceSchema = z.object({
     .max(2)
     .refine((languages) => new Set(languages).size === languages.length)
     .default(["zh"]),
-  relativePath: z.string().regex(/^materials\/[0-9a-f-]+\.(txt|md)$/),
+  relativePath: z.string().regex(/^materials\/[^/\\]+\.(txt|md|markdown)$/i),
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().nonnegative(),
   createdAt: z.iso.datetime(),

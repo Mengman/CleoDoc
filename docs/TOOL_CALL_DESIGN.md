@@ -241,7 +241,7 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 - `contentHash` 可继续用于增量索引、缓存失效、数据校验和内部版本比较，但不进入模型上下文、Tool 定义、Tool Result 或压缩投影。
 - 文档使用可理解且唯一的项目相对路径作为引用，不向模型返回文档数据库 ID。
 - `message_rowid`、Session 内部 Sequence、FTS Rank 等数据库实现字段不向模型返回。
-- 只有后续 Tool 或正式文档引用必须使用的稳定公开引用才可以返回。当前已实现的是不可变历史消息的 `messageId`；RAG Tool 设计允许返回 CDM Reference 使用的 `sourceId + chunkId`。SQLite Row ID 始终不得暴露。
+- 只有后续 Tool 或正式文档引用必须使用的稳定公开引用才可以返回。当前已实现的是不可变历史消息的 `messageId` 和稳定 `chunkId`；目标 RAG Tool 使用唯一资料 title 选择 Source，内部 `sources.id` 不向模型暴露。SQLite Row ID 始终不得暴露。
 - LLM 需要判断资源是否更新时返回 `updatedAt`。底层仍可使用 Hash 和 Revision 保证可靠性，不把一致性责任交给模型。
 
 ## 4. Tool 清单与披露等级
@@ -258,9 +258,9 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `SetProjectInstructionsTool` | `set_project_instructions` | `catalog` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `catalog` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `catalog` | `auto` | 已实现 |
-| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | 已实现 |
-| `ListMaterialsTool` | `list_materials` | `full` | `auto` | 已实现 |
-| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | 已实现 |
+| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | v2 已实现；title 契约待修改 |
+| `ListMaterialsTool` | `list_materials` | `full` | `auto` | v2 已实现；title 契约待修改 |
+| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | v2 已实现；title 契约待修改 |
 | `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
 `write_draft` 尚未成为已实现的 LLM Tool，不计入本清单。三个 RAG Tool 已接入 `ProjectToolCatalog`、Conversation 级 Runtime 和 Tool Loop。
@@ -700,9 +700,9 @@ Output Schema：
 
 ### 8.1 设计目标与公共约束
 
-本地 RAG Tool 将已经实现的资料 Exact、FTS、Vector 混合检索接入 LLM Tool Loop。当前只检索导入资料；正文尚未进入同一索引，因此 `search_knowledge` v2 不提前接受无效的 `scope` 参数。正文索引实现后再评审是否扩展该 Tool 并提升版本。
+本地 RAG Tool 将已经实现的资料 Exact、FTS、Vector 混合检索接入 LLM Tool Loop。当前只检索导入资料；正文尚未进入同一索引，因此修改后的 `search_knowledge` v2 仍不接受无效的 `scope` 参数。正文索引实现后再评审是否扩展该 Tool 并提升版本。
 
-三个 RAG Tool 当前均为 v2。v2 将容易与资料标题混淆的 `source` 统一改名为 `sourceId`，并使用 UUID Schema 校验；不再接受 v1 的 `source` 字段。`list_materials` 返回 `sourceId`，`search_knowledge` 原样接收并返回它，`read_material_context` 再原样接收搜索结果中的 `sourceId`。
+三个 RAG Tool 当前代码均为 v2，仍向模型暴露 UUID `sourceId`。由于该契约尚未进入实际项目使用，本次直接修改 v2，不创建 v3，也不保留旧字段兼容分支：`list_materials` 只返回项目内唯一的 `title`；`search_knowledge` 使用可选 `title` 限定资料；`read_material_context` 使用同一搜索结果中的 `title + chunkId`。修改后的 v2 不再向模型返回或接收 `sourceId`、`source` 等 Source 身份字段，`sources.id` 仅在应用内部关联数据库和索引。
 
 LLM 可见 JSON 优先保证小参数模型也能稳定理解：字段尽量少、命名直接、层次浅，不因为 CleoDoc 内部已经拥有某项诊断数据就默认返回。内部 `HybridRetrievalResult`、CLI Explain 和安全 Debug 可以保留完整运行诊断，但不得直接作为 Tool Result。
 
@@ -729,7 +729,7 @@ Input 字段：
 |---|---|---|
 | `query` | string | 必填；1～500 字符；必须使用目标资料的语言 |
 | `limit` | integer | 默认 5；1～10 |
-| `sourceId` | UUID string | 可选；必须原样复制 `list_materials` 返回值，不能使用资料标题 |
+| `title` | string | 可选；必须原样复制 `list_materials` 返回的唯一资料名称 |
 
 不提供 `language` 参数。CleoDoc 根据 query 的实际语言选择 Embedding 模型，避免模型声明英文却提交中文 query。
 
@@ -739,7 +739,7 @@ Input 字段：
 {
   "query": "What is Triton used for?",
   "limit": 5,
-  "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c"
+  "title": "Triton Programming Guide"
 }
 ```
 
@@ -751,12 +751,11 @@ Output 字段：
 | `sourceLanguages` | Array | 当前检索范围内资料的语言集合 |
 | `languageWarning` | string 或 null | Query 与资料语言明确不匹配时的提示 |
 | `results` | Array | 已按最终相关性排序的证据 |
-| `results[].sourceId` | UUID string | 资料公开引用 |
 | `results[].chunkId` | string | Chunk 公开引用 |
 | `results[].title` | string | 资料显示名称 |
 | `results[].content` | string | Chunk 纯文本内容 |
 
-`sourceId` 与 `chunkId` 是 CDM `<reference>` 使用的稳定公开标识，不是数据库 Row ID。当前 `sourceId` 复用 `KnowledgeSource.id` 的 UUID；`title` 只是显示名称，不能代替 `sourceId`。结果数组顺序已经表示最终相关性，LLM 不需要内部排名字段。
+`title` 是项目内唯一、用户可修改的资料名称，`chunkId` 是稳定、不透明的 Chunk 引用。模型只按 title 选择资料；CleoDoc 在内部把 title 解析为 `sources.id`。结果数组顺序已经表示最终相关性，LLM 不需要内部排名字段。title 改名后，历史 Tool Result 保持不变；模型使用旧名称失败时重新调用 `list_materials`。
 
 成功输出示例：
 
@@ -770,7 +769,6 @@ Output 字段：
     "languageWarning": null,
     "results": [
       {
-        "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
         "chunkId": "chk_8r2v5x9m",
         "title": "Triton Programming Guide",
         "content": "Triton is a language and compiler for writing efficient GPU kernels."
@@ -782,7 +780,7 @@ Output 字段：
 
 ### 8.3 检索语言判断
 
-`queryLanguage` 复用当前 Query 主语言检测逻辑，只返回 `zh` 或 `en`，并据此选择 Embedding 模型。`sourceLanguages` 来自当前项目、`material` 类型、`ready` 状态且满足可选 `sourceId` 限制的资料语言并集；指定 `sourceId` 时就是该资料的语言列表。
+`queryLanguage` 复用当前 Query 主语言检测逻辑，只返回 `zh` 或 `en`，并据此选择 Embedding 模型。`sourceLanguages` 来自当前项目、`material` 类型、`ready` 状态且满足可选 `title` 限制的资料语言并集；指定 title 时就是该资料的语言列表。
 
 只在资料语言集合非空、且不包含 Query 主语言时生成非阻断警告。
 
@@ -809,7 +807,7 @@ Source 语言目前是资料级信息，不精确到每个 Chunk。Chunk 级语�
 
 用途描述：
 
-> 列出当前项目导入资料的标题、格式、语言、公开 `sourceId` 和索引状态。需要确认有哪些资料、资料属于什么格式、使用什么语言或者选择 `search_knowledge.sourceId` 时调用。本 Tool 不读取资料正文。
+> 列出当前项目导入资料的唯一 title、格式、语言和索引状态。需要确认有哪些资料、资料属于什么格式、使用什么语言或者选择 `search_knowledge.title` 时调用。本 Tool 不读取资料正文。
 
 Input 字段：
 
@@ -832,7 +830,6 @@ Output 字段：
 | 路径 | 类型 | 说明 |
 |---|---|---|
 | `materials` | Array | 当前页资料摘要 |
-| `materials[].sourceId` | UUID string | 后续 RAG Tool 使用的资料引用 |
 | `materials[].title` | string | 资料显示名称 |
 | `materials[].format` | `text` 或 `markdown` | 当前支持的原始资料格式 |
 | `materials[].languages` | Array | 资料包含的语言 |
@@ -849,7 +846,6 @@ Output 字段：
   "data": {
     "materials": [
       {
-        "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
         "title": "Triton Programming Guide",
         "format": "markdown",
         "languages": ["en"],
@@ -862,19 +858,19 @@ Output 字段：
 }
 ```
 
-`sourceId` 是资料 UUID，供后续 Tool 原样引用；`title` 是面向用户的显示名称，二者不得互换。当前资料还没有 Tag 功能，因此不返回 `tags`；`updatedAt` 对模型的检索决策没有直接帮助，也不返回。保留 `format`，以支持“查询 PDF 中的信息”一类按资料格式表达的用户要求。v0.1 只允许 `text` 和 `markdown`；真正支持 PDF、DOCX 等格式时扩展枚举并提升 Tool 版本，不能提前让模型误以为已经支持。
+`title` 同时是面向用户的显示名称和 RAG Tool 的资料选择键。它在当前项目内唯一，但允许用户重命名；内部 Source UUID 不进入 Tool Result。当前资料还没有 Tag 功能，因此不返回 `tags`；`updatedAt` 对模型的检索决策没有直接帮助，也不返回。保留 `format`，以支持“查询 PDF 中的信息”一类按资料格式表达的用户要求。v0.1 只允许 `text` 和 `markdown`；真正支持 PDF、DOCX 等格式时扩展枚举并提升 Tool 版本，不能提前让模型误以为已经支持。
 
 ### 8.5 read_material_context
 
 用途描述：
 
-> 根据 `search_knowledge` 返回的 `sourceId` 和 `chunkId`，读取目标 Chunk 以及有限的相邻 Chunk。`sourceId` 必须原样传递，不能使用资料 `title`。只在搜索结果缺少必要前后文时调用。返回结果始终包含指定的目标 Chunk。
+> 根据 `search_knowledge` 返回的 `title` 和 `chunkId`，读取目标 Chunk 以及有限的相邻 Chunk。两者必须来自同一搜索结果。只在搜索结果缺少必要前后文时调用。返回结果始终包含指定的目标 Chunk。
 
 Input 字段：
 
 | 字段 | 类型 | 默认值/限制 |
 |---|---|---|
-| `sourceId` | UUID string | 必填；来自 `search_knowledge` 的同一结果项 |
+| `title` | string | 必填；来自 `search_knowledge` 的同一结果项 |
 | `chunkId` | string | 必填；来自 `search_knowledge` 的同一结果项 |
 | `before` | integer | 默认 1；0～3 |
 | `after` | integer | 默认 1；0～3 |
@@ -883,7 +879,7 @@ Input 字段：
 
 ```json
 {
-  "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
+  "title": "Triton Programming Guide",
   "chunkId": "chk_8r2v5x9m",
   "before": 1,
   "after": 1
@@ -896,7 +892,6 @@ Output 字段：
 
 | 路径 | 类型 | 说明 |
 |---|---|---|
-| `sourceId` | UUID string | 目标资料引用，只返回一次 |
 | `title` | string | 资料显示名称 |
 | `targetChunkId` | string | 请求的目标 Chunk |
 | `chunks` | Array | 按原文顺序排列的目标及相邻 Chunk |
@@ -910,7 +905,6 @@ Output 字段：
   "ok": true,
   "tool": { "name": "read_material_context", "version": 2 },
   "data": {
-    "sourceId": "7959297b-9e65-4718-a780-8b55bcb6136c",
     "title": "Triton Programming Guide",
     "targetChunkId": "chk_8r2v5x9m",
     "chunks": [
@@ -931,7 +925,7 @@ Output 字段：
 }
 ```
 
-`chunks` 固定按照原文顺序返回：前置 Chunk、目标 Chunk、后置 Chunk；不得按照检索相关性重新排序。Service 必须校验 Source 属于当前项目且处于 `ready` 状态、目标 Chunk 存在并属于该 Source、相邻读取没有超过限制。
+`chunks` 固定按照原文顺序返回：前置 Chunk、目标 Chunk、后置 Chunk；不得按照检索相关性重新排序。Service 必须把 title 解析为当前项目内的 Source，校验其处于 `ready` 状态、目标 Chunk 存在并属于该 Source、相邻读取没有超过限制。
 
 ### 8.6 多语言调用流程
 
@@ -966,7 +960,7 @@ Session 压缩不得包含资料正文或 Chunk Content。允许的压缩投影�
 - LLM 可以主动检索当前项目资料，并在同一任务中执行多轮及多语言检索。
 - 中文对话搜索英文资料时，模型使用英文 query；明显不匹配时得到简单的非阻断提示。
 - `read_material_context` 始终包含目标 Chunk，相邻 Chunk 保持原文顺序。
-- 所有返回的 `sourceId + chunkId` 都能回溯到当前项目资料。
+- 所有返回的 `title + chunkId` 都能在当前项目内解析并回溯到资料原件。
 - Tool 不泄露 Hash、Row ID、绝对路径和内部检索算法信息。
 - Embedding 不可用时仍可通过 Exact + FTS 返回结果。
 - Session 压缩不包含证据正文，普通检索不产生额外数据库审计记录。
@@ -1062,7 +1056,7 @@ Catalog v2 不在 Output 中重复返回模型刚刚提交的 `pageSize`。
       {
         "name": "list_materials",
         "version": 2,
-        "description": "列出当前项目导入资料。sourceId 是供 search_knowledge 使用的资料 UUID，title 只是显示名称；不读取资料正文。"
+        "description": "列出当前项目导入资料。title 是供 search_knowledge 使用的项目内唯一资料名称；不读取资料正文。"
       }
     ],
     "page": 1,
@@ -1263,7 +1257,7 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 | `MATERIAL_NOT_FOUND` | RAG 搜索/上下文读取 | 调用 `list_materials` 重新选择资料 |
 | `MATERIAL_NOT_INDEXED` | RAG 搜索/上下文读取 | 等待索引完成或要求用户重建索引 |
 | `KNOWLEDGE_CHUNK_NOT_FOUND` | RAG 上下文读取 | 重新调用 `search_knowledge` |
-| `CHUNK_SOURCE_MISMATCH` | RAG 上下文读取 | 使用同一搜索结果中的 `sourceId + chunkId` |
+| `CHUNK_SOURCE_MISMATCH` | RAG 上下文读取 | 使用同一搜索结果中的 `title + chunkId` |
 | `TOOL_EXECUTION_FAILED` | 意外内部故障 | 不自动重试有副作用 Tool，向用户报告 |
 
 项目指令数据库 Revision 冲突由 Runtime 和 Repository 内部处理，不作为要求 LLM 恢复的 Tool 错误。

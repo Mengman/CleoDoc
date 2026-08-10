@@ -51,6 +51,16 @@ export class MaterialRepository {
     return row === undefined ? null : mapSource(row);
   }
 
+  findByTitle(title: string): KnowledgeSource | null {
+    const row = this.projectDatabase.read(
+      (database) =>
+        database
+          .prepare("SELECT * FROM sources WHERE title = ? AND source_type = 'material'")
+          .get(title) as SourceRow | undefined,
+    );
+    return row === undefined ? null : mapSource(row);
+  }
+
   async upsert(source: KnowledgeSource): Promise<void> {
     await this.projectDatabase.write((database) => {
       database

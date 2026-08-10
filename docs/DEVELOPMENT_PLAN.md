@@ -1,7 +1,7 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 步骤 1–6d、7.1–7.5 已完成，正在实施本地 Embedding
-> 日期：2026-08-09
+> 状态：实施中；v0.1 核心闭环已完成，正在进行最终发布验收，并准备 RAG Tool v2 的 title 契约改造
+> 日期：2026-08-10
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
 
@@ -35,7 +35,7 @@ v0.1 的核心闭环是：
 | 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、完整 Schema v9 基线、唯一的 v8→v9 前向迁移、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
-| 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、文件与元数据事实源、SQLite 投影、哈希去重、资料 CRUD |
+| 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、原文件名与格式保存、title 唯一性、文件与元数据事实源、SQLite 投影、哈希去重和资料 CRUD |
 | 5.5 会话上下文管理 | 已完成 | Session 压缩、数据库项目指令注入、历史回查 Tool、分层压缩和可编辑草稿提交门 |
 | 5.6 Reasoning 流式体验与调用审计 | 已完成 | Reasoning 实时展示与持久化、DeepSeek Tool Loop 回传、逐次 ModelCall 审计、Session 必填的不可变 Message 和 External Content 历史 FTS |
 | 5.7 数据库原生项目指令 | 已完成 | 追加式版本、乐观并发、恢复、受控 Tool、CLI 查看及无文件快照的 Session Schema |
@@ -48,7 +48,7 @@ v0.1 的核心闭环是：
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 7. 本地 Embedding 与向量检索 | 已完成 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索、CLI 诊断恢复、固定语料测试及 CPU/GPU 基准 |
-| 9b. LLM 本地 RAG Tool | 已完成 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影 |
+| 9b. LLM 本地 RAG Tool | v2 基础完成；契约待修改 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影；待在 v2 中以唯一 title 替换 LLM 可见 sourceId |
 | 10. CLI 发布 | 进行中 | 快速失败恢复测试和 Windows/macOS/Linux 原生 CLI 打包已完成；待完成手工垂直闭环与最终发布验收 |
 
 ## 2. 开发原则
@@ -205,15 +205,19 @@ cleo document save-last <path>
 
 ### 步骤 5：资料管理
 
-状态：已完成。资料正文统一为 UTF-8 后保存于 `materials/<id>.txt|md`，元数据保存于 `sources/metadata/<id>.json`，SQLite `sources` 表作为可重建投影。文件导入支持 UTF-8、GB2312、GBK 和 GB18030，单份资料不超过 10 MiB。
+状态：已完成。文件资料保持文件名主体和 TXT/Markdown 格式，文件名前后空白会被去除，正文统一为 UTF-8 后保存于 `materials/<original-file-name>`；粘贴资料保存于 `materials/<id>.txt|md`。元数据保存于 `sources/metadata/<id>.json`，SQLite `sources` 表作为可重建投影。文件导入支持 UTF-8、GB2312、GBK 和 GB18030，单份资料不超过 10 MiB。
+
+一个项目内的资料 title 由业务检查和 SQLite 唯一索引共同保证唯一。导入和重命名执行同一规则；用户修改 title 只更新元数据，不移动原文件、不重建索引。
 
 工作内容：
 
 - 建立 `MaterialService`。
 - 支持粘贴文本、TXT 和 Markdown。
-- 保存标题、来源、标签、路径、时间和内容哈希。
+- 保存 title、来源、原始文件名、路径、时间、语言和内容哈希。
 - 支持添加、查看、列表、重命名和删除。
 - 使用内容哈希检测重复导入。
+- 为 `sources.title` 增加项目内唯一约束，并在导入、重命名时提前返回可理解的重名错误。
+- 文件导入不改名、不转换 TXT/Markdown 格式、不覆盖 `materials/` 中的同名文件。
 
 命令：
 
@@ -232,6 +236,7 @@ cleo material remove <material-id>
 - 重复导入不会生成重复资料。
 - 删除资料后不再进入当前检索。
 - 原始文件、资料元数据和 SQLite 投影保持一致。
+- 用户重命名资料后，原始文件名和索引内容不发生变化。
 
 ### 步骤 5.5：会话上下文管理
 
@@ -562,13 +567,15 @@ cleo search <query> --hybrid --explain
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
 
-实施状态：已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service；三个 RAG Tool v2 统一使用 UUID 格式的 `sourceId`，模型必须从 `list_materials` 到 `search_knowledge`、再到 `read_material_context` 原样传递，不能使用资料标题代替。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，跨项目 `sourceId` 对模型表现为当前项目中不存在。普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
+实施状态：基础闭环已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service；当前三个 RAG Tool v2 仍统一使用 UUID 格式的 `sourceId`。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
+
+由于当前 v2 尚未进入实际项目使用，本次直接修改三个 Tool 的 v2 契约，不增加 v3：`list_materials` 返回唯一 title；`search_knowledge` 使用可选 title 过滤；`read_material_context` 使用同一结果中的 `title + chunkId`。Tool 不再接收或返回 `sourceId`、`source`，Service 在项目内部把 title 解析为 `sources.id`。该改造依赖资料 title 唯一约束，必须在约束完成后实施。
 
 ```ts
 interface SearchKnowledgeInput {
   query: string;
   limit?: number;
-  source?: string;
+  title?: string;
 }
 ```
 
@@ -579,6 +586,7 @@ interface SearchKnowledgeInput {
 - Tool 不能读取其他项目或任意本地文件。
 - 所有发送给远程模型的资料片段可审计。
 - 本地搜索在断网状态下仍可独立使用。
+- LLM 无需接触或复制 Source UUID，能够使用 `list_materials` 返回的唯一 title 完成检索和相邻 Chunk 读取。
 
 ### 步骤 10：CLI 垂直闭环与发布
 
@@ -643,6 +651,7 @@ v0.2 只消费 v0.1 已验证的 Application Service。
 
 - 三栏布局。
 - 项目树、资料中心、正文阅读和主笔对话。
+- 资料中心支持单文件和文件夹导入。文件夹导入逐项处理：无冲突文件正常导入，同名 title、同名目标文件或格式不支持的文件单独列出失败原因，不回滚其他成功项，也不自动改名。
 - 提供独立的项目指令页面，从 SQLite 读取当前 Revision，并使用与 CLI 相同的冲突检查和恢复服务。
 - 将 CLI 命令映射为可视化操作。
 - 展示流式生成、Tool Call、证据和 RetrievalContext。

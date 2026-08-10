@@ -133,6 +133,8 @@ export const CURRENT_SCHEMA_SQL = `
     ON sources(project_id, updated_at DESC);
   CREATE INDEX sources_project_content_hash
     ON sources(project_id, content_hash);
+  CREATE UNIQUE INDEX sources_title_unique
+    ON sources(title);
 
   ${KNOWLEDGE_INDEX_SCHEMA_SQL}
 

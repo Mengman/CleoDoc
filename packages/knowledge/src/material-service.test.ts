@@ -45,6 +45,7 @@ describe("MaterialService", () => {
         format: "markdown",
         title: "铁路照明资料",
         originalFileName: "民国铁路.md",
+        relativePath: "materials/民国铁路.md",
       });
       expect(
         await readFile(path.join(project.root, imported.source.relativePath), "utf8"),

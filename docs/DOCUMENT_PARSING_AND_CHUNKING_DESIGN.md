@@ -1,8 +1,8 @@
 # CleoDoc 资料解析与切片设计
 
-状态：TXT/Markdown 解析、主语言模型 Tokenizer 驱动的 Baseline 切片、Chunk 入库和资料 FTS 已实现
+状态：TXT/Markdown 解析、原文件名保存、title 唯一性、Tokenizer 切片、Chunk/FTS/Embedding 已实现
 
-更新日期：2026-08-09
+更新日期：2026-08-10
 
 本文定义导入资料从原始文件到纯文本 Chunk 的处理规则。CDM 的正式文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，Chunk 的数据库结构见[数据库设计](./DATABASE_DESIGN.md)，FTS、Embedding、混合检索和引用使用见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
@@ -36,12 +36,22 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 
 ### 2.1 原始资料
 
-导入后位于 `materials/` 的 UTF-8 TXT/Markdown 副本是项目事实源。用户选择的外部文件不会被修改，但 CleoDoc 不依赖其原路径继续存在：
+导入后位于 `materials/` 的项目副本是资料事实源。用户选择的外部文件不会被修改，CleoDoc 也不依赖其原路径继续存在。
+
+文件导入采用以下最小规则：
+
+- 保留用户文件的文件名主体和扩展名，但去除文件名前后的空白字符；不改成 Source UUID，也不自动增加序号。
+- 保持资料格式不变：TXT 仍保存为 TXT，Markdown 仍保存为 Markdown，不在两种格式之间转换。
+- 文本编码继续在导入边界统一为 UTF-8，以复用现有解析、字节范围和索引链路；编码规范化不视为格式转换。
+- 文件副本直接保存为 `materials/<original-file-name>`。目标文件名已经存在时拒绝导入，不覆盖、不自动改名。
+- 粘贴资料没有用户原始文件名，可以继续使用系统生成的内部文件名。
 
 - 解析、切片或索引失败不能修改原件。
 - 数据库和索引损坏后可以重新读取原件生成。
 - 项目副本是否发生变化，以其 UTF-8 字节的 SHA-256 为准。
 - 修改时间和文件大小只能用于快速检查，不能代替内容 Hash。
+
+当前文件导入已经按以上规则保存原格式、原始文件名和 UTF-8 项目副本；粘贴资料仍保存为 `materials/<source-id>.txt|md`。
 
 ### 2.2 临时 CDM
 
@@ -82,6 +92,56 @@ Chunk 是 SQLite 中的纯文本检索投影，不是 CDM 文档，也不是新�
 - `parserVersion`、`chunkerVersion`、原始 UTF-8 字节长度和实际切片配置。
 - 每个 ChunkDraft 的 `ordinal`、纯文本 `content`、`characterCount`、`startOffset`、`endOffset`。
 - 仅供 Debug 的 `blockTypes`；它不等于未来数据库字段契约。
+
+### 2.4 资料名称、重命名与导入冲突
+
+`sources.id` 继续作为数据库、Chunk、FTS 和 Embedding 使用的内部稳定身份。用户和 LLM 使用资料的 `title`；一个项目内不允许存在同名 title。
+
+名称规则保持简单：
+
+- 默认 title 是 trim 后的原始文件名去掉扩展名后的部分。
+- title 进入校验前去除首尾空白，长度保持 1～200 字符。
+- v0.1 不增加模糊匹配、自动编号、自动改名或冲突合并。
+- 用户可以在导入后修改 title；新 title 与现有资料冲突时拒绝修改。
+- 修改 title 只更新 Source 元数据和 SQLite 投影，不移动或重命名 `materials/` 中的文件，也不触发重新解析、切片或 Embedding。
+
+单文件导入必须分别检查：
+
+1. 规范化后的 title 是否已经存在。
+2. `materials/` 中是否已经存在同名目标文件。
+3. 任一检查失败都拒绝本次导入，并给出明确冲突名称；不得覆盖现有文件。
+
+v0.2 GUI 支持从文件夹导入时采用部分成功，不引入批次事务：
+
+1. 逐个检查文件格式、title 和目标文件名。
+2. 无冲突文件正常导入。
+3. 冲突或格式不支持的文件单独记录失败原因。
+4. 一个文件失败不回滚已经成功导入的其他文件。
+5. 完成后向用户分别展示成功列表和失败列表；用户自行修改冲突名称后重新导入。
+
+文件夹导入不自动解决冲突，不创建 Source ID 子目录，也不改变任何用户文件名。
+
+### 2.5 最小实现边界与验收
+
+这次改造只修改资料命名、项目副本保存和 RAG Tool 的公开选择方式，不重做解析器、Chunk、Embedding 或引用系统：
+
+1. `KnowledgeSource.id` 和 `sources.id` 保持不变，继续承担内部关联。
+2. Source 元数据 Schema 增加 title 唯一语义；SQLite `sources.title` 增加唯一约束。
+3. `MaterialService` 在文件写入前检查 title 和目标文件名冲突，成功后仍按现有安全写入、元数据保存和 SQLite 投影流程提交。
+4. `rename` 使用同一 title 规则，只修改 Source 元数据和数据库投影。
+5. 三个 RAG Tool 保持 v2，直接将 LLM 可见的 Source 选择参数改为 title；Application Service 在内部解析为 Source ID。旧 v2 尚未投入实际使用，不保留其 `sourceId` 兼容分支。
+6. v0.2 文件夹导入复用单文件导入，不建立另一套摄取逻辑，只负责逐项调用并汇总成功与失败。
+
+实现状态：第 1～4 项已经完成；第 5 项 RAG Tool v2 契约修改属于后续任务；第 6 项在 v0.2 GUI 阶段实现。
+
+验收标准：
+
+- 导入 `notes.txt` 后，项目副本仍名为 `notes.txt`，内容格式仍是纯文本；导入 `notes.md` 后仍是 Markdown。
+- GB2312、GBK 或 GB18030 文本仍可导入，项目副本统一为 UTF-8，解析范围和 Hash 继续基于该副本。
+- 相同 title 的第二份资料被拒绝；重命名为已有 title 也被拒绝，既有资料不受影响。
+- 修改 title 后，原始文件名、内容 Hash、Chunk、FTS 和 Embedding 不变化。
+- `list_materials`、`search_knowledge` 和 `read_material_context` 的 v2 JSON 中不出现 Source UUID 或 `source` 字段。
+- 文件夹导入遇到冲突时，其他合法文件仍成功，并能分别查看成功项和失败原因。
 
 ## 3. Source Hash 与更新检测
 
