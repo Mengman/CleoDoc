@@ -2,7 +2,7 @@
 
 CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
 
-当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext` 和 CLI 可解释检索已经接入；正文索引和 RAG Tool 尚未实现。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext`、CLI 可解释检索和资料 RAG Tool 已经接入；正文索引和 CLI 发布验收尚未完成。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 

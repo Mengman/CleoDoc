@@ -585,23 +585,26 @@ interface SearchKnowledgeInput {
 
 1. 创建小说项目。
 2. 添加人物笔记和背景资料。
-3. 保存一章已有正文。
-4. 与 LLM 沟通下一章要求。
-5. LLM 调用 RAG 查询人物资料和上一章正文。
-6. LLM 生成新章节。
-7. 用户查看本次引用证据。
-8. 保存为 `manuscript/chapter-002.md`。
-9. 重启 CLI。
-10. 基于已保存章节继续创作。
+3. 为导入资料建立全文和向量索引。
+4. 保存一章已有正文。
+5. 与 LLM 沟通下一章要求。
+6. LLM 调用 RAG Tool 查询人物笔记和背景资料。
+7. LLM 调用文档 Tool 读取上一章正文。
+8. LLM 生成新章节。
+9. 用户明确保存为 `manuscript/chapter-002.md`。
+10. 重启 CLI、恢复原 Conversation，并基于已保存章节、资料和对话上下文继续创作。
+
+v0.1 的 RAG Tool 只检索导入资料；正文尚未进入统一 RAG 索引，通过 `list_project_documents` 和 `read_project_document` 受控读取。自动批准的 Tool 在 CLI 后台执行，不向用户直接展示 Tool 请求或原始 Tool Result；只有 `approval = "ask"` 的 Tool 在执行前进入用户审批。Tool Result 继续作为 Message 持久化并返回 LLM，用于当前回合决策、上下文恢复和内部审计。
 
 v0.1 发布条件：
 
 - LLM 对话、流式输出和取消稳定可用。
 - 生成结果能够安全保存和重新读取。
 - 资料 CRUD 完整可用。
-- 正文和资料支持全文、语义和混合检索。
+- 导入资料支持全文、语义和混合检索。
+- 正文支持通过文档 Tool 安全列出和读取；正文 RAG 索引不属于 v0.1 发布门。
 - LLM 能调用本地 RAG Tool。
-- RetrievalContext 可以还原所有发送给模型的检索资料。
+- 已持久化的版本化 Tool Result Message 可以还原实际发送给模型的检索资料，不要求 CLI 直接展示原始结果。
 - 项目重启后数据、索引和对话上下文保持一致。
 - 没有可复现的跨项目检索泄漏或项目文件损坏。
 - Windows、macOS 和 Linux 提供可运行 CLI 包。
