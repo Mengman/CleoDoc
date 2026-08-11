@@ -1,9 +1,8 @@
 # CleoDoc 会话上下文压缩与历史回查技术设计
 
-> 实现状态：完整 Schema v10 包含会话压缩结构；`session-compaction-v7` Prompt 与 `session-compaction-v8-turn-segmentation` 编排已落地，当前使用单一 Markdown 摘要、Tool 白名单投影、最低完整性校验、完整拼接 Debug 日志和逐次 ModelCall 审计
-> 开发进度来源：[DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 的 v0.1 步骤 5.5
-> 日期：2026-08-03
-> 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [开发计划](./DEVELOPMENT_PLAN.md)
+> v0.1 基线：`session-compaction-v7` Markdown Prompt、`session-compaction-v8-turn-segmentation` 编排、Tool 白名单投影、完整流式拼接日志和逐次 ModelCall 审计
+>
+> 相关文档：[产品需求](./PRD.md) · [技术架构](./TECHNICAL_ARCHITECTURE.md) · [数据库设计](./DATABASE_DESIGN.md)
 
 ## 1. 目标与范围
 
@@ -381,7 +380,7 @@ Summary 1 + Session 2 原始消息
 5. Assistant Tool Call 与其连续对应的全部 Tool Result 是不可拆分原子单元。若 Tool Call 消息自身带有超长可见正文，可以先把正文作为普通 Assistant 文本安全切分，但 Tool Call 元数据及结果仍必须保留在同一个原子单元中。
 6. 如果一个 Tool 原子单元投影后仍超过 `M`，本次压缩以 `PROVIDER_CONTEXT_LIMIT` 失败；不得拆散调用与结果，也不得把超限请求发送给 Provider。旧 Session 保持 active，可在调整上下文配置后重试。
 
-`session-compaction-v8-turn-segmentation` 用于标识上述分段编排算法；它不改变 v7 的 Markdown 摘要 Prompt 和输出格式。当前实现仍使用单层 Reduce；Segment Summary 过多时的递归归并属于后续独立工作。
+当前算法身份由两部分组成：`session-compaction-v7` 表示 Markdown 摘要 Prompt，`session-compaction-v8-turn-segmentation` 表示上述回合分段编排。当前只执行单层 Reduce；Segment Summary 过多时的递归归并仍是未决实现项。
 
 ### 5.4 压缩输入
 
@@ -534,7 +533,7 @@ DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模
 
 Debug 文件必须同时保留原始协议块和拼接后的完整 `summary`。完整拼接结果在响应结束后、校验之前写入，并标注 CompactionJob、调用轮次、普通/分段/归并阶段、字符数、结束原因和 Token 用量。用户不应再通过人工提取每个 `delta.content` 来还原真正送入校验的文本。
 
-JSON 解析、复杂 Zod Schema 和格式修复调用从 v7 主路径删除。空响应、`finish_reason = length`、超出本地安全长度、非法 Tool Call 或 Provider/协议错误直接使当前压缩失败；旧 Session 保持 active，并由用户或调度器重试完整压缩。
+当前压缩输出不经过 JSON 解析、复杂对象 Schema 或额外的格式修复调用。空响应、`finish_reason = length`、超出本地安全长度、非法 Tool Call 或 Provider/协议错误直接使当前压缩失败；旧 Session 保持 active，并由用户或调度器重试完整压缩。
 
 ## 7. 摘要输出与最终数据格式
 
@@ -621,7 +620,7 @@ interface SessionSummary {
 - 发送给模型的累计摘要只包含摘要正文和权威说明，不包含 Summary ID 或来源 Session ID。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
-- 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#611-project_instruction_revisions)。
+- 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#511-project_instruction_revisions)。
 
 ## 9. 会话历史查询 Tool
 
@@ -707,7 +706,7 @@ interface SessionSummaryRecord {
 }
 ```
 
-`session_summaries` 使用单一 Markdown `summary`，不包含 `model_call_id` 或 `compaction_job_id`；由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#68-session_summaries)。
+`session_summaries` 使用单一 Markdown `summary`，不包含 `model_call_id` 或 `compaction_job_id`；由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#58-session_summaries)。
 
 ### 10.3 `compaction_jobs`
 
@@ -902,11 +901,11 @@ type CompactionEvent =
 - 普通日志不记录完整历史、摘要原文、Prompt 或密钥。
 - 显式 `--debug` 日志会记录请求和完整拼接摘要，必须只写入项目 `.cleo/logs/`、在终端提示隐私风险并排除在 Git 之外；鉴权 Header 继续脱敏。
 
-## 17. 当前实现边界
+## 17. v0.1 基线与未决事项
 
-详细开发进度只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。本设计当前已经落地普通累计压缩、单层 Map-Reduce、按完整用户回合分段、Tool Call 原子性、Tool Result 白名单投影、Session 切换、失败恢复、历史回查和 ModelCall 审计。
+v0.1 基线包括普通累计压缩、单层 Map-Reduce、按完整用户回合分段、Tool Call 原子性、Tool Result 白名单投影、Session 切换、失败恢复、历史回查和 ModelCall 审计。
 
-当前尚未实现：
+以下问题保留：
 
 - Segment Summary 的递归多层归并；目前 Reduce Payload 超过 `M` 时返回 `PROVIDER_CONTEXT_LIMIT`。
 - 推荐 Markdown 标题缺失时的非阻断质量警告；当前只执行空内容、截断、长度和非法 Tool Call 等最低完整性校验。
@@ -938,7 +937,6 @@ type CompactionEvent =
 - 重启 CLI 后能恢复唯一的 active Session 和未完成压缩状态。
 - 连续多次压缩只注入最新累计摘要，不重复注入所有旧摘要。
 - `session_summaries` 只保存一份 `summary` 正文，不再重复保存 JSON 和注入文本。
-- 完整 Schema v8 项目顺序升级到 v9、v10 时不会重写会话相关表，原有聊天记录保持不变。
 
 ## 19. 明确不做
 

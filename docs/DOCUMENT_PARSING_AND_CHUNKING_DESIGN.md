@@ -1,8 +1,6 @@
 # CleoDoc 资料解析与切片设计
 
-状态：TXT/Markdown 解析、原文件名保存、title 唯一性、Tokenizer 切片、Chunk/FTS/Embedding 已实现
-
-更新日期：2026-08-10
+> v0.1 基线：TXT/Markdown、原文件名保存、唯一 title、语言检测和 GGUF Tokenizer 驱动切片
 
 本文定义导入资料从原始文件到纯文本 Chunk 的处理规则。CDM 的正式文档协议见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，Chunk 的数据库结构见[数据库设计](./DATABASE_DESIGN.md)，FTS、Embedding、混合检索和引用使用见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
@@ -27,10 +25,11 @@ PDF、DOCX、网页、图片、OCR、音频和视频不进入当前实现范围�
 → 提取纯文本与原文字节范围
 → 开发期写入单一临时切片 JSON 供检查
 → Chunk 与 External Content FTS 写入 SQLite
+→ 下游 Worker 生成 Embedding 并安全写回
 → 可选保留临时 CDM 用于开发期 Debug
 ```
 
-当前 `packages/document-ingestion` 已完成从项目内 UTF-8 TXT/Markdown 到临时 CDM、解析警告、Node 原文字节范围和纯文本 `ChunkDraft` 的处理。解析器与 Chunker 只返回内存结果，不读取项目目录、不访问 SQLite，也不处理外部编码。CleoDoc `MaterialService` 在导入边界统一编码后依次调用解析器与 Chunker；`MaterialIndexer` 负责临时检查文件和数据库索引编排，数据库 Repository 在短事务中替换 Chunk 与 FTS。Embedding 仍不在本阶段。
+`packages/document-ingestion` 负责从项目内 UTF-8 TXT/Markdown 生成临时 CDM、解析警告、Node 原文字节范围和纯文本 `ChunkDraft`。解析器与 Chunker 只返回内存结果，不读取项目目录、不访问 SQLite，也不处理外部编码。`MaterialService` 在导入边界统一编码后依次调用解析器与 Chunker；`MaterialIndexer` 负责临时检查文件和数据库索引编排，Repository 在短事务中替换 Chunk 与 FTS。Embedding 是下游 RAG/Worker 职责，不进入 Document Ingestion 模块。
 
 ## 2. 数据职责
 
@@ -121,18 +120,13 @@ v0.2 GUI 支持从文件夹导入时采用部分成功，不引入批次事务�
 
 文件夹导入不自动解决冲突，不创建 Source ID 子目录，也不改变任何用户文件名。
 
-### 2.5 最小实现边界与验收
+### 2.5 名称与 Tool 边界
 
-这次改造只修改资料命名、项目副本保存和 RAG Tool 的公开选择方式，不重做解析器、Chunk、Embedding 或引用系统：
-
-1. `KnowledgeSource.id` 和 `sources.id` 保持不变，继续承担内部关联。
-2. Source 元数据 Schema 增加 title 唯一语义；SQLite `sources.title` 增加唯一约束。
-3. `MaterialService` 在文件写入前检查 title 和目标文件名冲突，成功后仍按现有安全写入、元数据保存和 SQLite 投影流程提交。
-4. `rename` 使用同一 title 规则，只修改 Source 元数据和数据库投影。
-5. 三个 RAG Tool 保持 v2，直接将 LLM 可见的 Source 选择参数改为 title；Application Service 在内部解析为 Source ID。旧 v2 尚未投入实际使用，不保留其 `sourceId` 兼容分支。
-6. v0.2 文件夹导入复用单文件导入，不建立另一套摄取逻辑，只负责逐项调用并汇总成功与失败。
-
-实现状态：第 1～4 项已经完成；第 5 项 RAG Tool v2 契约修改属于后续任务；第 6 项在 v0.2 GUI 阶段实现。
+- `KnowledgeSource.id` 和 `sources.id` 只承担内部关联。
+- Source 元数据和 SQLite 都要求 title 在项目内唯一。
+- `MaterialService` 在文件写入前检查 title 与目标文件名冲突；`rename` 使用相同 title 规则，只修改 Source 元数据和数据库投影。
+- 三个 RAG Tool v2 以 title 选择资料，Application Service 在内部解析为 Source ID；LLM 可见 JSON 不包含 Source UUID。
+- v0.2 文件夹导入复用单文件导入服务，只负责逐项调用并汇总成功与失败，不建立另一套摄取逻辑。
 
 验收标准：
 

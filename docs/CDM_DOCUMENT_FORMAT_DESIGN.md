@@ -1,8 +1,6 @@
 # CleoDoc Document Model（CDM）设计
 
-状态：基础方向已确认；最小 CDM Core 已实现，正式 v1 Schema 待继续讨论
-
-更新日期：2026-08-08
+> v0.1 基线：最小 CDM Core 与非正式 `draft-1` Schema 已实现；正式 v1 Schema 保持未决
 
 本文定义 CleoDoc 内部统一文档格式的基础方向。CDM 同时适用于导入资料的临时结构化解析、AI 生成内容和用户编写内容，并作为文档展示、编辑、切片、版本比较与格式导出的共同上游。
 
@@ -294,7 +292,7 @@ HTML 无法完整表达 CleoDoc 的文档业务语义，因此 CDM 允许增加�
 ```xml
 <reference
   id="7k3m9qx2vc"
-  source="src_triton_guide"
+  source="Triton Programming Guide"
   chunk_id="chk_8r2v5x9m"
 >
   Triton 提供了一种接近 Python 的 GPU 内核开发方式。
@@ -308,7 +306,7 @@ HTML 无法完整表达 CleoDoc 的文档业务语义，因此 CDM 允许增加�
 不存在 chunk_id → 文献引用
 ```
 
-在 Chunk 引用中，`source` 是公开的导入资料标识，`chunk_id` 是公开的 Chunk 标识；两者都不能是 SQLite Row ID。数据库中的 Chunk 再通过自己的 `start_offset` 和 `end_offset` 定位原始 TXT/Markdown。正式引用不依赖导入阶段的临时 CDM、CDM Node ID 或原始文件绝对路径。
+在 Chunk 引用中，`chunk_id` 是稳定公开的 Chunk 引用，不能是 SQLite Row ID。数据库中的 Chunk 再通过 Source 关系及 `start_offset`、`end_offset` 定位原始 TXT/Markdown。`source` 的最终引用语义仍待确定：当前 RAG Tool 使用项目内唯一 title 选择资料且不暴露 Source UUID，Tool Result 到正式 CDM `<reference>` 的转换、资料改名后的显示与绑定方式必须在 Draft/引用校验实现前确认。正式引用不依赖导入阶段的临时 CDM、CDM Node ID 或原始文件绝对路径。
 
 在文献引用中，`source` 表示文献名称或未来的公开文献条目。它只建立文献级联系，不承诺能够定位到某个原文范围。
 
@@ -385,7 +383,7 @@ flowchart TD
   </blockquote>
 
   <comment id="f8w2y6a0c3">这里需要补充 Triton 与 CUDA 的关系。</comment>
-  <reference id="g9x3z7b1d4" source="material_triton_doc"/>
+  <reference id="g9x3z7b1d4" source="Triton Programming Guide"/>
 </document>
 ```
 
@@ -426,6 +424,7 @@ flowchart TD
 - `style` 的安全属性白名单和规范化方式。
 - `<comment>` 的正文关系、锚点、重叠和生命周期。
 - `<reference>` 是包围被支持文字还是作为独立引用节点，以及无效引用在 CDM/数据库之间的状态投影方式。
+- `<reference source>` 的稳定身份、显示名称、资料重命名语义，以及 RAG Tool 的 `title + chunkId` 如何转换为正式引用。
 - CDM 文档与外部原始文件、资源和图片的关联方式。
 - `book.cdm.xml` 的最终文件名、`<chapter-ref>` 属性和公开文档引用格式。
 - 发送局部 CDM 给 LLM 时的片段外壳和定位信息。

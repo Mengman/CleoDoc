@@ -2,7 +2,7 @@
 
 CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
 
-当前 v0.1 已完成 CLI 与项目基础、OpenAI-compatible/Ollama Provider、多轮对话与生成内容保存、资料管理、资料语言检测、Session 上下文压缩与历史回查、Reasoning 流式展示与 ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool Loop。`node-llama-cpp` GGUF Embedding、Tokenizer 驱动切片、增量向量写入、sqlite-vec 精确检索、Exact/FTS/Vector 混合 RAG、`RetrievalContext`、CLI 可解释检索、资料 RAG Tool 和跨平台 CLI 打包已经接入；正文索引不属于 v0.1 发布门，剩余工作是手工垂直闭环与最终发布验收。唯一的详细进度来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+v0.1 已形成 CLI 基线：OpenAI-compatible/Ollama 对话、生成内容保存、资料管理、Session 压缩与历史回查、Reasoning 展示与 ModelCall 审计、数据库项目指令、受控 Tool Loop，以及 `node-llama-cpp` GGUF Embedding、Tokenizer 切片、sqlite-vec 精确检索和 Exact/FTS/Vector 混合 RAG。跨平台 CLI 打包已经建立；正文索引不属于 v0.1 发布门，发布前只剩人工垂直闭环验收。文档入口见[文档索引](./docs/README.md)，唯一实施状态来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
@@ -61,13 +61,16 @@ my-novel.cleo/
 ├─ cleo.project.json
 ├─ manuscript/
 ├─ materials/
+├─ sources/
+│  └─ metadata/
 └─ .cleo/
    ├─ project.sqlite
    ├─ blobs/
-   └─ models/
+   ├─ models/
+   └─ backups/
 ```
 
-当前 CLI 以 Markdown/JSON 保存作品事实；目标统一文档格式为 CDM，过渡方案尚未实施。`.cleo/project.sqlite` 保存对话和可重建运行状态。
+当前 CLI 以 Markdown/JSON 保存作品事实；CDM 是 v0.2 的目标统一文档协议，正文迁移方式尚未确定。`.cleo/project.sqlite` 保存对话、资料索引和运行状态。
 
 ## 使用 OpenAI-compatible Provider
 
@@ -131,7 +134,7 @@ npm run cleo -- chat
 
 长对话达到发行配置的 75% 上下文预算后会在完整回复保存完毕后自动压缩。压缩期间可以继续编辑输入，但 Enter 不会提交，草稿也不会自动发送。可使用 `/context` 查看预算，`/compact` 手动压缩，`/retry-compact` 重试失败任务，`/sessions` 和 `/session <序号>` 审计内部 Session。上下文窗口和最大输出长度来自当前 Provider + Model 能力配置；以 1M/384K 模型为例，发行策略预留 32,768 Token 下一次用户输入和 5% 安全余量，约在当前 Payload 392K Token 时自动压缩，在 477K Token 时阻止继续提交。未知模型可用 `--context-window-tokens` 与 `--max-output-tokens` 临时提供能力信息。
 
-项目指令以 SQLite Revision 为唯一事实源，不读取作品项目目录中的 `AGENTS.md`。使用 `/instructions` 查看当前指令，`/instructions history` 查看历史，`/instructions restore <revision>` 经确认后恢复旧内容。模型也可以通过受控 Tool 读取、追加、局部替换或全量替换项目指令；写入必须经过用户批准。
+项目指令以 SQLite Revision 为唯一事实源，不读取作品项目目录中的 `AGENTS.md`。使用 `/instructions` 查看当前指令，`/instructions history` 查看历史，`/instructions restore <revision>` 经确认后恢复旧内容。模型也可以通过受控 Tool 读取、尾部追加或整体替换项目指令；写入必须经过用户批准。
 
 需要检查模型上下文占用或响应协议时可以使用 `npm run cleo -- chat --debug`。Debug 模式会把主笔和上下文压缩实际发送的 HTTP 请求 body、脱敏后的请求 Header、响应状态/响应 Header，以及 Provider 解析前收到的原始 SSE 或 NDJSON 数据块写入 UTF-8 日志；响应结束后还会记录输入 Context Token、输出 Token、结束原因、本地估算值、完整拼接的压缩摘要和最低完整性校验错误。终端只显示本次日志文件的绝对路径，不再输出原始协议内容，因此不会干扰聊天交互。
 
@@ -224,6 +227,7 @@ Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需�
 
 ## 项目文档
 
+- [文档索引与职责](./docs/README.md)
 - [产品需求](./docs/PRD.md)
 - [技术架构](./docs/TECHNICAL_ARCHITECTURE.md)
 - [数据库设计与当前实现](./docs/DATABASE_DESIGN.md)
@@ -231,6 +235,9 @@ Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需�
 - [会话上下文压缩设计](./docs/SESSION_COMPACTION_DESIGN.md)
 - [Tool Call 技术设计](./docs/TOOL_CALL_DESIGN.md)
 - [文档处理设计](./docs/文档处理设计.md)
+- [资料解析与切片设计](./docs/DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)
 - [本地 RAG 文档摄取与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
 - [CleoDoc Document Model（CDM）设计](./docs/CDM_DOCUMENT_FORMAT_DESIGN.md)
+- [软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)
+- [Embedding CPU/GPU 基准](./docs/EMBEDDING_BENCHMARK_BASELINE.md)
 - [编码 Agent 指南](./AGENTS.md)

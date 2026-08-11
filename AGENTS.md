@@ -10,6 +10,7 @@
 - [资料解析与切片设计](./docs/DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)
 - [本地 RAG 与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
 - [软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)
+- [文档索引与职责](./docs/README.md)
 
 修改架构、版本范围或数据语义时，必须同步更新相关文档，不能只修改代码或本文件。发现文档冲突时，不要自行扩大范围；先遵循已经明确的版本边界，并向用户说明冲突。
 
@@ -103,8 +104,8 @@ packages/diff        v0.2
 采用自研的薄 RAG 编排层，不让 LangChain.js 或 LlamaIndex.TS 的内部对象成为领域模型或存储格式。
 
 - `packages/cdm` 是不依赖 Project、Database、RAG、Agent、Electron、DOM 或 TipTap 的叶子协议包。
-- Document Ingestion 依赖 CDM 和 RAG Contracts，输出纯文本 `ChunkDraft`，但不访问 SQLite。
-- RAG Core 从 `ChunkDraft` 开始工作，不解析或持久化 CDM；CleoDoc 业务代码通过 `RagService` 使用 RAG，不直接访问其内部 Repository。
+- Document Ingestion 依赖 CDM 和注入的 Tokenizer 接口，输出纯文本 `ChunkDraft`，但不访问 SQLite 或 `node-llama-cpp`。
+- RAG Core 从纯文本 Chunk 开始工作，不解析或持久化 CDM；CleoDoc 业务代码通过 Material/Knowledge Application Service 使用 RAG，不直接把 Repository 暴露给 Agent。
 
 v0.1 检索路径为：
 
@@ -114,9 +115,9 @@ v0.1 检索路径为：
 4. 在上下文预算内组装证据包。
 5. 在内存中组装只包含最终采用证据的 `RetrievalContext`。
 
-本地 Embedding 使用 `node-llama-cpp` 加载 GGUF 模型，同一模型负责 Tokenize 与向量推理。v0.1 将 `Float32Array` 存为 SQLite BLOB，对过滤后的候选做精确余弦检索；不要提前引入独立向量数据库或 ANN 基础设施。向量索引必须放在可替换接口后面。
+本地 Embedding 使用 `node-llama-cpp` 加载 GGUF 模型，同一模型负责 Tokenize 与向量推理。归一化 `Float32Array` 以 Little-Endian BLOB 保存，`sqlite-vec` 只通过可替换的 `VectorIndex` Adapter 执行精确余弦检索。v0.1 不创建 `vec0`、不实现 ANN，也不引入独立向量数据库。
 
-每条检索结果至少能解释：来源、原文范围、相关度和命中通道。测试必须覆盖精确名称、近义描述、正文召回、跨项目隔离和 `RetrievalContext` 组装。
+每条检索结果在内部至少能解释：资料、原文范围、相关度和命中通道。测试必须覆盖精确名称、近义描述、资料正文召回、跨项目隔离和 `RetrievalContext` 组装。
 
 ## 6. LLM 与 Agent 规则
 
@@ -127,7 +128,7 @@ v0.1 检索路径为：
 - Tool Loop 必须设置最大轮数、上下文预算、超时和取消信号，避免无限循环。
 - 自动批准的 Tool 在 CLI 中静默执行；只有需要用户授权的 Tool 才显示审批界面。原始 Tool Result 返回 LLM 并按既有 Message 协议持久化，不直接作为普通 CLI 输出展示给用户。
 - LLM 生成内容不能直接覆盖正式文档。v0.1 需要用户明确执行保存或确认覆盖；v0.2 通过 ChangeSet 和审批应用。
-- RAG Tool 接入模型调用后，远程调用应能够还原所用模型、参数和实际发送的检索证据；步骤 8 的普通检索结果不写入数据库。
+- RAG Tool 的版本化 Tool Result Message 用于还原实际发送的检索证据；普通 CLI 检索的 Query、候选和结果不写入数据库。
 - 日志默认不记录正文、资料原文、完整 Prompt、模型响应或密钥。
 
 ## 7. v0.2 版本与桌面约束

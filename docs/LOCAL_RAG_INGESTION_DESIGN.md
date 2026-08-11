@@ -1,8 +1,6 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：Chunk、FTS、Embedding、混合 RAG 与唯一 title 契约的 RAG Tool v2 已实现
-
-更新日期：2026-08-10
+> v0.1 基线：Chunk、FTS、GGUF Embedding、sqlite-vec 精确向量、混合检索与 RAG Tool v2
 
 本文定义 CleoDoc 如何使用已经生成的纯文本 Chunk 建立本地全文、向量和混合检索，并把 LLM 使用的证据回溯到原始资料。重点回答三个问题：
 
@@ -155,7 +153,7 @@ countDocumentTokens(chunk.content) <= tokenizer.maxInputTokens
 
 原有 Baseline 结构规则保持不变：同一章节内的小块贪心向上合并；超长块先确定不超过 Token 上限的最远位置，再在其前方由 `splitSearchWindowRatio` 指定的区域内向前寻找句子、次级标点或空白边界。合并后的完整文本必须重新 Tokenize，不能把两个片段的 Token 数直接相加。
 
-当前仍处于早期开发阶段，直接修改 `structural-baseline-v1` 的实现和测试，不保留旧字符切片逻辑，也不升级切片器版本。字符数只保留在开发期切片预览中供人工检查；通用 `token_count` 不写入 `knowledge_chunks`，因为它依赖具体模型。有效 `chunking_config_json` 必须包含 Tokenizer/模型 Revision、最大输入 Token 和切片参数，任一项变化都使当前 Chunk 索引过期。
+当前切片器身份为 `structural-baseline-v1`。字符数只保留在开发期切片预览中供人工检查；通用 `token_count` 不写入 `knowledge_chunks`，因为它依赖具体模型。有效 `chunking_config_json` 必须包含 Tokenizer/模型 Revision、最大输入 Token 和切片参数，任一项变化都使当前 Chunk 索引过期。
 
 ## 5. Chunk 身份与引用边界
 
@@ -194,7 +192,7 @@ CREATE TABLE knowledge_chunks (
 );
 ```
 
-该表已经进入 Schema v9。Repository 写入前校验 Source Hash、资料字节长度、Chunk 顺序和原文范围，并在一个短事务中替换同一 Source 的完整 Chunk 集合。
+该表属于当前 Schema v10。Repository 写入前校验 Source Hash、资料字节长度、Chunk 顺序和原文范围，并在一个短事务中替换同一 Source 的完整 Chunk 集合。
 
 ### 6.2 External Content FTS
 
@@ -216,7 +214,7 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 - 普通中文片段优先使用 FTS5 trigram。
 - 两字人名、短别名、编号和精确专名不能只依赖 trigram，应使用标题、人名、别名等精确字段索引补充。
 - 查询必须先限制当前项目和允许的资料范围，再召回正文。
-- 修改后的 RAG Tool v2 返回项目内唯一的资料 `title`、稳定 `chunkId` 和纯文本 `content`，不返回内部 `sources.id`、`source` 字段、临时 CDM、标题路径、字节范围、SQLite Row ID、内部 FTS Rank 或实现表名。
+- RAG Tool v2 返回项目内唯一的资料 `title`、稳定 `chunkId` 和纯文本 `content`，不返回内部 `sources.id`、临时 CDM、标题路径、字节范围、SQLite Row ID、内部 FTS Rank 或实现表名。
 
 ## 7. Embedding 与向量存储
 
@@ -287,7 +285,7 @@ interface VectorIndex {
 
 ## 8. sqlite-vec 与 SQLite vec1 的选择
 
-截至 2026-08-07，两者都是 SQLite 扩展，不是独立向量数据库服务。
+两者都是 SQLite 扩展，不是独立向量数据库服务。以下比较只记录 v0.1 选型依据，不代表未来版本状态判断；升级前必须重新评测当时版本。
 
 | 维度 | sqlite-vec | SQLite vec1 |
 |---|---|---|
@@ -339,11 +337,11 @@ flowchart LR
 
 当前实现采用 `research` Profile：在同一项目与 `material` 范围内并列执行完整字符串 Exact、基于 trigram 的 FTS 和当前查询语言的 Vector 召回。默认每路最多召回 20 条，使用 `Σ 1 / (60 + rank)` 进行 RRF；融合结果按公开 `chunk_id` 合并通道，排除同一 Source 中范围重合度不低于 80% 的低排名 Chunk，再执行单一来源占比、12,000 字符上下文预算和调用方结果数量限制。以上参数均来自软件 YAML 的 `rag.retrieval`。向量路径不可用时返回错误码并继续 Exact + FTS，不静默伪造向量结果。
 
-普通检索不持久化 Query、候选排名、排除项或结果快照。`HybridRetrievalResult` 只包含运行诊断和一个内存 `RetrievalContext`；后者只包含最终采用的 `RetrievalCandidate[]` 与正文字符总数，调用方统一读取 `retrievalContext.items`。未采用候选只对 RAG Debug 有价值，当前不进入公共结果。当前预算单位明确为 Unicode 字符，不冒充 LLM Token；步骤 9 接入 Provider Tokenizer 后再由模型调用层提供精确 Token 预算及模型调用证据审计。
+普通检索不持久化 Query、候选排名、排除项或结果快照。`HybridRetrievalResult` 只包含运行诊断和一个内存 `RetrievalContext`；后者只包含最终采用的 `RetrievalCandidate[]` 与正文字符总数，调用方统一读取 `retrievalContext.items`。未采用候选只对 RAG Debug 有价值，不进入公共结果。当前预算单位明确为 Unicode 字符，不冒充 LLM Token；何时由 Provider Tokenizer 提供精确证据 Token 预算仍待模型适配层设计。
 
 ### 9.1 RAG Tool Result
 
-修改后的 RAG Tool v2 向 LLM 返回纯文本证据和允许公开的资料选择信息：
+RAG Tool v2 向 LLM 返回纯文本证据和允许公开的资料选择信息：
 
 ```json
 {
@@ -363,7 +361,7 @@ flowchart LR
 - LLM 文献引用：只有 `source`。
 - 用户文献引用：只有 `source`，用户不接触 Chunk 信息。
 
-本轮改动只定义 RAG Tool 的 LLM 可见字段，不修改 CDM `<reference>` 的 `source` 属性。Tool Result 到正式 CDM 引用的转换、资料改名后文献显示名称如何刷新，留到 Draft 自动写入和引用校验实现时确定；不得因此把内部 Source UUID重新暴露给模型。
+CDM `<reference>` 的 `source` 属性尚未与 RAG Tool 的 title 契约绑定。Tool Result 到正式 CDM 引用的转换、资料改名后文献显示名称如何刷新，留到 Draft 自动写入和引用校验实现时确定；不得因此把内部 Source UUID 暴露给模型。
 
 Chunk 引用的回溯链路为：
 
@@ -411,8 +409,6 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和数据库投影。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。当前 Schema v10 继承 v9 的 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步，并增加 Source title 唯一索引；混合检索不增加数据库表。Embedding Worker、安全写回编排和 sqlite-vec 0.1.9 精确余弦检索均已完成。`cleo index embed/status`、`cleo search --semantic` 与 `cleo search --hybrid [--explain]` 已形成离线检索闭环；安全 Debug 日志不保存 Query、资料正文或向量。固定中英文语料同时检查 Vector 与 Hybrid Top-1/Top-5 Recall，真实 Q8_0 CPU/GPU 首份结果见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
-
 ### v0.1
 
 - 将 TXT、Markdown 解析为可删除的临时 CDM，固定丢弃纯展示样式。
@@ -420,7 +416,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。Application Service 与三个 Tool v2 均使用项目内唯一 title 选择资料并在内部解析为 `sources.id`；LLM 可见 JSON 不包含 Source UUID，旧 `sourceId` 契约未保留兼容分支。
+- 使用 FTS 与向量的混合召回、内存 `RetrievalContext`，并通过三个 RAG Tool 提供资料列表、混合检索和相邻 Chunk 精读。Application Service 与 Tool v2 使用项目内唯一 title 选择资料并在内部解析为 `sources.id`；LLM 可见 JSON 不包含 Source UUID。
 - 数据库内部通过 `sources.id + chunk_id` 校验归属并回溯 TXT/Markdown 原文；内部 Source UUID 不对 LLM 公开。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 
@@ -459,7 +455,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 项目检索不返回未显式链接的其他项目资料。
 - Embedding 不可用时 FTS5 仍可工作。
 - 删除资料后无法再从 FTS 或向量结果中检索到该资料。
-- RAG Tool 只向 LLM 返回公开的 Source、Chunk ID、资料标题和纯文本证据。
+- RAG Tool 只向 LLM 返回项目内唯一 title、公开 Chunk ID 和纯文本证据。
 - Chunk 引用能够回到原件；Source Hash 变化时引用被标记为过期。
 
 ### 语言与模型

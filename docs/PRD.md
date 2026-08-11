@@ -1,6 +1,6 @@
 # CleoDoc：本地知识原生的中文小说 AI 主笔
 
-> 状态：产品需求基线  
+> 状态：以 v0.1 CLI 为已实现基线，定义 v0.2 桌面目标
 > 交付版本：v0.1 CLI 核心 MVP；v0.2 Electron 桌面产品  
 > 产品形态：免费、AGPLv3、本地优先；先验证 CLI，再交付跨平台桌面应用  
 > 技术方向：TypeScript Core、SQLite、自研 RAG；v0.2 使用 Electron、React  
@@ -15,12 +15,12 @@ CleoDoc 是一款面向普通中文用户的文档原生 AI Agent 应用。用�
 
 交付分为两个版本：
 
-- **v0.1 CLI 核心 MVP**：验证 LLM 对话与文档保存、资料 CRUD，以及 LLM 调用本地 RAG 检索资料和正文。
+- **v0.1 CLI 核心 MVP**：验证 LLM 对话与文档保存、资料 CRUD，以及 LLM 调用本地 RAG 检索导入资料；正文由受控文档 Tool 读取，尚未进入 RAG 索引。
 - **v0.2 Electron 桌面产品**：在 CLI 已验证的 Core 上实现 React 作品工作室、TipTap 编辑器、Git 版本、语义 Diff、知识图和完整创作阶段。
 
 除明确标注为 CLI 核心的能力外，本文描述的桌面交互和完整创作体验以 v0.2 为交付目标。
 
-产品由三个同等重要的核心组成：
+完整桌面产品由三个同等重要的核心组成：
 
 - **作品 Agent**：负责资料调研、故事策划、正文创作、一致性检查和修订。
 - **本地知识系统**：以混合 RAG 和结构化关系图管理资料、人物、事件、时间线、伏笔与正文事实。
@@ -171,27 +171,29 @@ v0.1 支持粘贴内容以及 TXT、Markdown 导入。DOCX、PDF、网页快照�
 - 不自动为冲突资料编号或改名，也不覆盖已有文件。
 - v0.2 从文件夹导入时允许部分成功：正常文件继续导入，名称冲突或格式不支持的文件单独列入失败列表，由用户处理后重试。
 
-处理流水线：
+v0.1 处理流水线：
 
 1. 解析正文、标题、段落、表格和来源元数据。
 2. 使用临时 CDM 识别结构边界，生成只含纯文本和原文字节范围的 Chunk；临时 CDM 可以在入库后删除。
 3. 对满足长度下限的 CDM 正文块检测语言，将有序语言列表保存到资料元数据；当前以第一项作为主语言。
 4. 通过内容哈希去重，仅更新发生变化的块。
-5. 写入 SQLite FTS5 中文全文索引。
+5. 写入 SQLite trigram FTS5 全文索引。
 6. 使用 `node-llama-cpp` 加载与主语言匹配的本地 GGUF 嵌入模型生成向量。
-7. 抽取实体、事件、关系、时间、规则和事实声明。
-8. 将抽取结果作为候选知识提交给用户批量确认。
+
+实体、事件、关系、规则和事实候选的抽取与审批属于 v0.2，不是当前摄取流水线的一部分。
 
 CDM、领域 JSON 和导入的原始资料是目标事实源；索引可以安全重建。当前 CLI 已有 Markdown/TXT 文档等待明确的 CDM 过渡方案，不进行静默转换。
 
 ### 4.3 混合检索
 
-每次 Agent 任务执行：
+完整桌面版本的检索框架为：
 
 1. 根据项目、创作阶段、资料类型、人物、时间和权威等级过滤。
 2. 并行执行 FTS5 全文检索、向量语义检索和关系图遍历。
 3. 融合排序、去重，并按当前任务加权。
-4. 在模型上下文预算内组装证据包，生成不可变的 `RetrievalContext`。
+4. 在模型上下文预算内组装证据包，生成当次调用使用的 `RetrievalContext`。
+
+v0.1 已实现其中的资料检索子集：在当前项目和 `material` 范围内并行执行 Exact、trigram FTS 与 Vector 召回，以 RRF 融合、按 Chunk 去重，并应用来源占比和字符预算。关系图、权威、时序和任务重排属于 v0.2。
 
 预置检索策略：
 
@@ -407,7 +409,7 @@ MyNovel.cleo/
 - 生成结果、检查结果和 `ChangeSet`。
 - 基准 revision、暂停、取消、重试和恢复状态。
 
-模型适配层支持 OpenAI-compatible、Anthropic、Gemini 和 Ollama，不得静默切换模型或供应商。
+v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini 是后续适配目标；任何版本都不得静默切换模型或供应商。
 
 ## 8. 核心公共类型
 
@@ -418,7 +420,7 @@ MyNovel.cleo/
 - `KnowledgeCandidate`：尚未确认的自动抽取事实或关系。
 - `KnowledgeConflict`：冲突双方、证据、影响范围和处理状态。
 - `RetrievalProfile`：任务的过滤、召回、排序和预算配置。
-- `RetrievalContext`：一次检索最终采用的知识块及正文字符总数；普通检索不持久化候选轨迹。
+- `RetrievalContext`：一次检索最终采用的知识块、来源和字符总数；普通检索不持久化 Query、候选轨迹或排除项。
 - `AgentJob`：可恢复的 Agent 工作单元。
 - `ChangeSet`：正文或设定补丁、基准版本、影响对象和验证结果。
 - `Checkpoint`：阶段交付物、用户决定和可恢复版本。
@@ -426,20 +428,34 @@ MyNovel.cleo/
 - `NamedVersion`：用户名称、说明和内部 annotated tag。
 - `DocumentDiff`：两个版本之间的文件、块和行内变化。
 
-## 9. 当前交付状态
+## 9. 版本基线
 
-开发任务、依赖、顺序和验收门只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护，PRD 不再保存重复的实施计划。
+| 领域 | v0.1 基线 | v0.2 目标 |
+| --- | --- | --- |
+| 交互 | CLI 对话、命令和 Tool 审批 | Electron + React 作品工作室 |
+| 作品文档 | Markdown/JSON、安全保存、字符范围读取 | CDM + TipTap、节点级编辑、批注和 Draft |
+| 资料 | TXT/Markdown、唯一 title、原件保留 | 文件夹批量导入、DOCX/PDF |
+| RAG | 资料 Chunk、FTS、Embedding、混合检索和三个 RAG Tool | 正文、设定、关系图、权威与影响分析 |
+| 历史 | Conversation/Session、压缩和消息回查 | 版本、语义 Diff、Checkpoint 和阶段审批 |
+| Agent | 单一前台 Tool Loop | 可恢复的作品阶段工作流 |
 
-截至 2026-08-10：
-
-- v0.1 已完成 CLI 与项目基础、LLM Provider、多轮对话与内容保存、资料管理、Session 压缩与历史回查、Reasoning/ModelCall 审计、数据库原生项目指令，以及受控的本地文档 Tool。
-- v0.1 已完成 CDM 最小 Core 和独立 TXT/Markdown 资料解析，能够输出临时 CDM、解析警告及 Node 原文字节范围。
-- v0.1 已实现资料 Chunk、FTS、本地 Embedding、sqlite-vec 精确向量检索、Exact/FTS/Vector 混合 RAG、可解释输出和 `RetrievalContext`，并已将资料列表、检索和相邻 Chunk 精读作为项目隔离的 RAG Tool 接入 LLM；Windows、macOS、Linux CLI 打包已经完成，正文索引不属于 v0.1 发布门，最终手工发布验收尚未完成。
-- v0.2 Electron、React、TipTap、Draft 写入与文本统计、Git 版本、语义 Diff、知识图和阶段 Agent 工作流尚未开始；Draft 写入协议已经完成设计。
+实施状态、任务顺序和发布门只在[开发计划](./DEVELOPMENT_PLAN.md)维护。
 
 ## 10. 验收标准
 
-### 10.1 v0.2 版本与 Diff
+### 10.1 v0.1 CLI 与本地 RAG
+
+- 可以创建项目、恢复 Conversation，并在重启后继续创作。
+- 可以导入、查看、重命名和删除 TXT/Markdown 资料；同名 title 明确拒绝。
+- 精确名称、近义描述和资料原文片段能召回对应证据；固定回归语料报告 Vector 与 Hybrid Top-1/Top-5 Recall。
+- 项目检索不会返回其他项目内容；模型不能通过 Tool 指定 Project ID 或内部 Source ID。
+- 离线状态下仍可导入、切片、建立 FTS/Embedding、搜索和浏览资料。
+- LLM 能调用资料列表、混合检索和相邻 Chunk 精读 Tool，并可依据结果继续创作。
+- 删除资料后，其 Chunk、FTS 和向量同步删除；索引损坏可从原始资料重建。
+- 超时、断网、压缩失败和进程退出不会丢失已保存消息、正文或原始资料。
+- Windows、macOS 和 Linux CLI 发行包可以启动并完成核心流程。
+
+### 10.2 v0.2 版本与 Diff
 
 - 用户无需安装或理解 Git 即可查看修改历史。
 - 连续字符编辑不会产生大量碎片版本。
@@ -452,18 +468,7 @@ MyNovel.cleo/
 - 应用在版本写入或恢复过程中异常退出时，项目能够从恢复日志回到一致状态。
 - 恢复版本后，只重新索引发生变化的文档和知识对象。
 
-### 10.2 v0.1 本地 RAG
-
-- 精确名称和近义描述都能检索到对应文本证据。
-- 10–15 万字正文加常规资料库的本地检索保持交互级响应。
-- 修改单章时只增量更新相关 Chunk、全文索引和向量索引。
-- 关键设定测试集的 Top-10 召回率不低于 90%。
-- 项目检索不会返回未显式链接的其他作品内容。
-- 离线状态下仍可导入、索引、搜索和浏览证据。
-- 每次模型调用都能还原其关联的 `RetrievalContext`。
-- 索引损坏不会破坏原始作品，并可安全重建。
-
-### 10.3 创作闭环
+### 10.3 v0.2 长篇创作闭环
 
 - 从一句灵感或零散资料可以形成委托书、总纲、作品圣经和样章。
 - 悬疑、言情和科幻基准项目均可完成至少 8 万字正文。

@@ -1,8 +1,8 @@
 # CleoDoc Tool Call 技术设计
 
-状态：v0.1 Tool 契约、ProjectToolCatalog 与 Conversation 级 Runtime 已实现
-适用范围：CleoDoc Core、CLI 和未来桌面端
-最后更新：2026-08-10
+> v0.1 基线：公共 Tool 契约、ProjectToolCatalog、Conversation 级 Runtime 和下列 11 个业务 Tool
+>
+> 适用范围：CleoDoc Core、CLI 和未来桌面端
 
 ## 1. Tool Call 设计原则
 
@@ -60,7 +60,7 @@ Tool 名称、描述、粒度、参数和结果格式都需要使用真实模型
 - 项目作用域和身份信息由 Runtime 注入，模型不能指定或切换 Project。
 - 普通沟通不调用写作 Tool；主笔创作文稿时直接调用 `write_draft`，统计结果作为标准 Tool Result 返回，模型停止调用即表示本轮写作完成。
 - `write_draft` 修改可恢复的工作 Draft，不等同于覆盖正式正文；正式内容仍通过 ChangeSet、审批和版本系统应用。
-- 检索 Tool 返回必要证据；普通检索的候选轨迹不持久化，实际发送给模型的证据如何随 ModelCall 还原由 RAG Tool 阶段单独设计。
+- 检索 Tool 返回必要证据；普通检索的候选轨迹不持久化，实际发送给模型的证据由版本化 Tool Result Message 保留。
 - 压缩和历史检索只投影允许进入上下文的 Tool 元数据，不默认复制历史 Tool 参数中的文稿或大段资料。
 
 ## 3. 公共 Tool 契约
@@ -153,7 +153,7 @@ type ToolResult<Output> = ToolOutcome<Output> & {
   "ok": true,
   "tool": {
     "name": "read_project_document",
-    "version": 1
+    "version": 2
   },
   "data": {
     "document": {}
@@ -168,7 +168,7 @@ type ToolResult<Output> = ToolOutcome<Output> & {
   "ok": false,
   "tool": {
     "name": "read_project_document",
-    "version": 1
+    "version": 2
   },
   "error": {
     "code": "DOCUMENT_NOT_FOUND",
@@ -241,7 +241,7 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 - `contentHash` 可继续用于增量索引、缓存失效、数据校验和内部版本比较，但不进入模型上下文、Tool 定义、Tool Result 或压缩投影。
 - 文档使用可理解且唯一的项目相对路径作为引用，不向模型返回文档数据库 ID。
 - `message_rowid`、Session 内部 Sequence、FTS Rank 等数据库实现字段不向模型返回。
-- 只有后续 Tool 或正式文档引用必须使用的稳定公开引用才可以返回。当前已实现的是不可变历史消息的 `messageId` 和稳定 `chunkId`；目标 RAG Tool 使用唯一资料 title 选择 Source，内部 `sources.id` 不向模型暴露。SQLite Row ID 始终不得暴露。
+- 只有后续 Tool 或正式文档引用必须使用的稳定公开引用才可以返回。当前已实现的是不可变历史消息的 `messageId` 和稳定 `chunkId`；RAG Tool 使用唯一资料 title 选择 Source，内部 `sources.id` 不向模型暴露。SQLite Row ID 始终不得暴露。
 - LLM 需要判断资源是否更新时返回 `updatedAt`。底层仍可使用 Hash 和 Revision 保证可靠性，不把一致性责任交给模型。
 
 ## 4. Tool 清单与披露等级
@@ -258,9 +258,9 @@ Tool 可以长期持有稳定的基础设施依赖，例如 `DocumentService`、
 | `SetProjectInstructionsTool` | `set_project_instructions` | `catalog` | `ask` | 已实现 |
 | `SearchConversationHistoryTool` | `search_conversation_history` | `catalog` | `auto` | 已实现 |
 | `ReadConversationMessageTool` | `read_conversation_message` | `catalog` | `auto` | 已实现 |
-| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | v2 已实现；title 契约待修改 |
-| `ListMaterialsTool` | `list_materials` | `full` | `auto` | v2 已实现；title 契约待修改 |
-| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | v2 已实现；title 契约待修改 |
+| `SearchKnowledgeTool` | `search_knowledge` | `full` | `auto` | v2 已实现 |
+| `ListMaterialsTool` | `list_materials` | `full` | `auto` | v2 已实现 |
+| `ReadMaterialContextTool` | `read_material_context` | `catalog` | `auto` | v2 已实现 |
 | `ProjectToolCatalog` | `project_tool_catalog` | `full` | `auto` | 已实现 |
 
 `write_draft` 尚未成为已实现的 LLM Tool，不计入本清单。三个 RAG Tool 已接入 `ProjectToolCatalog`、Conversation 级 Runtime 和 Tool Loop。
@@ -373,7 +373,7 @@ Output Schema 字段：
 }
 ```
 
-当前协议为 v2。v1 历史 Result 中的 `document` 包装层只作为历史消息保留，不参与 v2 Output Schema 校验。
+当前协议为 v2；Runtime 只按当前 Output Schema 校验新结果。历史 Tool Result Message 保持不可变，不用当前 Schema 重写。
 
 压缩投影只保留路径、更新时间和读取范围，不保留 `content`：
 
@@ -564,10 +564,6 @@ Output Schema 与追加 Tool 相同，只返回 `updatedAt` 和 `totalCharacters
 }
 ```
 
-### 6.4 删除精确片段替换 Tool
-
-`replace_project_instruction_text` 从目标设计中删除。项目指令只支持读取、尾部追加和整体替换，避免唯一文本匹配、模糊替换及额外恢复分支。
-
 ## 7. Conversation 历史 Tool
 
 历史查询不要求 LLM 预先知道 Session ID。Runtime 固定搜索范围为当前 Project、当前 Conversation、已关闭 Session 中的 `user` 和 `assistant` 消息，不检索 Reasoning，也不跨 Conversation。
@@ -690,11 +686,9 @@ Output Schema：
 }
 ```
 
-当前协议为 v2。v1 历史 Result 中的 `message` 包装层只作为历史消息保留。
+当前协议为 v2；历史 Tool Result Message 保持不可变，不用当前 Schema 重写。
 
 逻辑目标是读取完整消息，但必须保留分段机制，防止一条超长模型回复一次占满 Context。压缩投影不保留 Message ID 和正文，只记录名称、版本、状态、读取字符数及是否仍有后续。
-
-原 `read_conversation_history` 按 Session 分页读取的设计废弃。
 
 ## 8. 本地 RAG Tool
 
@@ -702,7 +696,7 @@ Output Schema：
 
 本地 RAG Tool 将已经实现的资料 Exact、FTS、Vector 混合检索接入 LLM Tool Loop。当前只检索导入资料；正文尚未进入同一索引，因此修改后的 `search_knowledge` v2 仍不接受无效的 `scope` 参数。正文索引实现后再评审是否扩展该 Tool 并提升版本。
 
-三个 RAG Tool 当前代码均保持 v2，并已直接完成 title 契约改造，没有创建 v3，也没有保留旧字段兼容分支：`list_materials` 只返回项目内唯一的 `title`；`search_knowledge` 使用可选 `title` 限定资料；`read_material_context` 使用同一搜索结果中的 `title + chunkId`。三个 Tool 均不向模型返回或接收 `sourceId`、`source` 等 Source 身份字段，`sources.id` 仅在应用内部关联数据库和索引。
+三个 RAG Tool 使用 v2 契约：`list_materials` 返回项目内唯一的 `title`；`search_knowledge` 使用可选 `title` 限定资料；`read_material_context` 使用同一搜索结果中的 `title + chunkId`。三个 Tool 均不向模型返回或接收 Source UUID，`sources.id` 仅在应用内部关联数据库和索引。
 
 LLM 可见 JSON 优先保证小参数模型也能稳定理解：字段尽量少、命名直接、层次浅，不因为 CleoDoc 内部已经拥有某项诊断数据就默认返回。内部 `HybridRetrievalResult`、CLI Explain 和安全 Debug 可以保留完整运行诊断，但不得直接作为 Tool Result。
 
@@ -953,7 +947,7 @@ Session 压缩不得包含资料正文或 Chunk Content。允许的压缩投影�
 | `list_materials` | 当前页资料数量、页码、总页数 |
 | `read_material_context` | 返回 Chunk 数量 |
 
-建议在 `packages/agent/src/tool/knowledge-tools.ts` 实现三个无执行状态的 Tool 和 `createKnowledgeTools()`。Tool 只持有稳定的 Application Service，不持有 Project ID、Conversation ID 或 Session ID，也不直接访问 SQLite Repository。资料/RAG Application Service 负责资料列表、混合检索和相邻 Chunk 读取，并已实现 title 到内部 Source ID 的项目内解析；Tool 契约切换后只调用该 title 路径。
+三个无执行状态的 Tool 位于 `packages/agent/src/tool/knowledge-tools.ts`。Tool 只持有稳定的 `KnowledgeToolService`，不持有 Project ID、Conversation ID 或 Session ID，也不直接访问 SQLite Repository。Service 负责资料列表、混合检索、相邻 Chunk 读取以及 title 到内部 Source ID 的项目内解析。
 
 ### 8.8 验收标准
 
@@ -1428,9 +1422,9 @@ classDiagram
     ToolCompactionProjector --> ProjectToolCatalog : resolves tool or self
 ```
 
-## 15. 实现状态与重构边界
+## 15. v0.1 Runtime 基线
 
-本文件定义的 v0.1 Tool Runtime 已完成：
+当前 Runtime 结构为：
 
 - `ProjectToolCatalog` 在 `ChatService` 打开项目时创建一次，持有全部无执行状态的业务 Tool，并以 `project_tool_catalog` 暴露 `list/get`。
 - `ProjectToolRuntime` 按 Conversation 创建和缓存；多次 `send()` 与 Session 压缩复用同一实例，应用退出时销毁。
