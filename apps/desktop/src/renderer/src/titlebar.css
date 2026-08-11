@@ -1,0 +1,84 @@
+.window-titlebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  position: relative;
+  min-width: 0;
+  border-bottom: 1px solid #252c38;
+  background: #121822;
+  user-select: none;
+  app-region: drag;
+}
+
+.window-titlebar-safe {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: env(titlebar-area-x, 0px);
+  width: env(titlebar-area-width, 100%);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.window-app-mark {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  place-content: center;
+  width: 25px;
+  height: 25px;
+  margin-right: 5px;
+  border-radius: 7px;
+  background: linear-gradient(145deg, #8c75ff, #6353e8);
+}
+
+.window-app-mark span {
+  display: block;
+  width: 11px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.window-menu {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  app-region: no-drag;
+}
+
+.window-menu button {
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  color: #c5ccda;
+  background: transparent;
+  cursor: default;
+  font-size: 12px;
+}
+
+.window-menu button:hover,
+.window-menu button:focus-visible {
+  color: #f3f5fa;
+  outline: none;
+  background: #293140;
+}
+
+.window-title {
+  position: absolute;
+  left: 50%;
+  max-width: 42%;
+  overflow: hidden;
+  color: #aeb7c8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 900px) {
+  .window-title {
+    display: none;
+  }
+}
