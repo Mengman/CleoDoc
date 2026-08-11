@@ -36,7 +36,7 @@ describe("KnowledgeToolService title addressing", () => {
 
     const service = await KnowledgeToolService.open(project.root, TEST_MATERIAL_OPTIONS);
     try {
-      const listed = await service.listMaterialsByTitle({ projectId: project.manifest.id });
+      const listed = await service.listMaterials({ projectId: project.manifest.id });
       expect(listed.materials).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ title: "Clock Tower Notes", indexStatus: "ready" }),
@@ -45,7 +45,7 @@ describe("KnowledgeToolService title addressing", () => {
       );
       expect(listed.materials[0]).not.toHaveProperty("sourceId");
 
-      const searched = await service.searchKnowledgeByTitle({
+      const searched = await service.searchKnowledge({
         projectId: project.manifest.id,
         query: "brass key",
         title: " Clock Tower Notes ",
@@ -57,7 +57,7 @@ describe("KnowledgeToolService title addressing", () => {
       });
       expect(searched.results[0]).not.toHaveProperty("sourceId");
 
-      const context = await service.readMaterialContextByTitle({
+      const context = await service.readMaterialContext({
         projectId: project.manifest.id,
         title: "Clock Tower Notes",
         chunkId: searched.results[0]!.chunkId,
@@ -85,20 +85,20 @@ describe("KnowledgeToolService title addressing", () => {
     const service = await KnowledgeToolService.open(project.root, TEST_MATERIAL_OPTIONS);
     try {
       await expect(
-        service.searchKnowledgeByTitle({
+        service.searchKnowledge({
           projectId: project.manifest.id,
           query: "evidence",
           title: "Missing Notes",
         }),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });
 
-      const railway = await service.searchKnowledgeByTitle({
+      const railway = await service.searchKnowledge({
         projectId: project.manifest.id,
         query: "railway",
         title: "Railway Notes",
       });
       await expect(
-        service.readMaterialContextByTitle({
+        service.readMaterialContext({
           projectId: project.manifest.id,
           title: "Clock Notes",
           chunkId: railway.results[0]!.chunkId,

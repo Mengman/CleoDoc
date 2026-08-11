@@ -1,6 +1,6 @@
 # CleoDoc 开发计划
 
-> 状态：实施中；v0.1 核心闭环已完成，正在进行最终发布验收，并准备 RAG Tool v2 的 title 契约改造
+> 状态：实施中；v0.1 核心闭环与 RAG Tool v2 的 title 契约已完成，正在进行最终发布验收
 > 日期：2026-08-10
 > 产品需求：[PRD.md](./PRD.md)  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)
@@ -48,7 +48,7 @@ v0.1 的核心闭环是：
 | 6d. Chunk 入库与资料 FTS | 已完成 | `knowledge_chunks`、External Content FTS5、索引状态、原子替换、删除级联、重建、中文短词回退及 CLI 状态/检索命令 |
 | v0.2-3a. Draft 写入与文本统计 | 未开始 | 设计已确认；等待 Core Tool、统计器、工作 Draft Revision 与 GUI 状态卡片实现 |
 | 7. 本地 Embedding 与向量检索 | 已完成 | GGUF、Tokenizer 切片、增量向量、Worker、安全写回、sqlite-vec 精确检索、CLI 诊断恢复、固定语料测试及 CPU/GPU 基准 |
-| 9b. LLM 本地 RAG Tool | v2 基础完成；契约待修改 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影；待在 v2 中以唯一 title 替换 LLM 可见 sourceId |
+| 9b. LLM 本地 RAG Tool | v2 已完成 | 资料列表、语言感知混合检索、相邻 Chunk 精读、项目隔离、Catalog 接入、Tool Loop 和压缩投影；以唯一 title 选择资料，不暴露 Source UUID |
 | 10. CLI 发布 | 进行中 | 快速失败恢复测试和 Windows/macOS/Linux 原生 CLI 打包已完成；待完成手工垂直闭环与最终发布验收 |
 
 ## 2. 开发原则
@@ -567,9 +567,9 @@ cleo search <query> --hybrid --explain
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
 
-实施状态：基础闭环已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service，并已增加按项目内唯一 title 列表、筛选和读取上下文的应用层路径，内部再解析为 `sources.id`。当前三个 RAG Tool v2 仍统一使用 UUID 格式的 `sourceId`，下一步切换到已经验证的 title 路径后删除旧应用层入口。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
+实施状态：已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service，三个 RAG Tool v2 均以项目内唯一 title 选择资料，Service 在内部解析为 `sources.id`。LLM 可见的输入与输出不再包含 `sourceId` 或 `source`，也未保留旧契约兼容分支。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
 
-由于当前 v2 尚未进入实际项目使用，本次直接修改三个 Tool 的 v2 契约，不增加 v3：`list_materials` 返回唯一 title；`search_knowledge` 使用可选 title 过滤；`read_material_context` 使用同一结果中的 `title + chunkId`。Tool 不再接收或返回 `sourceId`、`source`，Service 在项目内部把 title 解析为 `sources.id`。该改造依赖资料 title 唯一约束，必须在约束完成后实施。
+由于原 v2 尚未进入实际项目使用，本次直接修改三个 Tool 的 v2 契约，没有增加 v3：`list_materials` 返回唯一 title；`search_knowledge` 使用可选 title 过滤；`read_material_context` 使用同一结果中的 `title + chunkId`。Tool 不再接收或返回 `sourceId`、`source`，Service 在项目内部把 title 解析为 `sources.id`。该改造已在资料 title 唯一约束完成后实施。
 
 ```ts
 interface SearchKnowledgeInput {

@@ -15,15 +15,18 @@ import { KNOWLEDGE_ERRORS } from "./tool-errors.js";
 const languageSchema = z.enum(["zh", "en"]);
 const materialFormatSchema = z.enum(["text", "markdown"]);
 const indexStatusSchema = z.enum(["pending", "ready", "stale", "failed"]);
-const sourceIdSchema = z
-  .uuid()
-  .describe("资料 UUID；必须原样使用 Tool 返回的 sourceId，不能填写资料 title。");
+const materialTitleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .describe("项目内唯一的资料名称；必须原样使用 list_materials 或搜索结果返回的 title。");
 
 const searchKnowledgeInputSchema = z
   .object({
     query: z.string().trim().min(1).max(500),
     limit: z.number().int().min(1).max(10).optional(),
-    sourceId: sourceIdSchema.optional(),
+    title: materialTitleSchema.optional(),
   })
   .strict();
 type SearchKnowledgeInput = z.infer<typeof searchKnowledgeInputSchema>;
@@ -36,9 +39,8 @@ const searchKnowledgeOutputSchema = z
     results: z.array(
       z
         .object({
-          sourceId: sourceIdSchema,
           chunkId: z.string(),
-          title: z.string(),
+          title: materialTitleSchema,
           content: z.string(),
         })
         .strict(),
@@ -60,8 +62,7 @@ const listMaterialsOutputSchema = z
     materials: z.array(
       z
         .object({
-          sourceId: sourceIdSchema,
-          title: z.string(),
+          title: materialTitleSchema,
           format: materialFormatSchema,
           languages: z.array(languageSchema),
           indexStatus: indexStatusSchema,
@@ -76,7 +77,7 @@ type ListMaterialsOutput = z.infer<typeof listMaterialsOutputSchema>;
 
 const readMaterialContextInputSchema = z
   .object({
-    sourceId: sourceIdSchema,
+    title: materialTitleSchema,
     chunkId: z.string().trim().min(1),
     before: z.number().int().min(0).max(3).optional(),
     after: z.number().int().min(0).max(3).optional(),
@@ -86,8 +87,7 @@ type ReadMaterialContextInput = z.infer<typeof readMaterialContextInputSchema>;
 
 const readMaterialContextOutputSchema = z
   .object({
-    sourceId: sourceIdSchema,
-    title: z.string(),
+    title: materialTitleSchema,
     targetChunkId: z.string(),
     chunks: z.array(z.object({ chunkId: z.string(), content: z.string() }).strict()),
   })
@@ -98,7 +98,7 @@ export class SearchKnowledgeTool implements Tool<SearchKnowledgeInput, SearchKno
   readonly name = "search_knowledge";
   readonly version = 2;
   readonly description =
-    "在当前项目已建立索引的资料中执行混合检索。可选 sourceId 必须原样使用 list_materials 返回的 UUID，不可传 title；query 必须使用目标资料的语言。";
+    "在当前项目已建立索引的资料中执行混合检索。可选 title 必须原样使用 list_materials 返回的唯一资料名称；query 必须使用目标资料的语言。";
   readonly exposure = "full";
   readonly approval = "auto";
   readonly errors = KNOWLEDGE_ERRORS;
@@ -125,7 +125,7 @@ export class SearchKnowledgeTool implements Tool<SearchKnowledgeInput, SearchKno
         ? {
             queryLanguage: outcome.data.queryLanguage,
             resultCount: outcome.data.results.length,
-            sourceCount: new Set(outcome.data.results.map((result) => result.sourceId)).size,
+            sourceCount: new Set(outcome.data.results.map((result) => result.title)).size,
             languageWarning: outcome.data.languageWarning,
           }
         : {}),
@@ -137,7 +137,7 @@ export class ListMaterialsTool implements Tool<ListMaterialsInput, ListMaterials
   readonly name = "list_materials";
   readonly version = 2;
   readonly description =
-    "列出当前项目导入资料。sourceId 是供 search_knowledge 使用的资料 UUID，title 只是显示名称；不读取资料正文。";
+    "列出当前项目导入资料。title 是供 search_knowledge 使用的项目内唯一资料名称；不读取资料正文。";
   readonly exposure = "full";
   readonly approval = "auto";
   readonly errors = [] as const;
@@ -178,7 +178,7 @@ export class ReadMaterialContextTool implements Tool<
   readonly name = "read_material_context";
   readonly version = 2;
   readonly description =
-    "根据 search_knowledge 返回的 sourceId 和 chunkId 读取目标 Chunk 及有限相邻 Chunk；sourceId 必须原样传递，不可传资料 title。";
+    "根据 search_knowledge 同一结果中的 title 和 chunkId 读取目标 Chunk 及有限相邻 Chunk，两者都必须原样传递。";
   readonly exposure = "catalog";
   readonly approval = "auto";
   readonly errors = KNOWLEDGE_ERRORS;

@@ -42,7 +42,6 @@ describe("knowledge tools", () => {
           totalPages: 1,
           materials: [
             {
-              sourceId: fixture.sourceId,
               title: "English Railway Notes",
               format: "text",
               languages: ["en"],
@@ -51,6 +50,7 @@ describe("knowledge tools", () => {
           ],
         },
       });
+      expect(list.ok && list.data.materials[0]).not.toHaveProperty("sourceId");
 
       const searchTool = new SearchKnowledgeTool(fixture.knowledge);
       expect(
@@ -58,20 +58,23 @@ describe("knowledge tools", () => {
           .success,
       ).toBe(false);
       expect(
-        searchTool.inputSchema.safeParse({ query: "railway", sourceId: "English Railway Notes" })
+        searchTool.inputSchema.safeParse({ query: "railway", title: "English Railway Notes" })
           .success,
+      ).toBe(true);
+      expect(
+        searchTool.inputSchema.safeParse({ query: "railway", sourceId: fixture.sourceId }).success,
       ).toBe(false);
       expect(
         searchTool.inputSchema.safeParse({ query: "railway", source: fixture.sourceId }).success,
       ).toBe(false);
       await expect(
         searchTool.execute(
-          { query: "railway", sourceId: fixture.sourceId },
+          { query: "railway", title: "English Railway Notes" },
           { projectId: "another-project", conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });
       const mismatch = await searchTool.execute(
-        { query: "铁路时刻", sourceId: fixture.sourceId },
+        { query: "铁路时刻", title: "English Railway Notes" },
         context,
       );
       expect(mismatch).toMatchObject({
@@ -84,38 +87,44 @@ describe("knowledge tools", () => {
       });
 
       const search = await searchTool.execute(
-        { query: "railway timetable", sourceId: fixture.sourceId },
+        { query: "railway timetable", title: "English Railway Notes" },
         context,
       );
       expect(search.ok).toBe(true);
       if (!search.ok) return;
       expect(search.data.languageWarning).toBeNull();
       expect(search.data.results[0]).toMatchObject({
-        sourceId: fixture.sourceId,
         title: "English Railway Notes",
         content: expect.stringContaining("railway timetable"),
       });
+      expect(search.data.results[0]).not.toHaveProperty("sourceId");
       expect(JSON.stringify(search.data)).not.toMatch(
         /contentHash|sourceRevision|vectorDistance|rank/,
       );
 
       const target = search.data.results[0]!;
       const readTool = new ReadMaterialContextTool(fixture.knowledge);
+      expect(
+        readTool.inputSchema.safeParse({ sourceId: fixture.sourceId, chunkId: target.chunkId })
+          .success,
+      ).toBe(false);
       const read = await readTool.execute(
-        { sourceId: target.sourceId, chunkId: target.chunkId, before: 0, after: 0 },
+        { title: target.title, chunkId: target.chunkId, before: 0, after: 0 },
         context,
       );
       expect(read).toMatchObject({
         ok: true,
         data: {
-          sourceId: fixture.sourceId,
+          title: "English Railway Notes",
           targetChunkId: target.chunkId,
           chunks: [{ chunkId: target.chunkId, content: target.content }],
         },
       });
+      expect(read.ok && read.data).not.toHaveProperty("sourceId");
+      expect([listTool.version, searchTool.version, readTool.version]).toEqual([2, 2, 2]);
 
       const compacted = searchTool.getCompactionMessage(
-        { query: "railway timetable", sourceId: fixture.sourceId },
+        { query: "railway timetable", title: "English Railway Notes" },
         search,
       );
       expect(compacted).not.toContain("railway timetable");
@@ -124,7 +133,7 @@ describe("knowledge tools", () => {
       expect(listTool.getCompactionMessage({}, list)).not.toContain("English Railway Notes");
       expect(
         readTool.getCompactionMessage(
-          { sourceId: target.sourceId, chunkId: target.chunkId, before: 0, after: 0 },
+          { title: target.title, chunkId: target.chunkId, before: 0, after: 0 },
           read,
         ),
       ).not.toContain(target.content);
@@ -175,7 +184,7 @@ describe("knowledge tools", () => {
     try {
       await expect(
         new SearchKnowledgeTool(staleKnowledge).execute(
-          { query: "railway", sourceId: fixture.sourceId },
+          { query: "railway", title: "English Railway Notes" },
           { projectId: fixture.projectId, conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_INDEXED" });
@@ -197,7 +206,7 @@ describe("knowledge tools", () => {
       ).toMatchObject({ ok: true, data: { materials: [] } });
       await expect(
         new SearchKnowledgeTool(deletedKnowledge).execute(
-          { query: "railway", sourceId: fixture.sourceId },
+          { query: "railway", title: "English Railway Notes" },
           { projectId: fixture.projectId, conversationId: "conversation-1" },
         ),
       ).rejects.toMatchObject({ code: "MATERIAL_NOT_FOUND" });

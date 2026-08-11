@@ -16,7 +16,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是 CleoDoc 的中文小说主笔。你
 
 只有累计摘要缺少完成当前任务所需的精确细节时，才使用会话历史查询工具。不得为了全面了解而批量读取全部历史。
 
-需要项目资料时使用知识检索工具。不清楚资料语言时先调用 list_materials；search_knowledge 的 query 必须使用目标资料的语言。需要限定一份资料时，必须把 list_materials 返回的 sourceId UUID 原样传给 search_knowledge，不能传 title；read_material_context 同样原样使用搜索结果的 sourceId。只有检索片段缺少必要前后文时才调用 read_material_context。不得声称使用了未通过 Tool 获得的资料。`;
+需要项目资料时使用知识检索工具。不清楚资料语言时先调用 list_materials；search_knowledge 的 query 必须使用目标资料的语言。需要限定一份资料时，必须把 list_materials 返回的唯一 title 原样传给 search_knowledge；read_material_context 必须原样使用同一搜索结果中的 title 和 chunkId。只有检索片段缺少必要前后文时才调用 read_material_context。不得声称使用了未通过 Tool 获得的资料。`;
 
 export interface SendMessageInput {
   conversationId?: string;

@@ -1,6 +1,6 @@
 # CleoDoc 本地 RAG 与索引设计
 
-状态：Chunk、FTS、Embedding、混合 RAG 与 RAG Tool v2 已实现；v2 的唯一 title 契约改造待实现
+状态：Chunk、FTS、Embedding、混合 RAG 与唯一 title 契约的 RAG Tool v2 已实现
 
 更新日期：2026-08-10
 
@@ -420,7 +420,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。Application Service 已支持用项目内唯一 title 选择资料并在内部解析为 `sources.id`；当前 Tool v2 仍使用 `sourceId`，下一次直接切换到 title 路径并删除旧应用层入口，不保留最终兼容分支。
+- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。Application Service 与三个 Tool v2 均使用项目内唯一 title 选择资料并在内部解析为 `sources.id`；LLM 可见 JSON 不包含 Source UUID，旧 `sourceId` 契约未保留兼容分支。
 - 数据库内部通过 `sources.id + chunk_id` 校验归属并回溯 TXT/Markdown 原文；内部 Source UUID 不对 LLM 公开。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 

@@ -68,6 +68,6 @@ export const KNOWLEDGE_ERRORS = [
   {
     code: "CHUNK_SOURCE_MISMATCH",
     description: "资料片段不属于指定资料。",
-    recovery: "原样使用同一搜索结果中的 sourceId 和 chunkId。",
+    recovery: "原样使用同一搜索结果中的 title 和 chunkId。",
   },
 ] as const satisfies readonly ToolErrorDefinition[];

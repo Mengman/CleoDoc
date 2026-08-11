@@ -61,6 +61,8 @@ describe("ChatService knowledge tool loop", () => {
       expect(provider.requests[0]?.tools?.map((tool) => tool.name)).toEqual(
         expect.arrayContaining(["list_materials", "search_knowledge"]),
       );
+      expect(JSON.stringify(provider.requests[0]?.tools)).toContain("title");
+      expect(JSON.stringify(provider.requests[0]?.tools)).not.toContain("sourceId");
       expect(provider.requests[0]?.messages[0]?.content).toContain("list_materials");
       expect(provider.requests[1]?.messages).toEqual(
         expect.arrayContaining([

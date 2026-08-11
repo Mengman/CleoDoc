@@ -702,7 +702,7 @@ Output Schema：
 
 本地 RAG Tool 将已经实现的资料 Exact、FTS、Vector 混合检索接入 LLM Tool Loop。当前只检索导入资料；正文尚未进入同一索引，因此修改后的 `search_knowledge` v2 仍不接受无效的 `scope` 参数。正文索引实现后再评审是否扩展该 Tool 并提升版本。
 
-三个 RAG Tool 当前代码均为 v2，仍向模型暴露 UUID `sourceId`。由于该契约尚未进入实际项目使用，本次直接修改 v2，不创建 v3，也不保留旧字段兼容分支：`list_materials` 只返回项目内唯一的 `title`；`search_knowledge` 使用可选 `title` 限定资料；`read_material_context` 使用同一搜索结果中的 `title + chunkId`。修改后的 v2 不再向模型返回或接收 `sourceId`、`source` 等 Source 身份字段，`sources.id` 仅在应用内部关联数据库和索引。
+三个 RAG Tool 当前代码均保持 v2，并已直接完成 title 契约改造，没有创建 v3，也没有保留旧字段兼容分支：`list_materials` 只返回项目内唯一的 `title`；`search_knowledge` 使用可选 `title` 限定资料；`read_material_context` 使用同一搜索结果中的 `title + chunkId`。三个 Tool 均不向模型返回或接收 `sourceId`、`source` 等 Source 身份字段，`sources.id` 仅在应用内部关联数据库和索引。
 
 LLM 可见 JSON 优先保证小参数模型也能稳定理解：字段尽量少、命名直接、层次浅，不因为 CleoDoc 内部已经拥有某项诊断数据就默认返回。内部 `HybridRetrievalResult`、CLI Explain 和安全 Debug 可以保留完整运行诊断，但不得直接作为 Tool Result。
 
