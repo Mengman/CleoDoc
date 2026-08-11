@@ -126,12 +126,17 @@ export class MaterialRepository {
       const existing = database
         .prepare("SELECT id FROM sources WHERE source_type = 'material'")
         .all() as Array<{ id: string }>;
+      const releaseTitle = database.prepare(
+        "UPDATE sources SET title = ? WHERE id = ? AND source_type = 'material'",
+      );
       const remove = database.prepare(
         "DELETE FROM sources WHERE id = ? AND source_type = 'material'",
       );
       for (const row of existing) {
         if (!ids.has(row.id)) {
           remove.run(row.id);
+        } else {
+          releaseTitle.run(`\u0000cleodoc-projection-sync:${row.id}`, row.id);
         }
       }
 

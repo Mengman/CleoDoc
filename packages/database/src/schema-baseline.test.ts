@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v9 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v10 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
@@ -190,7 +190,7 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("migrates a complete v8 database to v9 without rewriting its data or history", async () => {
+  it("migrates a complete v8 database through v9 to v10 without rewriting its data or history", async () => {
     const root = await createTemporaryProject("cleodoc-existing-v8-test-");
     const state = path.join(root, ".cleo");
     await mkdir(state, { recursive: true });
@@ -245,7 +245,7 @@ describe("current database schema baseline", () => {
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
         ),
-      ).toEqual([{ version: 8 }, { version: 9 }]);
+      ).toEqual([{ version: 8 }, { version: 9 }, { version: 10 }]);
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("chunk_id");
       expect(getColumnNames(reopened, "knowledge_chunks")).toContain("content_hash");
       expect(getColumnNames(reopened, "sources")).toContain("index_status");
@@ -266,7 +266,7 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("removes the obsolete tags column from an existing v9 database", async () => {
+  it("removes the obsolete tags column while migrating an existing v9 database to v10", async () => {
     const root = await createTemporaryProject("cleodoc-old-v9-tags-test-");
     const state = path.join(root, ".cleo");
     await mkdir(state, { recursive: true });
@@ -274,7 +274,7 @@ describe("current database schema baseline", () => {
     const raw = new DatabaseSync(filePath);
     raw.exec(`
       CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
-      ${CURRENT_SCHEMA_SQL.replace(
+      ${v9SchemaSql().replace(
         `    original_file_name TEXT,\n`,
         `    original_file_name TEXT,\n    tags_json TEXT NOT NULL,\n`,
       )}
@@ -303,7 +303,16 @@ describe("current database schema baseline", () => {
         reopened.read((sqlite) =>
           sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
         ),
-      ).toEqual([{ version: 9 }]);
+      ).toEqual([{ version: 9 }, { version: 10 }]);
+      expect(
+        reopened.read((sqlite) =>
+          sqlite
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'sources_title_unique'",
+            )
+            .get(),
+        ),
+      ).toEqual({ name: "sources_title_unique" });
     } finally {
       await reopened.close();
     }
@@ -348,13 +357,8 @@ async function createTemporaryProject(prefix: string): Promise<string> {
 }
 
 function v8SchemaSql(): string {
-  return CURRENT_SCHEMA_SQL.replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
-    .replace(
-      `  CREATE UNIQUE INDEX sources_title_unique
-    ON sources(title);
-`,
-      "",
-    )
+  return v9SchemaSql()
+    .replace(KNOWLEDGE_INDEX_SCHEMA_SQL, "")
     .replace(
       `    title TEXT NOT NULL,\n`,
       `    title TEXT NOT NULL,\n    source_label TEXT,\n    tags_json TEXT NOT NULL,\n`,
@@ -371,6 +375,15 @@ function v8SchemaSql(): string {
 `,
       "",
     );
+}
+
+function v9SchemaSql(): string {
+  return CURRENT_SCHEMA_SQL.replace(
+    `  CREATE UNIQUE INDEX sources_title_unique
+    ON sources(title);
+`,
+    "",
+  );
 }
 
 function getColumnNames(database: ProjectDatabase, table: string): string[] {

@@ -59,6 +59,49 @@ export interface ReadMaterialContextResult {
   readonly chunks: { chunkId: string; content: string }[];
 }
 
+export interface SearchKnowledgeByTitleRequest {
+  readonly projectId: string;
+  readonly query: string;
+  readonly limit?: number;
+  readonly title?: string;
+}
+
+export interface SearchKnowledgeByTitleResult {
+  readonly queryLanguage: KnowledgeSourceLanguage;
+  readonly sourceLanguages: KnowledgeSourceLanguage[];
+  readonly languageWarning: string | null;
+  readonly results: {
+    chunkId: string;
+    title: string;
+    content: string;
+  }[];
+}
+
+export interface ListKnowledgeMaterialsByTitleResult {
+  readonly materials: {
+    title: string;
+    format: KnowledgeSource["format"];
+    languages: KnowledgeSourceLanguage[];
+    indexStatus: KnowledgeIndexStatus;
+  }[];
+  readonly page: number;
+  readonly totalPages: number;
+}
+
+export interface ReadMaterialContextByTitleRequest {
+  readonly projectId: string;
+  readonly title: string;
+  readonly chunkId: string;
+  readonly before?: number;
+  readonly after?: number;
+}
+
+export interface ReadMaterialContextByTitleResult {
+  readonly title: string;
+  readonly targetChunkId: string;
+  readonly chunks: { chunkId: string; content: string }[];
+}
+
 export class KnowledgeToolService {
   private constructor(private readonly materials: MaterialService) {}
 
@@ -91,6 +134,31 @@ export class KnowledgeToolService {
     };
   }
 
+  async searchKnowledgeByTitle(
+    input: SearchKnowledgeByTitleRequest,
+  ): Promise<SearchKnowledgeByTitleResult> {
+    this.assertProject(input.projectId);
+    const { sources, statusBySource } = await this.readSourceSnapshot();
+    const selected = selectSourcesByTitle(sources, statusBySource, input.title);
+    const sourceLanguages = orderedLanguages(selected);
+    const sourceId =
+      selected.length === 1 && input.title !== undefined ? selected[0]!.id : undefined;
+    const result = await this.materials.searchHybrid(input.query, {
+      limit: input.limit ?? 5,
+      ...(sourceId === undefined ? {} : { filter: { sourceId } }),
+    });
+    return {
+      queryLanguage: result.language,
+      sourceLanguages,
+      languageWarning: languageWarning(result.language, sourceLanguages),
+      results: result.retrievalContext.items.map(({ chunk }) => ({
+        chunkId: chunk.chunkId,
+        title: chunk.sourceTitle,
+        content: chunk.content,
+      })),
+    };
+  }
+
   async listMaterials(input: ListKnowledgeMaterialsRequest): Promise<ListKnowledgeMaterialsResult> {
     this.assertProject(input.projectId);
     const page = input.page ?? 1;
@@ -111,6 +179,22 @@ export class KnowledgeToolService {
     };
   }
 
+  async listMaterialsByTitle(
+    input: ListKnowledgeMaterialsRequest,
+  ): Promise<ListKnowledgeMaterialsByTitleResult> {
+    const result = await this.listMaterials(input);
+    return {
+      materials: result.materials.map(({ title, format, languages, indexStatus }) => ({
+        title,
+        format,
+        languages,
+        indexStatus,
+      })),
+      page: result.page,
+      totalPages: result.totalPages,
+    };
+  }
+
   async readMaterialContext(input: ReadMaterialContextRequest): Promise<ReadMaterialContextResult> {
     this.assertProject(input.projectId);
     const result = this.materials.readChunkContext(
@@ -121,6 +205,25 @@ export class KnowledgeToolService {
     );
     return {
       sourceId: result.sourceId,
+      title: result.sourceTitle,
+      targetChunkId: result.targetChunkId,
+      chunks: result.chunks.map((chunk) => ({ ...chunk })),
+    };
+  }
+
+  async readMaterialContextByTitle(
+    input: ReadMaterialContextByTitleRequest,
+  ): Promise<ReadMaterialContextByTitleResult> {
+    this.assertProject(input.projectId);
+    const { sources, statusBySource } = await this.readSourceSnapshot();
+    const [source] = selectSourcesByTitle(sources, statusBySource, input.title);
+    const result = this.materials.readChunkContext(
+      source!.id,
+      input.chunkId,
+      input.before ?? 1,
+      input.after ?? 1,
+    );
+    return {
       title: result.sourceTitle,
       targetChunkId: result.targetChunkId,
       chunks: result.chunks.map((chunk) => ({ ...chunk })),
@@ -157,6 +260,25 @@ function selectSources(
 ): KnowledgeSource[] {
   if (sourceId !== undefined) {
     const source = sources.find((candidate) => candidate.id === sourceId);
+    if (source === undefined) {
+      throw new AppError("MATERIAL_NOT_FOUND", "当前项目中找不到指定资料。");
+    }
+    if (statusBySource.get(source.id) !== "ready") {
+      throw new AppError("MATERIAL_NOT_INDEXED", "指定资料尚未完成有效索引。");
+    }
+    return [source];
+  }
+  return sources.filter((source) => statusBySource.get(source.id) === "ready");
+}
+
+function selectSourcesByTitle(
+  sources: readonly KnowledgeSource[],
+  statusBySource: ReadonlyMap<string, KnowledgeIndexStatus>,
+  title: string | undefined,
+): KnowledgeSource[] {
+  if (title !== undefined) {
+    const normalizedTitle = title.trim();
+    const source = sources.find((candidate) => candidate.title === normalizedTitle);
     if (source === undefined) {
       throw new AppError("MATERIAL_NOT_FOUND", "当前项目中找不到指定资料。");
     }

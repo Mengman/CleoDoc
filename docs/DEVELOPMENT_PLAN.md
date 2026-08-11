@@ -32,7 +32,7 @@ v0.1 的核心闭环是：
 | --- | --- | --- |
 | 1. 工程与 CLI 骨架 | 已完成 | npm workspaces、TypeScript、CLI、CI、Lint、Format、Vitest |
 | 1.5 软件 YAML 配置 | 已完成 | 发行默认配置、操作系统用户配置、逐项回退警告、独立 `state.yaml`、Provider/模型能力与运行参数注入 |
-| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、完整 Schema v9 基线、唯一的 v8→v9 前向迁移、版本校验、写入队列和健康检查 |
+| 2. 项目文件与 SQLite | 已完成 | 项目清单、安全文件写入、SQLite WAL、完整 Schema v10 基线、v8→v9→v10 顺序迁移、版本校验、写入队列和健康检查 |
 | 3. LLM Provider | 已完成 | OpenAI-compatible、Ollama、流式输出、取消、错误分类、`--debug` UTF-8 文件日志、原始请求/响应、Context/协议诊断和 Fake Provider 测试 |
 | 4. 生成内容保存 | 已完成 | 对话记录、显式保存、覆盖确认、文档命令和 CLI 端到端测试 |
 | 5. 资料管理 | 已完成 | 粘贴/TXT/Markdown 导入、原文件名与格式保存、title 唯一性、文件与元数据事实源、SQLite 投影、哈希去重和资料 CRUD |
@@ -242,7 +242,7 @@ cleo material remove <material-id>
 
 详细设计：[SESSION_COMPACTION_DESIGN.md](./SESSION_COMPACTION_DESIGN.md)
 
-实施状态：已完成当前范围。当前完整 Schema v9 包含已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；资料检索 `RetrievalContext` 已在步骤 8 以内存值落地，与 ModelCall 的证据审计方案留到步骤 9。
+实施状态：已完成当前范围。当前完整 Schema v10 包含已确定的单一 Markdown `summary`、数据库项目指令 Revision、不可变 Message 和历史 FTS，不再保留旧 Conversation、旧摘要或文件快照的迁移路径。CLI 已提供自动/手动压缩、上下文预算查看、Session 审计和失败重试。历史回查结果进入 Tool Loop；资料检索 `RetrievalContext` 已在步骤 8 以内存值落地，与 ModelCall 的证据审计方案留到步骤 9。
 
 工作内容：
 
@@ -270,7 +270,7 @@ cleo material remove <material-id>
 
 数据库设计：[Message](./DATABASE_DESIGN.md#64-messages)、[ModelCall](./DATABASE_DESIGN.md#612-model_calls)、[Generation 映射](./DATABASE_DESIGN.md#613-generation_model_call_mapping)及[CompactionJob 映射](./DATABASE_DESIGN.md#614-compaction_job_model_call_mapping)
 
-实施状态：已完成。当前完整 Schema v9 包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
+实施状态：已完成。当前完整 Schema v10 包含 Message 整数主键、必填 Session、Reasoning/ModelCall 字段、不可变约束、业务映射表、压缩编排配置和 External Content 历史 FTS；Provider、Agent 与 CLI 已完成 Reasoning 流式解析、展示、持久化和 Tool Loop 回传。压缩 ModelCall 阶段只保留实际使用的 `primary`、`segment` 和 `reduce`。
 
 工作内容：
 
@@ -314,7 +314,7 @@ CLI 交互示意：
 
 数据库设计：[project_instruction_revisions](./DATABASE_DESIGN.md#611-project_instruction_revisions)
 
-实施状态：已完成。当前完整 Schema v9 包含该 Repository、ContextBuilder、受控 Tool 及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
+实施状态：已完成。当前完整 Schema v10 包含该 Repository、ContextBuilder、受控 Tool 及 CLI 查看/历史/恢复设计。作品项目中的 `AGENTS.md` 或 `agents.md` 不会被扫描、导入或合并；CleoDoc 代码仓库自身的编码 Agent 指令文件不受影响。Session Schema 不包含文件路径或文件快照字段。
 
 工作内容：
 
@@ -378,7 +378,7 @@ CLI 命令：
 - Tool Loop 中批准的指令修改从下一次需要项目指令的模型调用开始生效。
 - 新 Session 和后续 Agent 调用不再读取项目目录下的 `AGENTS.md` 或 `agents.md`。
 - 作品项目中的 `AGENTS.md` 或 `agents.md` 不会改变数据库指令，也不会进入模型上下文。
-- 完整 Schema v8 项目升级到 v9 时，只新增资料索引与向量结构，不改写 Conversation、Session、Message、Summary 或 CompactionJob。
+- 完整 Schema v8 项目先升级到 v9，再升级到 v10；v9 增加资料索引与向量结构，v10 只增加 Source title 唯一索引，均不改写 Conversation、Session、Message、Summary 或 CompactionJob。
 - 未来 GUI 的项目指令页面与 CLI 使用同一个 Application Service 和 Revision 并发规则。
 
 ### 步骤 6：统一知识模型与 FTS5
@@ -417,7 +417,7 @@ cleo search <query> --scope material
 
 本步骤使用 SQLite 普通表保存 Float32 Little-Endian BLOB，并加载固定版本的 sqlite-vec 执行向量校验和精确余弦检索；不创建 `vec0`，不引入 SQLite vec1，也不实现 ANN。后端边界和升级条件见[本地 RAG 文档摄取与索引设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
 
-当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test/benchmark` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与当前数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 引入模型/向量表和增量 Chunk 同步，Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；步骤 7.9 的完整测试与 CPU/GPU 基准已经完成。
+当前进度：已接入 `node-llama-cpp` 3.19.1、`packages/rag` CPU Baseline 与可选 GPU 自动加速、中英文 Q8_0 发行模型配置、Document/Query Token 统计与归一化向量输出，以及开发期 `embedding model/test/benchmark` 命令。资料导入已经按正文块检测有序语言列表，并写入 Source 元数据与当前数据库投影；切片已经使用主语言 GGUF 的真实 Tokenizer 和输入上限。Schema v9 引入模型/向量表和增量 Chunk 同步，当前 Schema v10 继续保留这些结构并增加 Source title 唯一索引；Worker 任务、安全写回编排及 sqlite-vec 0.1.9 精确余弦检索已经实现。`index embed/status` 和 `search --semantic` 已完成索引、诊断、恢复和语义查询闭环；步骤 7.9 的完整测试与 CPU/GPU 基准已经完成。
 
 #### 7.1 GGUF Embedding 基础适配层（已完成）
 
@@ -455,7 +455,7 @@ cleo search <query> --scope material
 
 验收门：重复重建相同资料不会改变 Chunk Row ID 或重复生成向量；修改局部内容只使对应 Chunk 的旧向量过期。
 
-实施状态：已完成。当前完整 Schema v9 包含 `knowledge_chunks.content_hash`、`embedding_models` 和 `chunk_embeddings`。Chunk Repository 已改为增量同步，重复重建保留未变化 Chunk 及其向量，局部变化通过 Hash 不一致使旧向量失效，删除项由外键级联清理。实际向量生成和补齐从步骤 7.5、7.6 开始。
+实施状态：已完成。当前完整 Schema v10 包含 `knowledge_chunks.content_hash`、`embedding_models` 和 `chunk_embeddings`。Chunk Repository 已改为增量同步，重复重建保留未变化 Chunk 及其向量，局部变化通过 Hash 不一致使旧向量失效，删除项由外键级联清理。实际向量生成和补齐从步骤 7.5、7.6 开始。
 
 #### 7.5 Worker 化 Embedding 推理（已完成）
 
@@ -567,7 +567,7 @@ cleo search <query> --hybrid --explain
 - 只记录实际发送给模型的证据；不得把普通检索候选轨迹重新引入数据库。
 - 用户可以查看 LLM 使用的资料。
 
-实施状态：基础闭环已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service；当前三个 RAG Tool v2 仍统一使用 UUID 格式的 `sourceId`。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
+实施状态：基础闭环已完成。`KnowledgeToolService` 将资料列表、混合检索和同一资料的相邻 Chunk 读取封装为项目隔离的 Application Service，并已增加按项目内唯一 title 列表、筛选和读取上下文的应用层路径，内部再解析为 `sources.id`。当前三个 RAG Tool v2 仍统一使用 UUID 格式的 `sourceId`，下一步切换到已经验证的 title 路径后删除旧应用层入口。`search_knowledge` 与 `list_materials` 作为 `full` Tool 每轮提供最新定义，`read_material_context` 通过 Catalog 按需加载。CLI Chat 打开时创建一次 Service 并注入 `ChatService`，不会在每次消息发送时重建。模型不能传入 Project ID，普通检索过程不持久化；实际发送给模型的证据保存在既有 Tool Result Message 中，Session 压缩只保留数量和语言等必要元数据。
 
 由于当前 v2 尚未进入实际项目使用，本次直接修改三个 Tool 的 v2 契约，不增加 v3：`list_materials` 返回唯一 title；`search_knowledge` 使用可选 title 过滤；`read_material_context` 使用同一结果中的 `title + chunkId`。Tool 不再接收或返回 `sourceId`、`source`，Service 在项目内部把 title 解析为 `sources.id`。该改造依赖资料 title 唯一约束，必须在约束完成后实施。
 

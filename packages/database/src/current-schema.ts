@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 9 as const;
+export const CURRENT_SCHEMA_VERSION = 10 as const;
 
 export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   CREATE TABLE knowledge_chunks (

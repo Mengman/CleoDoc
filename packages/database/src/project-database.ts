@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { AppError } from "../../contracts/src/index.js";
 import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
-import { SCHEMA_V8_TO_V9_SQL } from "./schema-migrations.js";
+import { SCHEMA_V8_TO_V9_SQL, SCHEMA_V9_TO_V10_SQL } from "./schema-migrations.js";
 
 type DatabaseOperation<T> = (database: DatabaseSync) => T;
 
@@ -145,13 +145,18 @@ export class ProjectDatabase {
       );
     }
     if (appliedVersions.includes(CURRENT_SCHEMA_VERSION)) {
-      this.removeObsoleteSourceTagsColumn();
-      this.ensureSourceTitleUniqueIndex();
       return;
     }
 
-    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 9) {
+    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 10) {
       this.applyMigration(SCHEMA_V8_TO_V9_SQL, 9);
+      this.applyV9ToV10Migration();
+      return;
+    }
+
+    if (newestVersion === 9 && CURRENT_SCHEMA_VERSION === 10) {
+      this.removeObsoleteSourceTagsColumn();
+      this.applyV9ToV10Migration();
       return;
     }
 
@@ -214,18 +219,22 @@ export class ProjectDatabase {
     }
   }
 
-  private ensureSourceTitleUniqueIndex(): void {
-    try {
-      this.database.exec(
-        "CREATE UNIQUE INDEX IF NOT EXISTS sources_title_unique ON sources(title)",
-      );
-    } catch (error) {
+  private applyV9ToV10Migration(): void {
+    const duplicate = this.database
+      .prepare(
+        `SELECT title FROM sources
+         GROUP BY title
+         HAVING COUNT(*) > 1
+         LIMIT 1`,
+      )
+      .get() as { title: string } | undefined;
+    if (duplicate !== undefined) {
       throw new AppError(
         "DATABASE_ERROR",
-        "项目数据库中存在同名资料，无法建立资料名称唯一约束。请先处理重复资料或重建开发期数据库。",
-        { cause: error },
+        `项目数据库中存在同名资料“${duplicate.title}”，无法升级到 v10。请先使用旧版 CleoDoc 重命名重复资料。`,
       );
     }
+    this.applyMigration(SCHEMA_V9_TO_V10_SQL, 10);
   }
 
   private assertOpen(): void {

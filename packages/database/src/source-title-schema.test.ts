@@ -21,19 +21,15 @@ afterEach(async () => {
 });
 
 describe("sources title schema", () => {
-  it("creates and restores the v9 unique title index", async () => {
+  it("creates the v10 unique title index", async () => {
     const root = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(root, "novel.cleo"),
     );
     const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
-    await database.write((sqlite) => sqlite.exec("DROP INDEX sources_title_unique"));
-    await database.close();
-
-    const reopened = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     try {
       expect(
-        reopened.read(
+        database.read(
           (sqlite) =>
             sqlite
               .prepare(
@@ -43,13 +39,13 @@ describe("sources title schema", () => {
         ),
       ).toEqual({ name: "sources_title_unique" });
 
-      const repository = new MaterialRepository(reopened);
+      const repository = new MaterialRepository(database);
       await repository.upsert(source(project.manifest.id, "source-a", "同名资料", "a.txt", "a"));
       await expect(
         repository.upsert(source(project.manifest.id, "source-b", "同名资料", "b.txt", "b")),
       ).rejects.toMatchObject({ code: "DATABASE_ERROR" });
     } finally {
-      await reopened.close();
+      await database.close();
     }
   });
 });

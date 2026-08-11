@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计与当前实现
 
-> 状态：v0.1 Schema v9 当前基线
+> 状态：v0.1 Schema v10 当前基线
 > 更新日期：2026-08-10
 > Schema 来源：`packages/database/src/current-schema.ts`
 > 相关文档：[技术架构](./TECHNICAL_ARCHITECTURE.md) · [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) · [开发计划](./DEVELOPMENT_PLAN.md)
@@ -11,7 +11,7 @@
 
 本文严格区分：
 
-- **当前实现**：完整 Schema v9 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及唯一保留的 v8→v9 前向迁移。
+- **当前实现**：完整 Schema v10 基线直接创建的表、索引、Trigger、视图和 Repository 行为，以及 v8→v9→v10 顺序前向迁移。
 - **尚未实现范围**：技术架构中规划但尚未落地的知识图、版本和 ChangeSet 数据结构。
 
 当前数据库主要是“CLI 会话运行数据库”，已经覆盖会话、模型生成、资料元数据投影、Session 压缩和历史回查；它还不是完整的作品知识数据库。
@@ -100,12 +100,13 @@ PRAGMA busy_timeout = 5000;
 
 - 同一个 `ProjectDatabase` 实例内通过 Promise FIFO 队列串行写入。
 - 多语句业务更新使用 `BEGIN IMMEDIATE`、`COMMIT` 和失败回滚。
-- 当前数据库基线是 Schema v9，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
-- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v9 基线，不重放旧 DDL。
-- 完整 v8 数据库执行一次 v8→v9 前向迁移，增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表，并删除已停止使用的 `sources.source_label` 和 `sources.tags_json`。
-- 此字段删除发生在尚未发布的开发期 v9 内。由旧开发版本创建、已经标记为 v9 且仍含 `sources.tags_json` 的数据库在打开时只删除该列，已有 Source 行和 Schema 版本号保持不变。
+- 当前数据库基线是 Schema v10，版本标记保存在 `schema_migrations`，没有使用 `PRAGMA user_version`。
+- 全新空数据库在一个 `BEGIN IMMEDIATE` 事务中直接执行完整 v10 基线，不重放旧 DDL。
+- 完整 v8 数据库先执行 v8→v9：增加 Source 索引状态和语言列表、`knowledge_chunks`、资料 FTS、Chunk 内容 Hash、Embedding 模型与向量表，并删除已停止使用的 `sources.source_label` 和 `sources.tags_json`；随后继续执行 v9→v10。
+- v9→v10 只增加 `sources_title_unique` 唯一索引。迁移前如果已经存在同名 title，升级明确失败，不自动改名或合并。
+- 由旧开发版本创建、已经标记为 v9 且仍含 `sources.tags_json` 的数据库会先删除该废弃列，再执行 v9→v10；Source 行保持不变。
 - 只包含 v1–v7、缺少版本标记但已有业务对象、或版本高于当前程序的数据库都会被拒绝；打开过程不自动删除它们。
-- 当前代码不恢复 v1–v8 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
+- 当前代码不恢复 v1–v7 完整历史升级链、旧摘要 Schema、旧 Message/FTS 重建或项目指令文件快照转换逻辑。
 - 关闭数据库前等待写队列并执行 `wal_checkpoint(TRUNCATE)`。
 - `quickCheck()` 已实现，但项目打开时尚未自动调用。
 - `backup()` 当前执行完整 checkpoint 后复制主数据库文件，尚未使用 SQLite Backup API 或 `VACUUM INTO`。
@@ -113,8 +114,8 @@ PRAGMA busy_timeout = 5000;
 
 ## 5. Schema 演进策略
 
-- v9 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
-- 新项目只在 `schema_migrations` 写入一条 v9 记录；完整 v8 项目迁移后保留 v8、v9 两条记录。
+- v10 是当前早期开发阶段的数据库基线，v1–v7 转换路径不恢复。
+- 新项目只在 `schema_migrations` 写入一条 v10 记录；完整 v8 项目迁移后保留 v8、v9、v10 三条记录，v9 项目迁移后保留 v9、v10 两条记录。
 - 下一次结构变化必须使用更高且不复用的版本号。正式发布前可以再次压平开发期历史；正式发布后必须保留面向用户数据的前向升级路径。
 - 任何不受支持的数据库都只报告错误，不把完整基线覆盖到已有表上，也不自动删除数据库。
 
@@ -131,7 +132,7 @@ PRAGMA busy_timeout = 5000;
 
 ### 6.2 `schema_migrations`
 
-记录数据库已经达到的 Schema 版本。新数据库只记录 v9；受支持的 v8 项目升级后保留 v8、v9 两条历史行。
+记录数据库已经达到的 Schema 版本。新数据库只记录 v10；受支持的 v8 项目升级后保留 v8、v9、v10 三条历史行，v9 项目升级后保留 v9、v10 两条历史行。
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -230,9 +231,9 @@ UNIQUE(conversation_id, sequence)
 | `created_at` | TEXT | NOT NULL | 资料首次加入时间 |
 | `updated_at` | TEXT | NOT NULL | 资料内容或元数据最近更新时间 |
 
-`MaterialService` 打开项目时会从文件事实源校准该表，因此它可以重建。
+`MaterialService` 打开项目时会从 `sources/metadata/*.json` 与原始资料文件校准该表，因此删除或重建 SQLite 后仍可恢复 Source 投影。校准事务会先让现有投影 title 临时退出唯一键空间，再按完整元数据集合写回；这样即使两个旧投影 title 与事实源形成交换状态，也不会被唯一索引的中间状态阻断，同时不会删除仍然有效的 Chunk 和 Embedding。
 
-Schema v9 已通过 `sources_title_unique` 唯一索引约束 title。全新数据库和 v8→v9 都直接创建该索引；既有 v9 数据库打开时也会补建。若既有数据库已经存在同名资料，打开时明确失败，不自动改名或合并。
+Schema v10 通过 `sources_title_unique` 唯一索引约束 title。全新数据库直接创建该索引；v8 项目经过 v9 后继续迁移到 v10，v9 项目直接执行 v9→v10。若既有数据已经存在同名资料，迁移明确失败，不自动改名或合并。
 
 `sources.id` 继续作为内部主键以及 Chunk、FTS、Embedding 的关联身份。title 与物理文件名是两个独立概念：文件导入保存为 `materials/<original_file_name>`，用户修改 title 不移动文件；导入时还会单独检查原始文件名是否冲突。粘贴资料没有原始文件名，继续使用 UUID 内部文件名。
 
@@ -573,7 +574,7 @@ SQLite 还会为主键和 UNIQUE 约束创建自动索引。当前基线不创�
 
 ## 12. RAG 数据库范围
 
-Schema v9 已实现资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS，以及 Embedding 模型和向量存储表。混合检索在内存中生成结果和 `RetrievalContext`，不保存 Query、候选、排除项或证据快照。以下能力仍未进入当前 Schema：
+当前 Schema v10 继承了 v9 的资料 Source 索引状态、语言列表、纯文本 Chunk、Chunk 内容 Hash、External Content FTS、Embedding 模型和向量存储表，并增加资料 title 唯一索引。混合检索在内存中生成结果和 `RetrievalContext`，不保存 Query、候选、排除项或证据快照。以下能力仍未进入当前 Schema：
 
 - 正文 FTS、Embedding 任务/索引代次；资料本地精确向量和混合召回已经实现。
 - 实体、别名、事实、证据、关系、事件、人物状态和叙事线。
@@ -587,7 +588,7 @@ CDM 语义见 [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md)，TXT/Markdown 解�
 
 当前 Schema 已有 `sources` 表，字段和现状见 [6.6 `sources`](#66-sources)。RAG 不创建平行的 `knowledge_sources`；公开的 `source` 就是现有 `sources.id`，`sources.content_hash` 继续保存项目内规范化 UTF-8 资料副本的 SHA-256，`sources.size` 继续保存该副本的字节长度。
 
-当前完整 Schema v9 包含：
+当前完整 Schema v10 包含：
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
@@ -668,7 +669,7 @@ CREATE VIRTUAL TABLE knowledge_chunk_fts USING fts5(
 
 这里的 External Content 表示 FTS 通过 `chunk_rowid` 读取同一个 SQLite 数据库中的纯文本 Chunk，不表示正文保存在文件系统。FTS 的内部影子表是可重建索引，不是新的业务表。Chunk 与 FTS 的增删改必须由同一个 Repository 短事务维护。
 
-当前完整 Schema v9 同时包含 Chunk、FTS、Source 语言列表、Chunk Hash、Embedding 模型和向量表。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
+当前完整 Schema v10 同时包含 Chunk、FTS、Source 语言列表、Chunk Hash、Embedding 模型、向量表和 Source title 唯一索引。后续任务顺序只在 [DEVELOPMENT_PLAN.md](./DEVELOPMENT_PLAN.md) 维护。
 
 ### 12.4 `embedding_models`（已实现）
 

@@ -953,7 +953,7 @@ Session 压缩不得包含资料正文或 Chunk Content。允许的压缩投影�
 | `list_materials` | 当前页资料数量、页码、总页数 |
 | `read_material_context` | 返回 Chunk 数量 |
 
-建议在 `packages/agent/src/tool/knowledge-tools.ts` 实现三个无执行状态的 Tool 和 `createKnowledgeTools()`。Tool 只持有稳定的 Application Service，不持有 Project ID、Conversation ID 或 Session ID，也不直接访问 SQLite Repository。资料/RAG Application Service 负责 `searchKnowledge()`、`listMaterials()` 和 `readMaterialContext()`。
+建议在 `packages/agent/src/tool/knowledge-tools.ts` 实现三个无执行状态的 Tool 和 `createKnowledgeTools()`。Tool 只持有稳定的 Application Service，不持有 Project ID、Conversation ID 或 Session ID，也不直接访问 SQLite Repository。资料/RAG Application Service 负责资料列表、混合检索和相邻 Chunk 读取，并已实现 title 到内部 Source ID 的项目内解析；Tool 契约切换后只调用该 title 路径。
 
 ### 8.8 验收标准
 

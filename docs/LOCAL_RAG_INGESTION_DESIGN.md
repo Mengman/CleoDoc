@@ -411,7 +411,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 
 ## 11. 版本范围
 
-当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和数据库投影。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。Schema v9 包含 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步；混合检索不增加数据库表。Embedding Worker、安全写回编排和 sqlite-vec 0.1.9 精确余弦检索均已完成。`cleo index embed/status`、`cleo search --semantic` 与 `cleo search --hybrid [--explain]` 已形成离线检索闭环；安全 Debug 日志不保存 Query、资料正文或向量。固定中英文语料同时检查 Vector 与 Hybrid Top-1/Top-5 Recall，真实 Q8_0 CPU/GPU 首份结果见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
+当前已完成 `packages/rag` 的 `node-llama-cpp` CPU Baseline 适配层：可以从发行资源配置解析中英文 Q8_0 GGUF，按 Document/Query 两种输入计算包含特殊 Token 的实际长度，给 Query 添加模型指令，生成并归一化 `Float32Array`。资料导入已经按配置下限检测 CDM `<p>` 与 `<blockquote>` 正文块，将有序 `languages` 列表同时写入 Source 元数据和数据库投影。切片器已经根据主语言选择 GGUF，以 `vocabOnly` 模式复用模型 Tokenizer，按实际 Token 上限拆分和合并，并把模型 ID、revision、上限和比例写入 Source 索引配置。当前 Schema v10 继承 v9 的 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings` 和增量 Chunk 同步，并增加 Source title 唯一索引；混合检索不增加数据库表。Embedding Worker、安全写回编排和 sqlite-vec 0.1.9 精确余弦检索均已完成。`cleo index embed/status`、`cleo search --semantic` 与 `cleo search --hybrid [--explain]` 已形成离线检索闭环；安全 Debug 日志不保存 Query、资料正文或向量。固定中英文语料同时检查 Vector 与 Hybrid Top-1/Top-5 Recall，真实 Q8_0 CPU/GPU 首份结果见 [EMBEDDING_BENCHMARK_BASELINE.md](./EMBEDDING_BENCHMARK_BASELINE.md)。
 
 ### v0.1
 
@@ -420,7 +420,7 @@ CleoDoc 自动检查 Source、Chunk、归属关系、项目范围和原始文件
 - 使用 Embedding 模型自身的 Tokenizer 实现确定性 Baseline Chunk：超长块在 Token 上限前向前寻找自然边界，同一标题区域内的小块按 Token 上限贪心向前合并，并保留连续原文字节范围。
 - 使用 `node-llama-cpp` 加载 GGUF，并以同一模型完成 Tokenize 与 Embedding。
 - 实现 `knowledge_chunks.content_hash`、`embedding_models`、`chunk_embeddings`、Float32 Little-Endian BLOB，以及基于 sqlite-vec 的精确余弦检索。
-- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool；当前代码中的 v2 仍使用 `sourceId`，下一次直接修改同一 v2 契约，改用唯一 `title + chunkId`，不保留旧字段兼容分支。
+- 已实现 FTS 与向量的混合召回、RetrievalContext，以及面向 LLM 的资料列表、混合检索和相邻 Chunk 精读 Tool。Application Service 已支持用项目内唯一 title 选择资料并在内部解析为 `sources.id`；当前 Tool v2 仍使用 `sourceId`，下一次直接切换到 title 路径并删除旧应用层入口，不保留最终兼容分支。
 - 数据库内部通过 `sources.id + chunk_id` 校验归属并回溯 TXT/Markdown 原文；内部 Source UUID 不对 LLM 公开。
 - 使用 sqlite-vec 的稳定基础函数，不创建 `vec0`，不引入 vec1，不实现 ANN。
 
