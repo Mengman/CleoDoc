@@ -1,6 +1,6 @@
 # CleoDoc 文档索引
 
-本目录以 **v0.1 CLI 基线** 为共同起点，记录当前实现、已经确认的 v0.2 目标以及仍未确定的问题。开发过程中的临时方案、已经完成的重构清单和废弃接口不再作为设计文档保留。
+本目录以已经完成的 **v0.1 CLI 基线** 为共同起点，记录 v0.2 现有能力桌面 UI 化目标、顺延到 v0.3 的创作工作室方向以及仍未确定的问题。开发过程中的临时方案、已经完成的重构清单和废弃接口不再作为设计文档保留。
 
 ## 阅读顺序
 
@@ -20,7 +20,7 @@
 | [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) | Session 预算、压缩、切换、恢复和历史回查 | 通用 Tool 规范 |
 | [Tool Call 设计](./TOOL_CALL_DESIGN.md) | Tool 契约、Catalog、Runtime、审批及所有现有 Tool | 文档编辑模型和 RAG 排序算法 |
 | [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md) | CleoDoc 统一文档协议、标签、Node ID 和开放 Schema 问题 | 导入流水线和数据库存储 |
-| [文档处理设计](./文档处理设计.md) | v0.2 节点编辑、Draft 写入和文本统计 | CDM 标签白名单 |
+| [文档处理设计](./文档处理设计.md) | v0.3 节点编辑、Draft 写入和文本统计 | CDM 标签白名单 |
 | [资料解析与切片](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md) | TXT/Markdown 到临时 CDM、ChunkDraft 和原文定位 | Embedding、检索排序和表字段 |
 | [本地 RAG 与索引](./LOCAL_RAG_INGESTION_DESIGN.md) | Chunk 入库、FTS、Embedding、向量与混合检索 | 解析器细节和 Tool 通用协议 |
 | [软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md) | 默认 YAML、用户覆盖和配置生效规则 | Provider 协议实现 |
@@ -33,7 +33,7 @@
 - 文档事实源：当前作品使用 Markdown/JSON，资料保留原 TXT/Markdown 文件；CDM 是已实现最小 Core、尚未完成作品迁移的目标协议。
 - 本地知识：TXT/Markdown 解析、Tokenizer 切片、FTS5、GGUF Embedding、sqlite-vec 精确向量检索和混合 RAG 已完成。
 - Agent：OpenAI-compatible/Ollama、多轮 Tool Loop、Conversation 级 Runtime、Session 压缩、Reasoning 展示、ModelCall 审计和本地 RAG Tool 已完成。
-- 发布：跨平台 CLI 打包已建立；v0.1 尚需最终人工垂直闭环与发布验收。
+- 发布：跨平台 CLI 打包和 v0.1 人工垂直闭环验收均已完成；当前进入 v0.2 Desktop UI 规划与实施。
 
 ## 未决事项的维护规则
 
@@ -43,6 +43,7 @@
 - Chunk ID 在资料更新后的继承、混合语言多模型向量：资料解析与本地 RAG 设计。
 - Generation 与 Message 的长期关系：数据库设计。
 - 跨 Conversation 历史查询：PRD 与会话压缩设计。
-- v0.2 Draft、版本、Diff、知识图和阶段 Agent 的实施顺序：开发计划。
+- v0.2 Desktop UI 阶段、检查点和发布门：开发计划。
+- v0.3 Draft、版本、Diff、知识图和阶段 Agent 的顺延范围：开发计划；正式实施顺序尚未冻结。
 
 任何问题一旦确定，应直接更新对应专题文档并从“待确认”清单移除，不保留决策前后的过程记录。

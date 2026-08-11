@@ -1,7 +1,7 @@
 # CleoDoc：本地知识原生的中文小说 AI 主笔
 
-> 状态：以 v0.1 CLI 为已实现基线，定义 v0.2 桌面目标
-> 交付版本：v0.1 CLI 核心 MVP；v0.2 Electron 桌面产品  
+> 状态：v0.1 CLI 已完成；v0.2 聚焦现有能力桌面 UI 化；高级创作工作室能力顺延到 v0.3
+> 交付版本：v0.1 CLI 核心 MVP；v0.2 Electron 桌面 UI；v0.3 创作工作室扩展
 > 产品形态：免费、AGPLv3、本地优先；先验证 CLI，再交付跨平台桌面应用  
 > 技术方向：TypeScript Core、SQLite、自研 RAG；v0.2 使用 Electron、React  
 > 技术架构：[TECHNICAL_ARCHITECTURE.md](./TECHNICAL_ARCHITECTURE.md)  
@@ -13,12 +13,13 @@ CleoDoc 是一款面向普通中文用户的文档原生 AI Agent 应用。用�
 
 产品聚焦中文类型小说，长期目标是从一句灵感或零散素材出发，经过阶段性审批，形成一部 8–15 万字、结构完整且设定一致的作品。
 
-交付分为两个版本：
+交付分为三个版本：
 
 - **v0.1 CLI 核心 MVP**：验证 LLM 对话与文档保存、资料 CRUD，以及 LLM 调用本地 RAG 检索导入资料；正文由受控文档 Tool 读取，尚未进入 RAG 索引。
-- **v0.2 Electron 桌面产品**：在 CLI 已验证的 Core 上实现 React 作品工作室、TipTap 编辑器、Git 版本、语义 Diff、知识图和完整创作阶段。
+- **v0.2 Electron 桌面 UI**：在 CLI 已验证的 Core 上实现 React 三栏工作室，将项目、Markdown/TXT 阅读、资料、配置、对话、Session、Tool、RAG 和项目指令能力 UI 化，不新增创作与版本语义。
+- **v0.3 创作工作室扩展**：承接 CDM/TipTap、Draft、Git 版本、语义 Diff、知识图、阶段 Agent、新 Provider 和新格式导入导出。
 
-除明确标注为 CLI 核心的能力外，本文描述的桌面交互和完整创作体验以 v0.2 为交付目标。
+本文描述的完整创作体验是长期产品方向；v0.2 的确定范围只以现有能力 UI 化为目标，超出的桌面交互和创作流程均属于 v0.3 或更后版本。
 
 完整桌面产品由三个同等重要的核心组成：
 
@@ -59,6 +60,8 @@ CleoDoc 是一款面向普通中文用户的文档原生 AI Agent 应用。用�
 
 采用三栏桌面布局：
 
+v0.2 第一版只实现左侧作品/资料/查询/设置导航、中间 Markdown/TXT 只读阅读区和右侧主笔对话区。以下完整工作室内容中涉及编辑器、大纲、人物、时间线、版本和任务的入口从 v0.3 起再规划，v0.2 不显示占位控件。
+
 - **左侧**：作品树、知识库、人物、地点、时间线、情节线、资料、版本和任务。
 - **中间**：正文阅读与编辑、批注、版本对比、Agent 变更预览和证据查看。
 - **右侧**：唯一对外可见的 AI 主笔，包括沟通、计划、进度、风险和交付说明。
@@ -82,6 +85,8 @@ CleoDoc 是一款面向普通中文用户的文档原生 AI Agent 应用。用�
 - 某次恢复操作将内容恢复到了哪个历史状态。
 
 ### 3.2 阶段审批工作流
+
+本节属于 v0.3 及后续版本，不进入 v0.2。
 
 固定工作流为：
 
@@ -134,6 +139,8 @@ Conversation 的原始消息、Session 摘要和临时讨论结论默认相互�
 
 ### 3.4 Draft 写入与精确文本统计
 
+本节属于 v0.3 及后续版本，不进入 v0.2。
+
 未来作品工作室将聊天沟通与文稿产出分开：主笔需要解释、评审或提问时使用普通对话；决定产出文稿时，不在聊天消息中重复正文，而是直接调用 `write_draft` 将内容写入对应的工作 Draft。聊天区域只显示紧凑的写入状态，正文只在 Draft 页面展示。
 
 每次成功写入后，CleoDoc 在本地计算并通过标准 Tool Result 告诉主笔本次实际写入的字符数、字数和标点符号数。统计用于帮助主笔判断是否继续写作、补充、修订或征询用户，不作为自动截断或强制达标机制；普通对话不进行文稿字数统计。
@@ -169,7 +176,7 @@ v0.1 支持粘贴内容以及 TXT、Markdown 导入。DOCX、PDF、网页快照�
 - 一个项目内的资料名称必须唯一；默认使用原始文件名去掉扩展名，用户导入后可以重命名，但不能与已有资料同名。
 - 文件资料在项目中保持原 TXT/Markdown 格式、文件名主体和扩展名；文件名前后空白会被去除，文本编码可以在导入边界规范化为 UTF-8。修改资料名称不修改物理文件名。
 - 不自动为冲突资料编号或改名，也不覆盖已有文件。
-- v0.2 从文件夹导入时允许部分成功：正常文件继续导入，名称冲突或格式不支持的文件单独列入失败列表，由用户处理后重试。
+- v0.3 从文件夹导入时允许部分成功：正常文件继续导入，名称冲突或格式不支持的文件单独列入失败列表，由用户处理后重试。
 
 v0.1 处理流水线：
 
@@ -180,7 +187,7 @@ v0.1 处理流水线：
 5. 写入 SQLite trigram FTS5 全文索引。
 6. 使用 `node-llama-cpp` 加载与主语言匹配的本地 GGUF 嵌入模型生成向量。
 
-实体、事件、关系、规则和事实候选的抽取与审批属于 v0.2，不是当前摄取流水线的一部分。
+实体、事件、关系、规则和事实候选的抽取与审批属于 v0.3，不是当前摄取流水线的一部分。
 
 CDM、领域 JSON 和导入的原始资料是目标事实源；索引可以安全重建。当前 CLI 已有 Markdown/TXT 文档等待明确的 CDM 过渡方案，不进行静默转换。
 
@@ -193,7 +200,7 @@ CDM、领域 JSON 和导入的原始资料是目标事实源；索引可以安�
 3. 融合排序、去重，并按当前任务加权。
 4. 在模型上下文预算内组装证据包，生成当次调用使用的 `RetrievalContext`。
 
-v0.1 已实现其中的资料检索子集：在当前项目和 `material` 范围内并行执行 Exact、trigram FTS 与 Vector 召回，以 RRF 融合、按 Chunk 去重，并应用来源占比和字符预算。关系图、权威、时序和任务重排属于 v0.2。
+v0.1 已实现其中的资料检索子集：在当前项目和 `material` 范围内并行执行 Exact、trigram FTS 与 Vector 召回，以 RRF 融合、按 Chunk 去重，并应用来源占比和字符预算。关系图、权威、时序和任务重排属于 v0.3。
 
 预置检索策略：
 
@@ -220,7 +227,7 @@ v0.1 已实现其中的资料检索子集：在当前项目和 `material` 范围
 
 ### 4.5 关系图
 
-v0.2 使用 SQLite 关系表和递归查询，不引入独立图数据库：
+v0.3 计划使用 SQLite 关系表和递归查询，不引入独立图数据库：
 
 - 实体：人物、地点、组织、物品和概念。
 - 事件：时间、地点、参与者、原因、结果和来源章节。
@@ -230,6 +237,8 @@ v0.2 使用 SQLite 关系表和递归查询，不引入独立图数据库：
 - 证据：每条事实关联原始资料块或正文范围。
 
 ## 5. 版本管理
+
+本节属于 v0.3 及后续版本，不进入 v0.2。
 
 ### 5.1 用户语义
 
@@ -281,7 +290,7 @@ Git 是内部版本引擎，用户只看到：
 
 因此恢复操作本身也可以被撤销。
 
-v0.2 支持恢复整个项目或单个文档；片段级恢复后续提供。
+v0.3 计划支持恢复整个项目或单个文档；片段级恢复后续提供。
 
 ### 5.5 Agent 修改与版本
 
@@ -307,6 +316,8 @@ v0.2 支持恢复整个项目或单个文档；片段级恢复后续提供。
 大型原件进入基于 SHA-256 的内容寻址存储；Git 只记录文件名、哈希、来源和解析版本。只要仍被历史版本引用，原件不得被自动清理。
 
 ## 6. 文档语义 Diff
+
+本节属于 v0.3 及后续版本，不进入 v0.2。
 
 ### 6.1 对比场景
 
@@ -347,7 +358,7 @@ Git 负责提供两个版本的文件树和 Blob，CleoDoc 在其上计算文档
 
 - 对普通历史版本提供“恢复整个项目”和“恢复此文档”。
 - 对 Agent ChangeSet 提供“全部接受”“按章节接受”“拒绝”和“添加批注”。
-- v0.2 不支持按句子接受，以避免形成语义不连贯的正文。
+- v0.3 首版不支持按句子接受，以避免形成语义不连贯的正文。
 - Diff 结果按两端 revision 和算法版本缓存在 SQLite，可以随时重建。
 
 ## 7. 技术架构
@@ -355,25 +366,24 @@ Git 负责提供两个版本的文件树和 Blob，CleoDoc 在其上计算文档
 ### 7.1 桌面架构
 
 ```text
-React + TypeScript + TipTap
+React + TypeScript + Markdown/TXT Reader
           ↓ typed IPC
 Electron Main
           ↓
-Core Utility Process
+Single-Project Desktop Runtime
 ├─ ProjectService
-├─ VersionService（isomorphic-git）
-├─ KnowledgeService（SQLite / FTS5 / Vector / Graph）
-├─ DiffService
-└─ AgentRuntime
+├─ DocumentService
+├─ Material/KnowledgeService（SQLite / FTS5 / Vector）
+└─ v0.1 AgentRuntime
           ↓
 Embedding Worker（node-llama-cpp / GGUF）
 ```
 
-- Renderer 不直接访问文件系统、SQLite、Git 或模型密钥。
-- Electron Main 只负责窗口、应用生命周期、系统权限和凭据。
-- Core Utility Process 负责项目写入、版本、RAG、Agent 和模型调用。
-- Git 操作由 `VersionService` 串行执行，不依赖用户安装系统 Git。
+- Renderer 不直接访问文件系统、SQLite 或模型密钥。
+- Electron Main 负责窗口、应用生命周期和系统文件/目录对话框。
+- Desktop Runtime 只调用 v0.1 已验证的 Application Service，并且同一应用实例只保持一个活动 Project。
 - CPU 密集的本地嵌入在独立 Worker 中运行。
+- v0.2 不引入 TipTap、Git、Diff、Graph 或持久化阶段工作流。
 
 ### 7.2 项目目录
 
@@ -381,35 +391,21 @@ Embedding Worker（node-llama-cpp / GGUF）
 MyNovel.cleo/
 ├─ cleo.project.json
 ├─ manuscript/
-├─ canon/
 ├─ materials/
-├─ reviews/
 ├─ sources/
+│  └─ metadata/
 └─ .cleo/
-   ├─ git/
    ├─ project.sqlite
    ├─ blobs/
-   ├─ proposals/
-   └─ recovery-journal.json
+   ├─ models/
+   └─ backups/
 ```
 
-`.cleo/git` 是内部 Git 仓库；SQLite 损坏后可以从正文、设定和原始资料重建知识索引。
+v0.2 不改变项目目录的数据语义，也不创建 `.cleo/git`、提案目录或恢复日志。SQLite 中的资料索引仍可从原始资料重建。
 
 ### 7.3 Agent 运行时
 
-前台保持一个 AI 主笔，内部包含策划、研究、创作、文学编辑、一致性检查和影响分析能力。
-
-每个 `AgentJob` 保存：
-
-- 工作目标和当前创作阶段。
-- 允许读取的知识空间。
-- 检索策略和上下文预算。
-- 使用过的 `RetrievalContext`。
-- 模型、参数和用量估算。
-- 生成结果、检查结果和 `ChangeSet`。
-- 基准 revision、暂停、取消、重试和恢复状态。
-
-v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini 是后续适配目标；任何版本都不得静默切换模型或供应商。
+v0.2 沿用 v0.1 的单一前台 Tool Loop、Conversation/Session、压缩、历史回查、项目 Tool 和 RAG Tool，只增加桌面交互与任务状态展示。OpenAI-compatible 和 Ollama 是 v0.2 的全部 Provider；新 Provider、AgentJob、ChangeSet、Checkpoint 和阶段工作流顺延到 v0.3，任何版本都不得静默切换模型或供应商。
 
 ## 8. 核心公共类型
 
@@ -430,14 +426,14 @@ v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini �
 
 ## 9. 版本基线
 
-| 领域 | v0.1 基线 | v0.2 目标 |
-| --- | --- | --- |
-| 交互 | CLI 对话、命令和 Tool 审批 | Electron + React 作品工作室 |
-| 作品文档 | Markdown/JSON、安全保存、字符范围读取 | CDM + TipTap、节点级编辑、批注和 Draft |
-| 资料 | TXT/Markdown、唯一 title、原件保留 | 文件夹批量导入、DOCX/PDF |
-| RAG | 资料 Chunk、FTS、Embedding、混合检索和三个 RAG Tool | 正文、设定、关系图、权威与影响分析 |
-| 历史 | Conversation/Session、压缩和消息回查 | 版本、语义 Diff、Checkpoint 和阶段审批 |
-| Agent | 单一前台 Tool Loop | 可恢复的作品阶段工作流 |
+| 领域 | v0.1 基线 | v0.2 目标 | v0.3 顺延方向 |
+| --- | --- | --- | --- |
+| 交互 | CLI 对话、命令和 Tool 审批 | Electron + React 三栏 UI | 完整创作工作室和任务中心 |
+| 作品文档 | Markdown/JSON、安全保存、字符范围读取 | Markdown/TXT 只读展示和现有文档操作 UI | CDM + TipTap、节点编辑、批注和 Draft |
+| 资料 | TXT/Markdown、唯一 title、原件保留 | 现有资料管理和阅读 UI | 文件夹批量导入、DOCX/PDF |
+| RAG | 资料 Chunk、FTS、Embedding、混合检索和三个 RAG Tool | 现有索引、检索和 Tool 状态 UI | 正文、设定、关系图、权威与影响分析 |
+| 历史 | Conversation/Session、压缩和消息回查 | 现有历史和压缩 UI | 版本、语义 Diff、Checkpoint 和阶段审批 |
+| Agent | 单一前台 Tool Loop | 同一 Tool Loop 的桌面交互 | 可恢复的作品阶段工作流 |
 
 实施状态、任务顺序和发布门只在[开发计划](./DEVELOPMENT_PLAN.md)维护。
 
@@ -455,7 +451,20 @@ v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini �
 - 超时、断网、压缩失败和进程退出不会丢失已保存消息、正文或原始资料。
 - Windows、macOS 和 Linux CLI 发行包可以启动并完成核心流程。
 
-### 10.2 v0.2 版本与 Diff
+### 10.2 v0.2 桌面 UI 闭环
+
+- 用户可以从桌面安装版创建、打开、关闭和继续使用现有项目。
+- 可以查看 Markdown/TXT 作品和资料，阅读过程不改写原文件。
+- 可以通过 UI 完成现有资料导入、重命名、删除、索引、Embedding 和混合检索。
+- 可以配置 OpenAI-compatible/Ollama，与主笔流式对话，查看 Reasoning，并取消当前生成。
+- 可以新建和恢复 Conversation，查看 Session、触发压缩并在重启后继续工作。
+- 模型可以继续调用现有文档、历史和 RAG Tool；写入和项目指令修改必须由用户批准。
+- 项目指令当前 Revision、历史和恢复可以通过 UI 操作。
+- 一个应用实例只保持一个活动项目，项目切换不会串用消息、审批、任务或检索结果。
+- Windows、macOS 和 Linux 发行物能够启动并完成核心项目打开验证。
+- v0.2 不显示 TipTap、Draft、版本、Diff、知识图、人物设定或任务中心的占位入口。
+
+### 10.3 v0.3 版本与 Diff
 
 - 用户无需安装或理解 Git 即可查看修改历史。
 - 连续字符编辑不会产生大量碎片版本。
@@ -468,7 +477,7 @@ v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini �
 - 应用在版本写入或恢复过程中异常退出时，项目能够从恢复日志回到一致状态。
 - 恢复版本后，只重新索引发生变化的文档和知识对象。
 
-### 10.3 v0.2 长篇创作闭环
+### 10.4 v0.3 长篇创作闭环
 
 - 从一句灵感或零散资料可以形成委托书、总纲、作品圣经和样章。
 - 悬疑、言情和科幻基准项目均可完成至少 8 万字正文。
@@ -487,4 +496,4 @@ v0.1 模型适配层支持 OpenAI-compatible 和 Ollama。Anthropic 与 Gemini �
 - 用户作品不受软件许可证约束，CleoDoc 不使用用户内容训练模型。
 - 用户自备模型密钥或连接本地模型。
 - 对指定在世作者的模仿请求转换为抽象文风特征。
-- 本地 RAG、版本历史和 Diff 都是核心基础设施，不作为后期附加功能。
+- 本地 RAG 是当前核心基础设施；版本历史和 Diff 是 v0.3 的长期核心方向，但不因此进入 v0.2。

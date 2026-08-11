@@ -29,7 +29,7 @@ CleoDoc 是 AGPLv3、免费、本地优先的中文小说 AI 主笔，不是通�
 
 ### v0.1：CLI 核心 MVP
 
-当前优先实现 v0.1。在 CLI 验收通过前，不主动开发 Electron、React、TipTap 或其他 GUI 能力。
+v0.1 已完成开发和发布闭环验收，是后续桌面产品复用的 Core 基线。
 
 v0.1 按重要性排序只有三个核心目标：
 
@@ -50,9 +50,13 @@ v0.1 明确不做：Electron、React、TipTap、Git 版本界面、语义 Diff�
 
 ### v0.2：Electron 桌面产品
 
-v0.2 在同一套 Core 上增加 Electron + React 工作室、TipTap 编辑器、Git 版本管理、文档语义 Diff、知识图、设定审批和可恢复的 Agent 工作流。
+v0.2 在同一套 Core 上增加 Electron + React 桌面界面，将 v0.1 已完成的项目、文档、资料、配置、对话、Session、Tool、RAG 和项目指令能力 UI 化。除补充 Markdown/TXT 作品与资料只读展示外，v0.2 不增加新的文档格式、创作流程、知识语义或版本能力。
 
 GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中复制项目、数据库、RAG 或模型调用逻辑。
+
+### v0.3：创作工作室能力扩展
+
+原先规划在 v0.2 的 CDM/TipTap、Draft 与文本统计、Git 版本与语义 Diff、知识图与设定审批、阶段 Agent、新 Provider 和新格式导入导出统一顺延到 v0.3。列入顺延范围不代表已经冻结 v0.3 设计；进入实施前必须重新规划。
 
 ## 3. 架构不变量
 
@@ -80,10 +84,10 @@ packages/project     项目格式和安全文件读写
 packages/database    SQLite、当前 Schema 基线和 Repository
 packages/knowledge   资料与知识模型
 packages/rag         Chunk/Source、FTS、Embedding、检索、融合和上下文组装
-packages/agent       LLM Tool Loop；v0.2 扩展持久化工作流
+packages/agent       LLM Tool Loop；v0.3 再评估持久化工作流
 packages/model-providers
-packages/versioning  v0.2
-packages/diff        v0.2
+packages/versioning  v0.3
+packages/diff        v0.3
 ```
 
 底层 package 不得反向依赖 `apps/cli`、`apps/desktop` 或 UI。
@@ -127,7 +131,7 @@ v0.1 检索路径为：
 - Tool 参数必须经过 Schema 校验；Tool 只能读取当前任务被授权的项目范围。
 - Tool Loop 必须设置最大轮数、上下文预算、超时和取消信号，避免无限循环。
 - 自动批准的 Tool 在 CLI 中静默执行；只有需要用户授权的 Tool 才显示审批界面。原始 Tool Result 返回 LLM 并按既有 Message 协议持久化，不直接作为普通 CLI 输出展示给用户。
-- LLM 生成内容不能直接覆盖正式文档。v0.1 需要用户明确执行保存或确认覆盖；v0.2 通过 ChangeSet 和审批应用。
+- LLM 生成内容不能直接覆盖正式文档。v0.1 和 v0.2 都需要用户明确执行保存或确认覆盖；ChangeSet 留到 v0.3 重新规划。
 - RAG Tool 的版本化 Tool Result Message 用于还原实际发送的检索证据；普通 CLI 检索的 Query、候选和结果不写入数据库。
 - 日志默认不记录正文、资料原文、完整 Prompt、模型响应或密钥。
 
@@ -135,14 +139,14 @@ v0.1 检索路径为：
 
 以下约束在开发 v0.2 时生效：
 
-- 使用 Electron、React、TypeScript、TipTap/ProseMirror。
+- 使用 Electron、React 和 TypeScript；作品与资料只提供 Markdown/TXT 阅读，不接入 TipTap/ProseMirror。
 - Renderer 启用 sandbox、context isolation 和严格 CSP；关闭 Node integration。
-- Renderer 不直接访问文件系统、SQLite、Git、模型密钥或原始 `ipcRenderer`。
+- Renderer 不直接访问文件系统、SQLite、模型密钥或原始 `ipcRenderer`。
 - Preload 只暴露经过 Schema 校验的白名单 Typed IPC。
-- Git 使用 isomorphic-git，对用户隐藏 Git 概念；用户只看到修改历史、命名版本、比较和恢复。
-- 恢复历史通过创建新的恢复记录完成，不改写既有历史。
-- 文档 Diff 以稳定 CDM Node ID、CDM 结构和中文句子/字符级差异为基础，不依赖视觉行号。
-- 用户直接修改的正文具有较高权威，Agent 不得静默改回。
+- 同一应用实例只保持一个活动 Project；切换项目前必须关闭当前 Project，审批、Conversation Runtime 和后台任务不得跨 Project 共享。
+- v0.2 继续使用当前 Markdown/JSON 作品事实源，不静默迁移为 CDM，也不增加正文编辑、Draft、Git 或 Diff。
+- 参考 UI 中未进入 v0.2 的功能必须隐藏，不创建不可用按钮、占位页面、平行数据模型或预留数据库表。
+- ModelCall 审计和 Debug 日志保留现有 Core/CLI 能力，但 v0.2 不开发模型调用记录或独立问题诊断界面。
 
 ## 8. 编码与测试要求
 

@@ -1,8 +1,8 @@
 # CleoDoc
 
-CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
+CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 已通过 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环；v0.2 将这些已完成能力迁移到 Electron + React 桌面界面。
 
-v0.1 已形成 CLI 基线：OpenAI-compatible/Ollama 对话、生成内容保存、资料管理、Session 压缩与历史回查、Reasoning 展示与 ModelCall 审计、数据库项目指令、受控 Tool Loop，以及 `node-llama-cpp` GGUF Embedding、Tokenizer 切片、sqlite-vec 精确检索和 Exact/FTS/Vector 混合 RAG。跨平台 CLI 打包已经建立；正文索引不属于 v0.1 发布门，发布前只剩人工垂直闭环验收。文档入口见[文档索引](./docs/README.md)，唯一实施状态来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+v0.1 CLI 基线包括：OpenAI-compatible/Ollama 对话、生成内容保存、资料管理、Session 压缩与历史回查、Reasoning 展示与 ModelCall 审计、数据库项目指令、受控 Tool Loop，以及 `node-llama-cpp` GGUF Embedding、Tokenizer 切片、sqlite-vec 精确检索和 Exact/FTS/Vector 混合 RAG。跨平台 CLI 打包和人工垂直闭环验收均已完成。v0.2 只做现有能力 UI 化，并补充 Markdown/TXT 作品与资料阅读；CDM/TipTap、Draft、Git/Diff、知识图和阶段 Agent 顺延到 v0.3。文档入口见[文档索引](./docs/README.md)，唯一实施状态来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
@@ -70,7 +70,7 @@ my-novel.cleo/
    └─ backups/
 ```
 
-当前 CLI 以 Markdown/JSON 保存作品事实；CDM 是 v0.2 的目标统一文档协议，正文迁移方式尚未确定。`.cleo/project.sqlite` 保存对话、资料索引和运行状态。
+当前 CLI 和 v0.2 Desktop 继续以 Markdown/JSON 保存作品事实，并只读展示 Markdown/TXT 作品与资料；CDM 统一文档协议及正文迁移顺延到 v0.3。`.cleo/project.sqlite` 保存对话、资料索引和运行状态。
 
 ## 使用 OpenAI-compatible Provider
 

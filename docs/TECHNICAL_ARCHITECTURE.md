@@ -8,7 +8,7 @@
 
 ## 1. 架构目标
 
-CleoDoc 使用 TypeScript 构建本地优先的模块化单体。v0.1 用 CLI 验证领域 Core；v0.2 在同一套 Application Service 上增加 Electron + React，不重写项目、数据库、RAG 或 Agent 逻辑。
+CleoDoc 使用 TypeScript 构建本地优先的模块化单体。v0.1 已用 CLI 验证领域 Core；v0.2 在同一套 Application Service 上增加 Electron + React，只把已有能力 UI 化，不重写项目、数据库、RAG 或 Agent 逻辑。
 
 架构必须保证：
 
@@ -202,13 +202,10 @@ Provider/模型能力目录维护 `contextWindowTokens`、`maxOutputTokens` 和�
 
 ```mermaid
 flowchart TB
-    RENDERER["Electron Renderer · React · TipTap"] -->|"Typed IPC"| PRELOAD["Sandboxed Preload"]
+    RENDERER["Electron Renderer · React · Markdown/TXT Reader"] -->|"Typed IPC"| PRELOAD["Sandboxed Preload"]
     PRELOAD --> MAIN["Electron Main"]
-    MAIN --> CORE["Core Utility Process"]
-    CORE --> SERVICES["v0.1 Application Services"]
-    CORE --> VERSION["VersionService · isomorphic-git"]
-    CORE --> DIFF["CDM DiffService"]
-    CORE --> WORKFLOW["Persistent Agent Workflow"]
+    MAIN --> RUNTIME["Single-Project Desktop Runtime"]
+    RUNTIME --> SERVICES["v0.1 Application Services"]
     SERVICES --> DB["Project SQLite"]
     SERVICES --> FILES["Project Files"]
     SERVICES --> EMBED["Embedding Worker"]
@@ -217,25 +214,29 @@ flowchart TB
 ### 8.1 Desktop 边界
 
 - Renderer 启用 sandbox、context isolation 和严格 CSP，关闭 Node integration。
-- Renderer 不直接访问文件系统、SQLite、Git、模型密钥或原始 `ipcRenderer`。
+- Renderer 不直接访问文件系统、SQLite、模型密钥或原始 `ipcRenderer`。
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
-- Main 负责窗口、生命周期、系统对话框和凭据；领域操作在 Core Utility Process。
-- 是否允许一个应用进程同时打开多个 Project 仍待产品决定；决定前不得让审批或 Runtime 状态跨 Project 共享。
+- Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
+- 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
+- Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 
-### 8.2 CDM 与编辑器
+### 8.2 作品与资料阅读
 
-CDM 是用户、LLM、解析器和展示层共用的目标协议。除纯样式 Mark 外的结构 Node 使用稳定 ID；TipTap 只作为 Editor/View Model。视觉行号不进入文档协议。正式 CDM v1、当前 Markdown 正文迁移、Revision 和节点编辑契约仍需在实现前确定。
+- v0.2 继续以当前 Markdown/JSON 作品和 TXT/Markdown 资料作为事实源，不执行 CDM 迁移。
+- Desktop 为 Markdown 提供安全只读渲染，为 TXT 提供保留换行的只读展示。
+- 作品服务补充 `.txt` 列出与读取，但不增加 TXT 编辑、富文本编辑、自动保存、Draft 或版本语义。
+- Markdown 渲染结果是不可信内容，不能执行脚本、获得 Node 权限或绕过外部链接策略。
 
-### 8.3 Git、Diff 与恢复
+### 8.3 v0.1 能力 UI 化
 
-- Git 由 VersionService 管理，用户不看到 commit、tag、branch 或 checkout。
-- 恢复旧版本通过写入目标文件树并创建新的恢复记录完成，不改写历史。
-- Diff 基于 CDM Node ID 和结构，节点内使用中文句子/字符级算法。
-- Git 写入、事实文件切换、SQLite 投影更新和恢复日志组成可恢复事务边界。
+- 项目、资料、对话、Session、Reasoning、Tool、RAG、项目指令、Provider 和软件配置继续由已有 Application Service 拥有。
+- UI 只保存界面状态和未发送输入，不创建第二套项目、消息、资料或索引事实源。
+- 长任务通过同一桌面边界报告运行、完成、失败和取消状态；必要状态显示在所属页面，不建设独立监控中心。
+- ModelCall 审计和 Debug 日志保留现有存储与 CLI 行为，v0.2 不增加调用记录或诊断页面。
 
-### 8.4 知识图与阶段 Agent
+### 8.4 v0.3 演进边界
 
-v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状态、伏笔和证据；不引入独立图数据库。Graph Retriever 与现有 Exact/FTS/Vector 并列。AgentJob、ChangeSet 和 Checkpoint 持久化阶段目标、基准 Revision、证据、输出、审批和恢复状态。
+CDM/TipTap、Draft、Git/语义 Diff、知识图、设定审批、阶段 Agent、新 Provider 和新格式导入导出统一顺延到 v0.3。v0.2 不为这些能力增加入口、占位模块、数据库表或平行领域模型。v0.3 开始前必须重新确认这些能力的范围和顺序。
 
 ## 9. 安全、故障与性能
 
@@ -254,7 +255,7 @@ v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状�
 - 索引或向量失败只更新索引状态，不修改原始资料。
 - Source 删除通过外键级联清理 Chunk 和向量，FTS Trigger 同步清理索引。
 - Worker 返回结果写回前校验 Source/Chunk Hash，陈旧结果丢弃。
-- v0.2 版本应用和恢复必须使用恢复日志，避免文件与索引处于半提交状态。
+- v0.2 项目关闭和切换必须有序取消或结束长任务，避免数据库、消息和索引处于不一致状态。
 
 ### 9.3 性能与测试
 
@@ -266,12 +267,12 @@ v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状�
 
 ## 10. 当前未决架构问题
 
-1. v0.2 是单项目进程还是一个应用内多项目切换。
-2. CDM v1 Schema、作品正文迁移和 Document Revision 的最终协议。
-3. 跨 Conversation 历史查询的范围、权限和权威等级。
-4. 多语言 Source 何时生成多套 Embedding，以及不同语言结果如何融合。
-5. 资料更新后 Chunk ID 的继承和既有引用迁移。
-6. Generation 与 Message 的模型正文是否长期同时保留。
-7. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
+1. Electron 中 `node:sqlite`、sqlite-vec、`node-llama-cpp` 与现有 Worker 的最终进程承载和打包方式。
+2. 跨 Conversation 历史查询的范围、权限和权威等级。
+3. 多语言 Source 何时生成多套 Embedding，以及不同语言结果如何融合。
+4. 资料更新后 Chunk ID 的继承和既有引用迁移。
+5. Generation 与 Message 的模型正文是否长期同时保留。
+6. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
+7. v0.3 的 CDM v1、作品迁移、Draft、版本和阶段 Agent 最终边界。
 
 这些问题保留在对应领域文档中；本文件只记录它们对系统边界的影响，不提前给出实现。

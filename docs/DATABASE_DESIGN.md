@@ -362,5 +362,5 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 2. v0.2 是否在项目打开时自动执行 `quickCheck()`，以及损坏后的备份、只读打开和重建 UX。
 3. `inherited_summary_id`、消息边界和 `summary_id` 是否在正式发布后增加数据库外键；当前业务流程保证其完整性。
 4. 资料更新重新切片时 Chunk ID 的继承与正式文档引用迁移。
-5. 知识图、AgentJob、ChangeSet、Checkpoint、Git Revision 和 Diff 缓存的最终表结构。
+5. v0.3 知识图、AgentJob、ChangeSet、Checkpoint、Git Revision 和 Diff 缓存的最终表结构。
 6. 查询辅助索引是否需要调整，必须以真实项目 P50/P95 数据为依据。
