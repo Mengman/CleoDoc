@@ -24,61 +24,78 @@ import {
 } from "../arguments.js";
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
 
+export type MaterialCommandService = Pick<
+  MaterialService,
+  "addFile" | "addText" | "get" | "list" | "remove" | "rename"
+>;
+
 export async function runMaterialCommand(
   parsed: ParsedArguments,
   context: CliCommandContext,
 ): Promise<void> {
   const config = getSoftwareConfig();
-  const [subcommand, reference, value] = parsed.positionals;
-  assertOnlyOptions(parsed, ["project", "stdin", "title", "format", "encoding"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
   const materials = await MaterialService.open(root, createMaterialServiceOptions());
   try {
-    switch (subcommand) {
-      case "add":
-        await addMaterial(parsed, context, materials, reference, config.materials.maxImportBytes);
-        return;
-      case "list":
-        assertPositionals(parsed, 1, "cleo material list");
-        assertOnlyOptions(parsed, ["project"]);
-        await listMaterials(context, materials);
-        return;
-      case "show": {
-        assertPositionals(parsed, 2, "cleo material show <material-id>");
-        assertOnlyOptions(parsed, ["project"]);
-        const material = await materials.get(reference!);
-        printMaterialMetadata(context, material.source);
-        context.output.write("--- 内容 ---\n");
-        context.output.write(material.content);
-        if (!material.content.endsWith("\n")) context.output.write("\n");
-        return;
-      }
-      case "rename": {
-        assertPositionals(parsed, 3, "cleo material rename <material-id> <title>");
-        assertOnlyOptions(parsed, ["project"]);
-        const renamed = await materials.rename(reference!, value!);
-        context.output.write(`已重命名资料：${renamed.title}（${renamed.id}）\n`);
-        return;
-      }
-      case "remove": {
-        assertPositionals(parsed, 2, "cleo material remove <material-id>");
-        assertOnlyOptions(parsed, ["project"]);
-        const removed = await materials.remove(reference!);
-        context.output.write(`已删除资料：${removed.title}（${removed.id}）\n`);
-        return;
-      }
-      default:
-        throw new AppError("VALIDATION_ERROR", "用法：cleo material <add|list|show|rename|remove>");
-    }
+    await executeMaterialCommand(parsed, context, materials, config.materials.maxImportBytes);
   } finally {
     await materials.close();
+  }
+}
+
+export async function executeMaterialCommand(
+  parsed: ParsedArguments,
+  context: CliCommandContext,
+  materials: MaterialCommandService,
+  maxImportBytes: number,
+): Promise<void> {
+  const [subcommand, reference, value] = parsed.positionals;
+  assertOnlyOptions(parsed, ["project", "stdin", "title", "format", "encoding"]);
+  switch (subcommand) {
+    case "add":
+      await addMaterial(parsed, context, materials, reference, maxImportBytes);
+      return;
+    case "list":
+      assertPositionals(parsed, 1, "cleo material list");
+      assertOnlyOptions(parsed, ["project"]);
+      await listMaterials(context, materials);
+      return;
+    case "show": {
+      assertPositionals(parsed, 2, "cleo material show <title>");
+      assertOnlyOptions(parsed, ["project"]);
+      const source = await findMaterialByTitle(materials, reference!);
+      const material = await materials.get(source.id);
+      printMaterialMetadata(context, material.source);
+      context.output.write("--- 内容 ---\n");
+      context.output.write(material.content);
+      if (!material.content.endsWith("\n")) context.output.write("\n");
+      return;
+    }
+    case "rename": {
+      assertPositionals(parsed, 3, "cleo material rename <current-title> <new-title>");
+      assertOnlyOptions(parsed, ["project"]);
+      const source = await findMaterialByTitle(materials, reference!);
+      const renamed = await materials.rename(source.id, value!);
+      context.output.write(`已重命名资料：${renamed.title}\n`);
+      return;
+    }
+    case "remove": {
+      assertPositionals(parsed, 2, "cleo material remove <title>");
+      assertOnlyOptions(parsed, ["project"]);
+      const source = await findMaterialByTitle(materials, reference!);
+      const removed = await materials.remove(source.id);
+      context.output.write(`已删除资料：${removed.title}\n`);
+      return;
+    }
+    default:
+      throw new AppError("VALIDATION_ERROR", "用法：cleo material <add|list|show|rename|remove>");
   }
 }
 
 async function addMaterial(
   parsed: ParsedArguments,
   context: CliCommandContext,
-  materials: MaterialService,
+  materials: MaterialCommandService,
   reference: string | undefined,
   maxImportBytes: number,
 ): Promise<void> {
@@ -120,15 +137,27 @@ async function addMaterial(
 
 async function listMaterials(
   context: CliCommandContext,
-  materials: MaterialService,
+  materials: MaterialCommandService,
 ): Promise<void> {
   const list = await materials.list();
   if (list.length === 0) context.output.write("尚无资料。\n");
   for (const source of list) {
     context.output.write(
-      `${source.id}\t${source.title}\t${source.format}\t${source.languages.join(",")}\t${source.size} bytes\n`,
+      `${source.title}\t${source.format}\t${source.languages.join(",")}\t${source.size} bytes\n`,
     );
   }
+}
+
+async function findMaterialByTitle(
+  materials: MaterialCommandService,
+  title: string,
+): Promise<Awaited<ReturnType<MaterialCommandService["list"]>>[number]> {
+  const normalizedTitle = title.trim();
+  const source = (await materials.list()).find((candidate) => candidate.title === normalizedTitle);
+  if (source === undefined) {
+    throw new AppError("MATERIAL_NOT_FOUND", `当前项目中找不到资料：${normalizedTitle}`);
+  }
+  return source;
 }
 
 function assertPositionals(parsed: ParsedArguments, expected: number, usage: string): void {
@@ -167,14 +196,9 @@ function printMaterialImported(
   context.output.write(
     `${result.created ? "已添加资料" : "资料已存在，未重复导入"}：${result.source.title}\n`,
   );
-  context.output.write(`资料 ID：${result.source.id}\n路径：${result.source.relativePath}\n`);
+  context.output.write(`路径：${result.source.relativePath}\n`);
   context.output.write(`输入编码：${result.inputEncoding}\n`);
   context.output.write(`语言：${result.source.languages.join(", ")}\n`);
-  if (result.created) {
-    context.output.write(`解析结果：.cleo/derived/documents/${result.source.id}.cdm.xml\n`);
-    context.output.write(`切片结果：.cleo/derived/chunks/${result.source.id}.chunks.json\n`);
-  }
-  context.output.write(`内容哈希：${result.source.contentHash}\n`);
 }
 
 function printMaterialMetadata(
@@ -182,10 +206,9 @@ function printMaterialMetadata(
   source: Awaited<ReturnType<MaterialService["list"]>>[number],
 ): void {
   context.output.write(`资料：${source.title}\n`);
-  context.output.write(`资料 ID：${source.id}\n`);
   context.output.write(`格式：${source.format}\n`);
   context.output.write(`语言：${source.languages.join(", ")}\n`);
-  context.output.write(`路径：${source.relativePath}\n内容哈希：${source.contentHash}\n`);
+  context.output.write(`路径：${source.relativePath}\n`);
   context.output.write(`创建时间：${source.createdAt}\n更新时间：${source.updatedAt}\n`);
 }
 

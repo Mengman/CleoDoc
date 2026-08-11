@@ -209,6 +209,8 @@ cleo document save-last <path>
 
 一个项目内的资料 title 由业务检查和 SQLite 唯一索引共同保证唯一。导入和重命名执行同一规则；用户修改 title 只更新元数据，不移动原文件、不重建索引。
 
+资料 CRUD、索引状态和检索结果的普通 CLI 输出使用 title，不展示内部 Source UUID 或 Source 内容哈希。`show`、`rename` 和 `remove` 也以唯一 title 定位资料；包含空格的 title 由 Shell 引号作为一个参数传入。
+
 工作内容：
 
 - 建立 `MaterialService`。
@@ -225,9 +227,9 @@ cleo document save-last <path>
 cleo material add <file>
 cleo material add --stdin
 cleo material list
-cleo material show <material-id>
-cleo material rename <material-id> <title>
-cleo material remove <material-id>
+cleo material show <title>
+cleo material rename <current-title> <new-title>
+cleo material remove <title>
 ```
 
 验收门 B：

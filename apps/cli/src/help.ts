@@ -34,9 +34,9 @@ export const helpText = `CleoDoc v0.1 CLI
     [--encoding <utf-8|gb2312|gbk|gb18030>]
   cleo material add --stdin [--title <标题>] [--format <text|markdown>]
   cleo material list [--project <directory>]
-  cleo material show <material-id> [--project <directory>]
-  cleo material rename <material-id> <title> [--project <directory>]
-  cleo material remove <material-id> [--project <directory>]
+  cleo material show <title> [--project <directory>]
+  cleo material rename <current-title> <new-title> [--project <directory>]
+  cleo material remove <title> [--project <directory>]
 
   cleo index status [--project <directory>]
   cleo index rebuild [--project <directory>]

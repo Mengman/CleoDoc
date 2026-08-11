@@ -194,7 +194,6 @@ async function semanticSearch(
 function printResults(
   results: readonly {
     sourceTitle: string;
-    sourceId: string;
     chunkId: string;
     content: string;
     startOffset: number;
@@ -210,7 +209,7 @@ function printResults(
     output.write(
       `[${index + 1}] ${result.sourceTitle}` +
         `\n` +
-        `source: ${result.sourceId}\nchunk: ${result.chunkId}\n` +
+        `chunk: ${result.chunkId}\n` +
         `range: ${result.startOffset}-${result.endOffset}\n${snippet(result.content)}\n\n`,
     );
   }
@@ -228,7 +227,7 @@ function printVectorResults(
     const chunk = result.chunk;
     output.write(
       `[${index + 1}] ${chunk.sourceTitle}\tdistance: ${result.distance.toFixed(6)}\n` +
-        `source: ${chunk.sourceId}\nchunk: ${chunk.chunkId}\n` +
+        `chunk: ${chunk.chunkId}\n` +
         `range: ${chunk.startOffset}-${chunk.endOffset}\n${snippet(chunk.content)}\n\n`,
     );
   }
@@ -248,7 +247,7 @@ function printHybridResults(
     const ranks = result.ranks.map((rank) => `${rank.method}#${rank.rank}`).join(", ");
     output.write(
       `[${index + 1}] ${chunk.sourceTitle}\tscore: ${result.score.toFixed(6)}\n` +
-        `source: ${chunk.sourceId}\nchunk: ${chunk.chunkId}\n` +
+        `chunk: ${chunk.chunkId}\n` +
         `range: ${chunk.startOffset}-${chunk.endOffset}\n` +
         (explain ? `命中：${ranks}\n资料版本时间：${chunk.sourceUpdatedAt}\n` : "") +
         `${snippet(chunk.content)}\n\n`,

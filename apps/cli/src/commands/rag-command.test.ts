@@ -77,11 +77,28 @@ describe("RAG CLI commands", () => {
           },
         ];
       },
+      async rebuildIndex() {
+        return {
+          indexedCount: 0,
+          failed: [
+            {
+              sourceId: "source-1",
+              title: "资料",
+              errorCode: "INDEX_FAILED",
+              message: "index failed",
+            },
+          ],
+        };
+      },
     });
     await executeIndexCommand(parseArguments(["index", "status"]), dependencies(output, service));
+    await executeIndexCommand(parseArguments(["index", "rebuild"]), dependencies(output, service));
     expect(output.content).toContain("embedding: 2/3");
     expect(output.content).toContain("pending: 1");
     expect(output.content).toContain("model: model-zh");
+    expect(output.content).toContain("资料\tready\t3 chunks");
+    expect(output.content).toContain("失败 [INDEX_FAILED]：资料— index failed");
+    expect(output.content).not.toContain("source-1");
   });
 
   it("keeps FTS usable when semantic search is unavailable and never logs text", async () => {
@@ -127,6 +144,7 @@ describe("RAG CLI commands", () => {
 
     expect(output.content).toContain("distance: 0.250000");
     expect(output.content).toContain("FTS:exact keyword");
+    expect(output.content).not.toContain("source: source-1");
     const logs = await readdir(path.join(root, ".cleo", "logs"));
     for (const logName of logs) {
       const log = await readFile(path.join(root, ".cleo", "logs", logName), "utf8");
@@ -155,6 +173,7 @@ describe("RAG CLI commands", () => {
 
     expect(output.content).toContain("exact#1, fts#1, vector#1");
     expect(output.content).toContain("上下文字符数：");
+    expect(output.content).not.toContain("source: source-1");
     const [logName] = await readdir(path.join(root, ".cleo", "logs"));
     const log = await readFile(path.join(root, ".cleo", "logs", logName!), "utf8");
     expect(log).toContain('"operation":"hybrid-search"');

@@ -59,7 +59,7 @@ async function printIndexStatus(
   }
   for (const status of statuses) {
     output.write(
-      `${status.sourceId}\t${status.title}\t${status.status}\t${status.chunkCount} chunks\n` +
+      `${status.title}\t${status.status}\t${status.chunkCount} chunks\n` +
         `  embedding: ${status.embeddedChunkCount}/${status.chunkCount}` +
         `\tpending: ${status.pendingEmbeddingCount}` +
         `\tlanguage: ${status.language}\tmodel: ${status.embeddingModelId}` +
@@ -78,9 +78,7 @@ async function rebuildIndex(
     `索引重建完成：${result.indexedCount} 份资料成功，${result.failed.length} 份失败。\n`,
   );
   for (const failure of result.failed) {
-    output.write(
-      `失败 [${failure.errorCode}]：${failure.title}（${failure.sourceId}）— ${failure.message}\n`,
-    );
+    output.write(`失败 [${failure.errorCode}]：${failure.title}— ${failure.message}\n`);
   }
 }
 

@@ -180,13 +180,13 @@ npm run cleo -- document delete manuscript/notes.md
 当前资料管理支持粘贴文本以及 UTF-8、GB2312、GBK、GB18030 编码的 TXT、Markdown 文件。文件导入默认先严格检查 UTF-8，失败后尝试 GB18030；判断错误时可用 `--encoding` 明确指定：
 
 ```powershell
-npm run cleo -- material add .\references\railway.md --title "铁路资料" --tags "历史,铁路"
+npm run cleo -- material add .\references\railway.md --title "铁路资料"
 npm run cleo -- material add .\references\old-book.txt --encoding gb2312
 Get-Content .\notes.txt | npm run cleo -- material add --stdin --title "访谈笔记"
 npm run cleo -- material list
-npm run cleo -- material show <material-id>
-npm run cleo -- material rename <material-id> "新标题"
-npm run cleo -- material remove <material-id>
+npm run cleo -- material show "资料名称"
+npm run cleo -- material rename "当前名称" "新标题"
+npm run cleo -- material remove "资料名称"
 npm run cleo -- index status
 npm run cleo -- index rebuild
 npm run cleo -- index embed
@@ -198,6 +198,8 @@ npm run cleo -- embedding test en "local document retrieval" --query
 ```
 
 导入内容统一转换为 UTF-8 后保存在 `materials/`，可移植元数据保存在 `sources/metadata/`。CLI 会显示输入编码，并在 `.cleo/derived` 生成可重建的 CDM 与切片检查文件。纯文本 Chunk 与 External Content FTS 保存于 SQLite；`index rebuild` 可从原始资料重建，`search` 当前只检索资料。相同规范化内容哈希只保留一份资料，即使原始文件名或输入编码不同也不会重复导入。单份资料上限为 10 MiB。
+
+资料 CLI 使用项目内唯一 title 执行查看、重命名和删除。普通输出不展示内部 Source UUID 或内容哈希；名称包含空格时需要使用引号。
 
 ## 软件配置
 
