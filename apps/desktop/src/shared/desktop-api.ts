@@ -12,6 +12,7 @@ export const desktopChannels = {
   listConversations: "desktop:list-conversations",
   getConversationHistory: "desktop:get-conversation-history",
   sendChatMessage: "desktop:send-chat-message",
+  chatMessageEvent: "desktop:chat-message-event",
 } as const;
 
 export const windowMenuIdSchema = z.enum(["file", "edit", "view", "window"]);
@@ -129,10 +130,37 @@ export const getDesktopConversationHistoryInputSchema = z
 
 export const sendDesktopChatMessageInputSchema = z
   .object({
-    conversationId: z.uuid().optional(),
+    requestId: z.uuid(),
+    conversationId: z.uuid(),
     prompt: z.string().trim().min(1).max(100_000),
   })
   .strict();
+
+export const desktopChatMessageEventSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("reasoning-delta"),
+      requestId: z.uuid(),
+      conversationId: z.uuid(),
+      text: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("reasoning-complete"),
+      requestId: z.uuid(),
+      conversationId: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("content-delta"),
+      requestId: z.uuid(),
+      conversationId: z.uuid(),
+      text: z.string().min(1),
+    })
+    .strict(),
+]);
 
 export const desktopConversationListResultSchema = z.discriminatedUnion("outcome", [
   z
@@ -171,6 +199,7 @@ export type GetDesktopConversationHistoryInput = z.infer<
   typeof getDesktopConversationHistoryInputSchema
 >;
 export type SendDesktopChatMessageInput = z.infer<typeof sendDesktopChatMessageInputSchema>;
+export type DesktopChatMessageEvent = z.infer<typeof desktopChatMessageEventSchema>;
 export type DesktopConversationListResult = z.infer<typeof desktopConversationListResultSchema>;
 export type DesktopConversationHistoryResult = z.infer<
   typeof desktopConversationHistoryResultSchema
@@ -195,4 +224,5 @@ export interface CleoDocDesktopApi {
   readonly sendChatMessage: (
     input: SendDesktopChatMessageInput,
   ) => Promise<SendDesktopChatMessageResult>;
+  readonly onChatMessageEvent: (listener: (event: DesktopChatMessageEvent) => void) => () => void;
 }

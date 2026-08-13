@@ -6,6 +6,7 @@ import {
   desktopRuntimeInfoSchema,
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
+  desktopChatMessageEventSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   showWindowMenuInputSchema,
@@ -177,17 +178,43 @@ describe("desktopConversationHistoryResultSchema", () => {
 });
 
 describe("sendDesktopChatMessageInputSchema", () => {
-  it("distinguishes a new conversation from a continuation", () => {
-    // Verify omission starts a conversation while an explicit identifier continues one.
-    expect(sendDesktopChatMessageInputSchema.parse({ prompt: "新对话" })).toEqual({
-      prompt: "新对话",
-    });
+  it("requires an existing conversation and request correlation identifier", () => {
+    // Verify the current desktop boundary permits continuation but not conversation creation.
     expect(
       sendDesktopChatMessageInputSchema.parse({
+        requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
         conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
         prompt: "继续对话",
       }),
     ).toMatchObject({ conversationId: "7e564f20-70ec-4a3d-b820-54299948635d" });
-    expect(() => sendDesktopChatMessageInputSchema.parse({ prompt: "   " })).toThrow();
+    expect(() =>
+      sendDesktopChatMessageInputSchema.parse({
+        requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
+        prompt: "创建对话",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("desktopChatMessageEventSchema", () => {
+  it("accepts only correlated reasoning and content stream events", () => {
+    // Verify streaming IPC cannot expose usage, Tool calls, or other internal model events.
+    const identity = {
+      requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
+      conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
+    };
+    expect(
+      desktopChatMessageEventSchema.parse({
+        type: "reasoning-delta",
+        ...identity,
+        text: "分析",
+      }),
+    ).toMatchObject({ type: "reasoning-delta", text: "分析" });
+    expect(
+      desktopChatMessageEventSchema.parse({ type: "reasoning-complete", ...identity }),
+    ).toMatchObject({ type: "reasoning-complete" });
+    expect(() =>
+      desktopChatMessageEventSchema.parse({ type: "tool-call", ...identity, name: "secret" }),
+    ).toThrow();
   });
 });

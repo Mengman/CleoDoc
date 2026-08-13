@@ -1,6 +1,7 @@
 import { createContextBudgetPolicy } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
 import { AppError } from "../../../../packages/contracts/src/index.js";
+import type { ModelEvent } from "../../../../packages/contracts/src/index.js";
 import { createProvider } from "../../../../packages/model-providers/src/index.js";
 import type { SendDesktopChatMessageInput } from "../shared/desktop-api.js";
 import type { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
@@ -28,19 +29,15 @@ export class DesktopChatService {
     private readonly llmSettings: DesktopLlmSettingsService,
   ) {}
 
-  async send(input: SendDesktopChatMessageInput) {
+  async send(input: SendDesktopChatMessageInput, onEvent?: (event: ModelEvent) => void) {
     // Send a new or continuing message with the currently saved desktop model configuration.
     // 1. Resolve the fixed transitional provider and model from validated software settings.
     // 2. Read the API key only in the main process and construct the provider locally.
     // 3. Run the message inside the active project session and return its latest visible messages.
     const config = getSoftwareConfig();
-    const existingTarget =
-      input.conversationId === undefined
-        ? undefined
-        : this.projects.getConversationModel(input.conversationId);
-    const providerId =
-      existingTarget?.providerId ?? config.llm.selectedProvider ?? "openai-compatible";
-    const model = existingTarget?.model ?? config.llm.selectedModel;
+    const existingTarget = this.projects.getConversationModel(input.conversationId);
+    const providerId = existingTarget.providerId;
+    const model = existingTarget.model;
     const providerConfig = config.llm.providers[providerId];
     if (providerConfig === undefined || model === null) {
       throw new AppError("CONFIG_ERROR", "请先完成模型 API 配置。");
@@ -62,11 +59,12 @@ export class DesktopChatService {
       environment: apiKey === undefined ? {} : { CLEODOC_API_KEY: apiKey },
     });
     return this.projects.sendMessage({
-      ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+      conversationId: input.conversationId,
       prompt: input.prompt,
       provider,
       model,
       contextBudgetPolicy: createContextBudgetPolicy(configuredModel, config.context),
+      ...(onEvent === undefined ? {} : { onEvent }),
     });
   }
 }

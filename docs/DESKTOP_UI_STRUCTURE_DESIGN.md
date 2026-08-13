@@ -112,9 +112,11 @@ CleoDoc 桌面窗口
 
 当前 Conversation 采用列表与当前对话两级视图。项目打开后，列表按最近活动顺序展示当前项目全部 Conversation；点击一项进入可继续交流的当前对话视图，顶部显示返回箭头和数据库 `conversations.title`。当前对话视图只加载最近 20 条 `user` 与 `assistant` 可见消息，User 气泡居右，Assistant 气泡居左。
 
-输入框固定在聊天窗口底部，在 Conversation 列表和当前对话视图中始终存在。列表中的输入用于创建新 Conversation，当前对话中的输入用于继续该 Conversation。新对话入口和每个已打开 Conversation 分别维护临时输入草稿；切换列表或 Conversation 时不清空，切回后恢复。草稿只保存在当前 Renderer 生命周期内，发送成功后只清空本次发送对应的草稿，发送失败则保留。
+当前阶段暂不开放新建 Conversation，因此 Conversation 列表不显示输入框。用户打开已有 Conversation 后，输入框固定在当前对话视图底部，用于继续该 Conversation。每个已打开 Conversation 分别维护临时输入草稿；切换 Conversation 时不清空，切回后恢复。草稿只保存在当前 Renderer 生命周期内，发送成功后清空，发送失败则恢复。
 
 Assistant 的 `reasoning_content` 去除首尾空白后非空时，在正文气泡上方显示“思考 ▸”控制项，小三角位于文字右侧。Reasoning 默认折叠，用户展开前不渲染正文；展开后显示“思考 ▾”，正文使用灰色文字且不包含在聊天气泡中。“思考”控制项使用亮灰色，字号为聊天内容字号的三分之二。每条 Assistant 消息独立维护折叠状态，离开当前对话视图后恢复默认折叠。
+
+模型生成期间的 Reasoning 增量例外：收到第一段 Reasoning 时自动展开并实时显示；Reasoning 结束或第一段 Content 到达时自动折叠，随后在 Assistant 气泡中流式展示 Content。持久化完成后的消息仍遵循默认折叠规则。
 
 ## 7. 功能区－资料界面
 

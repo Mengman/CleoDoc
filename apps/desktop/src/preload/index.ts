@@ -7,6 +7,7 @@ import {
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
   desktopConversationListResultSchema,
+  desktopChatMessageEventSchema,
   sendDesktopChatMessageResultSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
@@ -72,6 +73,14 @@ const desktopApi: CleoDocDesktopApi = {
         sendDesktopChatMessageInputSchema.parse(input),
       ),
     ),
+  onChatMessageEvent: (listener) => {
+    // Validate streaming chat events and return a disposer for the wrapped IPC listener.
+    const handleEvent = (_event: Electron.IpcRendererEvent, rawEvent: unknown): void => {
+      listener(desktopChatMessageEventSchema.parse(rawEvent));
+    };
+    ipcRenderer.on(desktopChannels.chatMessageEvent, handleEvent);
+    return () => ipcRenderer.removeListener(desktopChannels.chatMessageEvent, handleEvent);
+  },
 };
 
 contextBridge.exposeInMainWorld("cleodoc", desktopApi);

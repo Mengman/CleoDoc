@@ -1,18 +1,35 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { DesktopConversationMessage } from "../../../../shared/desktop-api.js";
 
 export interface ConversationMessageProps {
   readonly message: DesktopConversationMessage;
+  readonly reasoningStreaming?: boolean;
 }
 
-export function ConversationMessage({ message }: ConversationMessageProps): ReactNode {
-  // Render a visible chat message with independently expandable assistant reasoning.
-  // 1. Normalize reasoning to decide whether its disclosure control exists.
-  // 2. Render reasoning content only after the user expands the control.
-  // 3. Keep reasoning outside the user or assistant content bubble.
+export function ConversationMessage({
+  message,
+  reasoningStreaming = false,
+}: ConversationMessageProps): ReactNode {
+  // Render a visible message with user-controlled or stream-controlled assistant reasoning.
+  // 1. Normalize reasoning and track whether its live stream has just completed.
+  // 2. Force live reasoning open, then force its first completed render closed.
+  // 3. Preserve ordinary manual disclosure behavior for persisted messages.
+  // 4. Keep all reasoning content outside the assistant content bubble.
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const wasReasoningStreaming = useRef(false);
   const reasoning = message.reasoningContent?.trim() ?? "";
+  const displayedReasoningExpanded = resolveReasoningExpanded(
+    reasoningStreaming,
+    wasReasoningStreaming.current,
+    reasoningExpanded,
+  );
+
+  useEffect(() => {
+    if (reasoningStreaming) setReasoningExpanded(true);
+    else if (wasReasoningStreaming.current) setReasoningExpanded(false);
+    wasReasoningStreaming.current = reasoningStreaming;
+  }, [reasoningStreaming]);
 
   return (
     <article className={`conversation-message ${message.role}`}>
@@ -21,14 +38,14 @@ export function ConversationMessage({ message }: ConversationMessageProps): Reac
           <button
             type="button"
             className="message-reasoning-toggle"
-            aria-expanded={reasoningExpanded}
+            aria-expanded={displayedReasoningExpanded}
             aria-controls={`reasoning-${message.id}`}
             onClick={() => setReasoningExpanded((expanded) => !expanded)}
           >
             <span>思考</span>
-            <span aria-hidden="true">{reasoningExpanded ? "▾" : "▸"}</span>
+            <span aria-hidden="true">{displayedReasoningExpanded ? "▾" : "▸"}</span>
           </button>
-          {reasoningExpanded ? (
+          {displayedReasoningExpanded ? (
             <div id={`reasoning-${message.id}`} className="message-reasoning-content">
               {reasoning}
             </div>
@@ -40,4 +57,14 @@ export function ConversationMessage({ message }: ConversationMessageProps): Reac
       ) : null}
     </article>
   );
+}
+
+export function resolveReasoningExpanded(
+  reasoningStreaming: boolean,
+  wasReasoningStreaming: boolean,
+  userExpanded: boolean,
+): boolean {
+  if (reasoningStreaming) return true;
+  if (wasReasoningStreaming) return false;
+  return userExpanded;
 }

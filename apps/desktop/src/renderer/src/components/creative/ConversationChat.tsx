@@ -12,6 +12,7 @@ export interface ConversationChatProps {
   readonly messages: readonly DesktopConversationMessage[];
   readonly loading: boolean;
   readonly error: string | null;
+  readonly streamingReasoningMessageId: string | null;
   readonly onBack: () => void;
 }
 
@@ -20,6 +21,7 @@ export function ConversationChat({
   messages,
   loading,
   error,
+  streamingReasoningMessageId,
   onBack,
 }: ConversationChatProps): ReactNode {
   // Keep the selected conversation title fixed and its newest messages in view.
@@ -54,7 +56,11 @@ export function ConversationChat({
           <p className="chat-panel-state">当前对话暂无可显示的消息</p>
         ) : null}
         {messages.map((message) => (
-          <ConversationMessage key={message.id} message={message} />
+          <ConversationMessage
+            key={message.id}
+            message={message}
+            reasoningStreaming={message.id === streamingReasoningMessageId}
+          />
         ))}
       </div>
     </div>

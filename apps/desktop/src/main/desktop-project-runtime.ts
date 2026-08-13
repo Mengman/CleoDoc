@@ -9,6 +9,7 @@ import {
 import {
   AppError,
   asAppError,
+  type ModelEvent,
   type ModelProvider,
 } from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
@@ -177,6 +178,7 @@ export class DesktopProjectRuntime {
     readonly provider: ModelProvider;
     readonly model: string;
     readonly contextBudgetPolicy?: Parameters<ChatService["send"]>[0]["contextBudgetPolicy"];
+    readonly onEvent?: (event: ModelEvent) => void;
   }) {
     // Send through the active project's chat service and return its refreshed visible messages.
     const active = this.requireActiveProject();

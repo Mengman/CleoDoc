@@ -10,8 +10,6 @@ import { ChatComposer } from "./ChatComposer.js";
 import { ConversationChat } from "./ConversationChat.js";
 import { ConversationList } from "./ConversationList.js";
 
-const newConversationDraftKey = "new-conversation";
-
 export interface ChatPanelProps {
   readonly projectState: DesktopProjectState;
 }
@@ -20,17 +18,24 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   // Coordinate project-bound conversation browsing, drafting, and message submission.
   // 1. Reset conversation data and drafts only when the active project changes or closes.
   // 2. Load the list and selected conversation through the typed desktop boundary.
-  // 3. Keep an independent draft for the new-conversation view and every opened conversation.
-  // 4. Send list-view input as a new conversation and selected-view input as a continuation.
+  // 3. Keep an independent unsent draft for every opened conversation.
+  // 4. Stream reasoning and content only while continuing an existing conversation.
   const projectId = projectState.status === "open" ? projectState.project.id : null;
   const requestVersion = useRef(0);
+  const selectedConversationId = useRef<string | null>(null);
   const [conversations, setConversations] = useState<readonly DesktopConversationItem[]>([]);
   const [selected, setSelected] = useState<DesktopConversationItem | null>(null);
   const [messages, setMessages] = useState<readonly DesktopConversationMessage[]>([]);
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [listScrollTop, setListScrollTop] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [sending, setSending] = useState(false);
+  const activeRequestId = useRef<string | null>(null);
+  const [activeSendingConversationId, setActiveSendingConversationId] = useState<string | null>(
+    null,
+  );
+  const [streamingReasoningMessageId, setStreamingReasoningMessageId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +44,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     let active = true;
     setConversations([]);
     setSelected(null);
+    selectedConversationId.current = null;
     setMessages([]);
     setDrafts({});
     setListScrollTop(0);
@@ -63,6 +69,26 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    // Merge validated model deltas into the temporary assistant message for the active request.
+    return window.cleodoc.onChatMessageEvent((event) => {
+      if (
+        event.requestId !== activeRequestId.current ||
+        event.conversationId !== selectedConversationId.current
+      )
+        return;
+      const messageId = `streaming-${event.requestId}`;
+      if (event.type === "reasoning-complete") {
+        setStreamingReasoningMessageId(null);
+        return;
+      }
+      setMessages((current) =>
+        updateStreamingAssistantMessage(current, messageId, event.type, event.text),
+      );
+      if (event.type === "reasoning-delta") setStreamingReasoningMessageId(messageId);
+    });
+  }, []);
+
   function openConversation(conversation: DesktopConversationItem): void {
     // Load the selected conversation without allowing an older response to replace it.
     // 1. Publish the selection immediately and invalidate earlier requests.
@@ -70,6 +96,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     // 3. Apply only the newest response and settle its loading state.
     requestVersion.current += 1;
     const version = requestVersion.current;
+    selectedConversationId.current = conversation.id;
     setSelected(conversation);
     setMessages([]);
     setError(null);
@@ -93,46 +120,59 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   }
 
   function updateDraft(value: string): void {
-    const key = selected?.id ?? newConversationDraftKey;
-    setDrafts((current) => ({ ...current, [key]: value }));
+    if (selected !== null) setDrafts((current) => ({ ...current, [selected.id]: value }));
   }
 
   async function sendMessage(): Promise<void> {
-    // Submit the active draft, update the conversation, and clear only the sent draft.
-    // 1. Capture the selected conversation and its draft key before the asynchronous request.
-    // 2. Send through Typed IPC while retaining the draft if submission fails.
-    // 3. Open the returned conversation, refresh its messages, and move it to the list front.
+    // Continue the selected conversation while rendering its reply from streamed deltas.
+    // 1. Require an existing conversation and append an optimistic user message.
+    // 2. Correlate reasoning and content events with this specific request.
+    // 3. Replace temporary messages with persisted results after generation settles.
     const conversation = selected;
-    const draftKey = conversation?.id ?? newConversationDraftKey;
+    if (conversation === null) return;
+    const draftKey = conversation.id;
     const prompt = (drafts[draftKey] ?? "").trim();
-    if (prompt.length === 0 || sending) return;
+    if (prompt.length === 0 || activeRequestId.current !== null) return;
 
     requestVersion.current += 1;
-    const version = requestVersion.current;
-    setSending(true);
+    const requestId = crypto.randomUUID();
+    activeRequestId.current = requestId;
+    setActiveSendingConversationId(conversation.id);
     setError(null);
+    setDrafts((current) => ({ ...current, [draftKey]: "" }));
+    setMessages((current) => [...current, createOptimisticUserMessage(requestId, prompt)]);
     try {
       const result = await window.cleodoc.sendChatMessage({
-        ...(conversation === null ? {} : { conversationId: conversation.id }),
+        requestId,
+        conversationId: conversation.id,
         prompt,
       });
       if (result.outcome === "error") {
-        if (version === requestVersion.current) setError(result.error.message);
+        if (selectedConversationId.current === conversation.id) {
+          setError(result.error.message);
+          setDrafts((current) => ({ ...current, [draftKey]: prompt }));
+          setMessages((current) => removeTemporaryMessages(current, requestId));
+        }
         return;
       }
       setConversations((current) => [
         result.conversation,
         ...current.filter((item) => item.id !== result.conversation.id),
       ]);
-      setDrafts((current) => ({ ...current, [draftKey]: "" }));
-      if (version === requestVersion.current) {
+      if (selectedConversationId.current === result.conversation.id) {
         setSelected(result.conversation);
         setMessages(result.messages);
       }
     } catch {
-      if (version === requestVersion.current) setError("消息发送失败，请稍后重试");
+      if (selectedConversationId.current === conversation.id) {
+        setError("消息发送失败，请稍后重试");
+        setDrafts((current) => ({ ...current, [draftKey]: prompt }));
+        setMessages((current) => removeTemporaryMessages(current, requestId));
+      }
     } finally {
-      setSending(false);
+      if (activeRequestId.current === requestId) activeRequestId.current = null;
+      setStreamingReasoningMessageId(null);
+      setActiveSendingConversationId(null);
     }
   }
 
@@ -146,7 +186,6 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     );
   }
 
-  const draftKey = selected?.id ?? newConversationDraftKey;
   return (
     <aside className="chat-panel">
       {selected === null ? (
@@ -164,8 +203,10 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
           messages={messages}
           loading={loading}
           error={error}
+          streamingReasoningMessageId={streamingReasoningMessageId}
           onBack={() => {
             requestVersion.current += 1;
+            selectedConversationId.current = null;
             setSelected(null);
             setMessages([]);
             setError(null);
@@ -173,13 +214,77 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
           }}
         />
       )}
-      <ChatComposer
-        value={drafts[draftKey] ?? ""}
-        disabled={sending}
-        placeholder={selected === null ? "输入消息，开启新对话…" : "继续当前对话…"}
-        onChange={updateDraft}
-        onSend={() => void sendMessage()}
-      />
+      {selected === null ? null : (
+        <ChatComposer
+          value={drafts[selected.id] ?? ""}
+          disabled={activeSendingConversationId === selected.id}
+          placeholder="继续当前对话…"
+          onChange={updateDraft}
+          onSend={() => void sendMessage()}
+        />
+      )}
     </aside>
+  );
+}
+
+export function createOptimisticUserMessage(
+  requestId: string,
+  content: string,
+): DesktopConversationMessage {
+  // Create the temporary user message shown before persistence completes.
+  return {
+    id: `optimistic-${requestId}`,
+    role: "user",
+    content,
+    sequence: Number.MAX_SAFE_INTEGER - 1,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function updateStreamingAssistantMessage(
+  messages: readonly DesktopConversationMessage[],
+  messageId: string,
+  eventType: "reasoning-delta" | "content-delta",
+  text: string,
+): readonly DesktopConversationMessage[] {
+  // Merge a model delta into the single temporary assistant message for this request.
+  // 1. Create the assistant placeholder when the first reasoning or content delta arrives.
+  // 2. Keep reasoning and final content in their separate message fields.
+  // 3. Append later deltas without changing the order of surrounding messages.
+  const existing = messages.find((message) => message.id === messageId);
+  if (existing === undefined) {
+    return [
+      ...messages,
+      {
+        id: messageId,
+        role: "assistant",
+        content: eventType === "content-delta" ? text : "",
+        ...(eventType === "reasoning-delta" ? { reasoningContent: text } : {}),
+        sequence: Number.MAX_SAFE_INTEGER,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  return messages.map((message) =>
+    message.id !== messageId
+      ? message
+      : {
+          ...message,
+          content: eventType === "content-delta" ? message.content + text : message.content,
+          ...(eventType === "reasoning-delta"
+            ? { reasoningContent: (message.reasoningContent ?? "") + text }
+            : {}),
+        },
+  );
+}
+
+export function removeTemporaryMessages(
+  messages: readonly DesktopConversationMessage[],
+  requestId: string,
+): readonly DesktopConversationMessage[] {
+  // Remove both optimistic messages when the corresponding request fails.
+  return messages.filter(
+    (message) =>
+      message.id !== `optimistic-${requestId}` && message.id !== `streaming-${requestId}`,
   );
 }

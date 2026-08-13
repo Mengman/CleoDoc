@@ -194,7 +194,8 @@ v0.2 采用已确认的深色三栏工作室作为第一版视觉与信息架构
 - 发送消息、展示历史消息、停止生成和保留未发送输入。
 - 新建、列出、恢复 Conversation，并展示最近对话。
 - 第一阶段在打开项目后列出该项目全部 Conversation；点击后进入可继续交流的当前对话视图，展示最近 20 条 `user`/`assistant` 消息，并可返回原列表。
-- 输入框在列表和当前对话视图中均固定于底部：列表输入创建新 Conversation，当前对话输入继续该 Conversation；不同 Conversation 的未发送草稿在界面生命周期内分别保留。
+- 当前阶段只在已有 Conversation 的当前对话视图底部显示输入框，用于继续对话；暂不提供新建 Conversation。不同 Conversation 的未发送草稿在界面生命周期内分别保留。
+- LLM 的 Reasoning 在生成时自动展开并流式展示，完成后自动折叠，再流式展示回复 Content。
 - 历史页标题使用 `conversations.title`；Assistant Reasoning 以默认折叠的“思考 ▸”区域显示在正文气泡上方，展开前不渲染 Reasoning 正文。
 - 将已有项目文档加入后续对话上下文。
 - 将生成结果保存为项目文档。
