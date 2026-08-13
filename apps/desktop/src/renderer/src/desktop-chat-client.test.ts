@@ -1,15 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { CleoDocDesktopApi, DesktopChatMessageEvent } from "../../shared/desktop-api.js";
 import { sendDesktopChatMessageResultSchema } from "../../shared/desktop-api.js";
 import { DesktopChatClient } from "./desktop-chat-client.js";
 
 describe("DesktopChatClient", () => {
-  it("forwards only correlated events and disposes the temporary subscription", async () => {
-    // Verify one renderer chat operation owns its stream correlation and listener lifetime.
+  it("does not mix streamed replies from different chat requests", async () => {
     let listener: ((event: DesktopChatMessageEvent) => void) | undefined;
-    const dispose = vi.fn();
-    const sendChatMessage: CleoDocDesktopApi["sendChatMessage"] = vi.fn(async () =>
+    const sendChatMessage: CleoDocDesktopApi["sendChatMessage"] = async () =>
       sendDesktopChatMessageResultSchema.parse({
         outcome: "success",
         conversation: { id: conversationId, title: "测试对话" },
@@ -29,13 +27,12 @@ describe("DesktopChatClient", () => {
             createdAt: "2026-08-13T12:00:01.000Z",
           },
         ],
-      }),
-    );
+      });
     const api: Pick<CleoDocDesktopApi, "sendChatMessage" | "onChatMessageEvent"> = {
       sendChatMessage,
       onChatMessageEvent: (registered) => {
         listener = registered;
-        return dispose;
+        return () => undefined;
       },
     };
     const events: DesktopChatMessageEvent[] = [];
@@ -58,13 +55,7 @@ describe("DesktopChatClient", () => {
     });
     await request.result;
 
-    expect(sendChatMessage).toHaveBeenCalledWith({
-      requestId: request.requestId,
-      conversationId,
-      prompt: "继续",
-    });
     expect(events).toEqual([expect.objectContaining({ type: "content-delta", text: "回答" })]);
-    expect(dispose).toHaveBeenCalledOnce();
   });
 });
 

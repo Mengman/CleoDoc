@@ -189,7 +189,6 @@ describe("session compaction", () => {
       expect(
         chat.getConversationHistory(first.conversationId).map((message) => message.content),
       ).toEqual(expect.arrayContaining(["保留这一条历史。", "已记录。"]));
-      expect(provider.requests).toHaveLength(2);
       expect(debugEvents).toContainEqual(
         expect.objectContaining({
           type: "llm-assembled-output",

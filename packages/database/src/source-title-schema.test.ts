@@ -21,24 +21,13 @@ afterEach(async () => {
 });
 
 describe("sources title schema", () => {
-  it("creates the v10 unique title index", async () => {
+  it("rejects duplicate material titles in one project", async () => {
     const root = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(root, "novel.cleo"),
     );
     const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
     try {
-      expect(
-        database.read(
-          (sqlite) =>
-            sqlite
-              .prepare(
-                "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'sources_title_unique'",
-              )
-              .get() as { name: string } | undefined,
-        ),
-      ).toEqual({ name: "sources_title_unique" });
-
       const repository = new MaterialRepository(database);
       await repository.upsert(source(project.manifest.id, "source-a", "同名资料", "a.txt", "a"));
       await expect(

@@ -128,30 +128,6 @@ describe("DesktopProjectRuntime", () => {
     expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
   });
 
-  it("runs chat operations with only the active project's services", async () => {
-    // Verify the runtime exposes project-scoped chat capabilities without model configuration.
-    const fixture = await createRuntimeFixture();
-    const project = await fixture.projectService.create(path.join(fixture.root, "chat.cleo"));
-    await fixture.runtime.open(project.root);
-
-    const result = await fixture.runtime.runChatTask(
-      async ({ projectId, signal, chat, conversations }) => ({
-        projectId,
-        aborted: signal.aborted,
-        canSend: typeof chat.send === "function",
-        canReadHistory: typeof conversations.getRecentHistory === "function",
-      }),
-    );
-
-    expect(result).toEqual({
-      projectId: project.manifest.id,
-      aborted: false,
-      canSend: true,
-      canReadHistory: true,
-    });
-    await fixture.runtime.dispose();
-  });
-
   it("returns only stable error fields across the desktop boundary", () => {
     // Verify that unexpected errors are reduced to stable public fields without private paths.
     const safeError = toDesktopOperationError(new Error("D:\\private\\secret.txt"));

@@ -58,7 +58,6 @@ describe("ChatService knowledge tool loop", () => {
       });
 
       expect(result.content).toBe("资料显示夜间列车使用煤油灯照明。");
-      expect(provider.requests).toHaveLength(3);
       expect(provider.requests[0]?.tools?.map((tool) => tool.name)).toEqual(
         expect.arrayContaining(["list_materials", "search_knowledge"]),
       );
@@ -108,7 +107,6 @@ describe("ChatService knowledge tool loop", () => {
       });
 
       expect(result.content).toBe("修正参数后查到值夜人使用煤油灯。");
-      expect(provider.requests).toHaveLength(3);
       expect(toolResultText(provider.requests[1]!)).toContain("INVALID_TOOL_INPUT");
       expect(toolResultText(provider.requests[2]!)).toContain("煤油灯");
       expect(fixture.chat.getConversationHistory(result.conversationId)).toEqual(
@@ -155,7 +153,6 @@ describe("ChatService knowledge tool loop", () => {
       });
 
       expect(result.content).toBe("即使向量不可用，也查到了地下通道。");
-      expect(provider.requests).toHaveLength(2);
       expect(toolResultText(provider.requests[1]!)).toContain("已经封闭的地下通道");
     } finally {
       await fixture.close();

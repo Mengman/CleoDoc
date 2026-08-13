@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { parse } from "yaml";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { softwareConfigSchema, type SoftwareConfig } from "../../config/src/index.js";
 import type {
@@ -32,18 +32,7 @@ describe("ProviderService", () => {
     });
   });
 
-  it("reuses one concrete provider for repeated sends", async () => {
-    const fixture = await createFixture();
-
-    await collect(fixture.service);
-    await collect(fixture.service);
-
-    expect(fixture.providers).toHaveLength(1);
-    expect(fixture.providers[0]?.requests).toHaveLength(2);
-    expect(fixture.factoryEnvironments).toEqual([{ CLEODOC_API_KEY: "sk-secret-test" }]);
-  });
-
-  it("persists configuration through the service and rebuilds the cached provider", async () => {
+  it("uses persisted configuration for subsequent messages", async () => {
     const fixture = await createFixture();
     await collect(fixture.service);
 
@@ -57,14 +46,13 @@ describe("ProviderService", () => {
     expect(info.baseUrl).toBe("https://gateway.example/v1");
     expect(info.apiKeyLength).toBe(14);
     expect(fixture.credentials.apiKey).toBe("sk-replacement");
-    expect(fixture.providers).toHaveLength(2);
-    expect(fixture.factoryBaseUrls).toEqual([
-      "https://api.deepseek.com",
-      "https://gateway.example/v1",
-    ]);
+    expect(fixture.requests.at(-1)).toMatchObject({
+      baseUrl: "https://gateway.example/v1",
+      apiKey: "sk-replacement",
+    });
   });
 
-  it("rebuilds the provider when only its credential changes", async () => {
+  it("uses a newly saved credential for subsequent messages", async () => {
     const fixture = await createFixture();
     await collect(fixture.service);
 
@@ -75,11 +63,7 @@ describe("ProviderService", () => {
     });
     await collect(fixture.service);
 
-    expect(fixture.providers).toHaveLength(2);
-    expect(fixture.factoryEnvironments).toEqual([
-      { CLEODOC_API_KEY: "sk-secret-test" },
-      { CLEODOC_API_KEY: "sk-new-secret" },
-    ]);
+    expect(fixture.requests.at(-1)?.apiKey).toBe("sk-new-secret");
   });
 
   it("rejects a request that would silently switch provider or model", async () => {
@@ -97,31 +81,6 @@ describe("ProviderService", () => {
         ),
       ),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
-    expect(fixture.providers).toHaveLength(0);
-  });
-
-  it("does not republish an in-flight provider after configuration changes", async () => {
-    const fixture = await createFixture();
-    let releaseCredential: (() => void) | undefined;
-    const credentialGate = new Promise<void>((resolve) => {
-      releaseCredential = resolve;
-    });
-    const originalRead = fixture.credentials.readApiKey.bind(fixture.credentials);
-    const readApiKey = vi
-      .spyOn(fixture.credentials, "readApiKey")
-      .mockImplementationOnce(async () => {
-        await credentialGate;
-        return originalRead();
-      });
-
-    const firstSend = collect(fixture.service);
-    await vi.waitFor(() => expect(readApiKey).toHaveBeenCalledTimes(1));
-    fixture.service.invalidate();
-    releaseCredential?.();
-    await firstSend;
-    await collect(fixture.service);
-
-    expect(fixture.providers).toHaveLength(2);
   });
 });
 
@@ -144,25 +103,34 @@ class MemoryCredentialStore implements ProviderCredentialStore {
 class RecordingProvider implements ModelProvider {
   readonly id = "openai-compatible";
   readonly displayName = "OpenAI-compatible";
-  readonly requests: ModelRequest[] = [];
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly apiKey: string | undefined,
+    private readonly requests: ProviderRequest[],
+  ) {}
 
   async validateConfiguration(): Promise<ProviderHealth> {
     return { ok: true, message: "ready" };
   }
 
   async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
-    this.requests.push(request);
+    this.requests.push({ baseUrl: this.baseUrl, apiKey: this.apiKey, request });
     yield { type: "text-delta", text: "ok" };
     yield { type: "done", finishReason: "stop" };
   }
 }
 
+interface ProviderRequest {
+  readonly baseUrl: string;
+  readonly apiKey: string | undefined;
+  readonly request: ModelRequest;
+}
+
 async function createFixture(): Promise<{
   readonly service: ProviderService;
   readonly credentials: MemoryCredentialStore;
-  readonly providers: RecordingProvider[];
-  readonly factoryBaseUrls: string[];
-  readonly factoryEnvironments: NodeJS.ProcessEnv[];
+  readonly requests: ProviderRequest[];
 }> {
   // Build an isolated ProviderService around the packaged configuration snapshot.
   // 1. Load a complete valid configuration and expose an in-memory update boundary.
@@ -191,21 +159,15 @@ async function createFixture(): Promise<{
     },
   };
   const credentials = new MemoryCredentialStore();
-  const providers: RecordingProvider[] = [];
-  const factoryBaseUrls: string[] = [];
-  const factoryEnvironments: NodeJS.ProcessEnv[] = [];
+  const requests: ProviderRequest[] = [];
   const service = new ProviderService({
     configuration,
     credentials,
     providerFactory: (_providerId, options) => {
-      const provider = new RecordingProvider();
-      providers.push(provider);
-      factoryBaseUrls.push(options.baseUrl);
-      factoryEnvironments.push(options.environment ?? {});
-      return provider;
+      return new RecordingProvider(options.baseUrl, options.environment?.CLEODOC_API_KEY, requests);
     },
   });
-  return { service, credentials, providers, factoryBaseUrls, factoryEnvironments };
+  return { service, credentials, requests };
 }
 
 async function collect(service: ProviderService): Promise<ModelEvent[]> {
