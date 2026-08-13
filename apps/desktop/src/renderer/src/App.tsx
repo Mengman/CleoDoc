@@ -11,7 +11,6 @@ import {
   Plus as PlusIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
-  ShieldCheck as ShieldIcon,
   Sparkles as SparkleIcon,
 } from "lucide-react";
 
@@ -26,7 +25,7 @@ interface SectionDefinition {
   readonly icon: ReactNode;
 }
 
-const sections: readonly SectionDefinition[] = [
+const mainSections: readonly SectionDefinition[] = [
   {
     id: "works",
     label: "作品",
@@ -45,13 +44,16 @@ const sections: readonly SectionDefinition[] = [
     description: "全文与语义检索",
     icon: <SearchIcon />,
   },
-  {
-    id: "settings",
-    label: "设置",
-    description: "Provider 与软件配置",
-    icon: <SettingsIcon />,
-  },
 ];
+
+const settingsSection: SectionDefinition = {
+  id: "settings",
+  label: "设置",
+  description: "Provider 与软件配置",
+  icon: <SettingsIcon />,
+};
+
+const sections: readonly SectionDefinition[] = [...mainSections, settingsSection];
 
 const windowMenus = [
   { id: "file", label: "File" },
@@ -126,42 +128,9 @@ export function App(): ReactNode {
         </div>
       </div>
 
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div>
-            <strong>CleoDoc</strong>
-            <small>本地优先的中文小说 AI 主笔</small>
-          </div>
-        </div>
-
-        <div className="current-document">
-          <span>当前项目</span>
-          <strong>尚未打开项目</strong>
-        </div>
-
-        <div className="topbar-actions">
-          <div className="status-pill">
-            <i /> 桌面界面已就绪
-          </div>
-          <button className="model-button" type="button" disabled>
-            <span>模型</span>
-            <strong>待配置</strong>
-            <ChevronIcon />
-          </button>
-          <button className="primary-button" type="button" disabled>
-            <PlusIcon /> 新建对话
-          </button>
-        </div>
-      </header>
-
       <nav className="rail" aria-label="主导航">
         <div className="rail-items">
-          {sections.map((section) => (
+          {mainSections.map((section) => (
             <button
               key={section.id}
               className={activeSection === section.id ? "rail-item active" : "rail-item"}
@@ -174,9 +143,16 @@ export function App(): ReactNode {
             </button>
           ))}
         </div>
-        <div className="local-indicator" title="项目数据保存在本地">
-          <ShieldIcon />
-          <span>本地</span>
+        <div className="rail-items rail-bottom">
+          <button
+            className={activeSection === settingsSection.id ? "rail-item active" : "rail-item"}
+            type="button"
+            onClick={() => setActiveSection(settingsSection.id)}
+            aria-current={activeSection === settingsSection.id ? "page" : undefined}
+          >
+            {settingsSection.icon}
+            <span>{settingsSection.label}</span>
+          </button>
         </div>
       </nav>
 
@@ -221,14 +197,6 @@ export function App(): ReactNode {
           <div className="empty-mini-icon">{currentSection.icon}</div>
           <strong>暂无内容</strong>
           <span>项目打开后将在这里显示</span>
-        </div>
-
-        <div className="panel-footer">
-          <ShieldIcon />
-          <div>
-            <strong>项目数据仅保存在本地</strong>
-            <span>未打开任何项目</span>
-          </div>
         </div>
       </aside>
 
@@ -277,33 +245,21 @@ export function App(): ReactNode {
       </main>
 
       <aside className="chat-panel">
-        <div className="chat-heading">
-          <div>
-            <h2>主笔对话</h2>
-            <p>理解作品上下文，协助推进创作</p>
-          </div>
-          <span className="agent-status">
-            <i /> 等待项目
-          </span>
-        </div>
-
-        <div className="context-row">
-          <span className="context-chip active">当前项目</span>
-          <span className="context-chip">Conversation</span>
-          <span className="context-chip">上下文</span>
-        </div>
-
-        <div className="conversation-empty">
-          <div className="assistant-avatar">C</div>
-          <div>
-            <strong>Cleo · 主笔 Agent</strong>
-            <span>本地工作区已准备好</span>
-          </div>
-          <div className="welcome-card">
-            <SparkleIcon />
-            <h3>欢迎来到 CleoDoc</h3>
-            <p>打开项目后，你可以在这里与主笔对话、检索资料，并审批文档写入。</p>
-          </div>
+        <div className="conversation-stream" role="log" aria-label="聊天内容" aria-live="polite">
+          <article className="message-row">
+            <div className="assistant-avatar">C</div>
+            <div className="message-content">
+              <div className="message-author">
+                <strong>Cleo · 主笔 Agent</strong>
+                <span>本地工作区已准备好</span>
+              </div>
+              <div className="welcome-card">
+                <SparkleIcon />
+                <h3>欢迎来到 CleoDoc</h3>
+                <p>打开项目后，你可以在这里与主笔对话、检索资料，并审批文档写入。</p>
+              </div>
+            </div>
+          </article>
         </div>
 
         <div className="composer-wrap">
