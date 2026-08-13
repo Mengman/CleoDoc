@@ -9,6 +9,9 @@ export const desktopChannels = {
   projectStateChanged: "desktop:project-state-changed",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
+  listConversations: "desktop:list-conversations",
+  getConversationHistory: "desktop:get-conversation-history",
+  sendChatMessage: "desktop:send-chat-message",
 } as const;
 
 export const windowMenuIdSchema = z.enum(["file", "edit", "view", "window"]);
@@ -102,6 +105,58 @@ export const desktopLlmApiSettingsResultSchema = z.discriminatedUnion("outcome",
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
+export const desktopConversationItemSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string().nullable(),
+  })
+  .strict();
+
+export const desktopConversationMessageSchema = z
+  .object({
+    id: z.uuid(),
+    role: z.enum(["user", "assistant"]),
+    content: z.string(),
+    reasoningContent: z.string().optional(),
+    sequence: z.number().int().nonnegative(),
+    createdAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const getDesktopConversationHistoryInputSchema = z
+  .object({ conversationId: z.uuid() })
+  .strict();
+
+export const sendDesktopChatMessageInputSchema = z
+  .object({
+    conversationId: z.uuid().optional(),
+    prompt: z.string().trim().min(1).max(100_000),
+  })
+  .strict();
+
+export const desktopConversationListResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      conversations: z.array(desktopConversationItemSchema),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
+export const desktopConversationHistoryResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      conversation: desktopConversationItemSchema,
+      messages: z.array(desktopConversationMessageSchema).max(20),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
+export const sendDesktopChatMessageResultSchema = desktopConversationHistoryResultSchema;
+
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
@@ -110,6 +165,17 @@ export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
 export type SaveDesktopLlmApiSettingsInput = z.infer<typeof saveDesktopLlmApiSettingsInputSchema>;
 export type DesktopLlmApiSettingsResult = z.infer<typeof desktopLlmApiSettingsResultSchema>;
+export type DesktopConversationItem = z.infer<typeof desktopConversationItemSchema>;
+export type DesktopConversationMessage = z.infer<typeof desktopConversationMessageSchema>;
+export type GetDesktopConversationHistoryInput = z.infer<
+  typeof getDesktopConversationHistoryInputSchema
+>;
+export type SendDesktopChatMessageInput = z.infer<typeof sendDesktopChatMessageInputSchema>;
+export type DesktopConversationListResult = z.infer<typeof desktopConversationListResultSchema>;
+export type DesktopConversationHistoryResult = z.infer<
+  typeof desktopConversationHistoryResultSchema
+>;
+export type SendDesktopChatMessageResult = z.infer<typeof sendDesktopChatMessageResultSchema>;
 
 export interface CleoDocDesktopApi {
   readonly getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
@@ -122,4 +188,11 @@ export interface CleoDocDesktopApi {
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,
   ) => Promise<DesktopLlmApiSettingsResult>;
+  readonly listConversations: () => Promise<DesktopConversationListResult>;
+  readonly getConversationHistory: (
+    input: GetDesktopConversationHistoryInput,
+  ) => Promise<DesktopConversationHistoryResult>;
+  readonly sendChatMessage: (
+    input: SendDesktopChatMessageInput,
+  ) => Promise<SendDesktopChatMessageResult>;
 }

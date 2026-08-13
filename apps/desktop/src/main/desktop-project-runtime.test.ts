@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
+import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
-import { TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
 const temporaryDirectories: string[] = [];
@@ -122,6 +123,34 @@ describe("DesktopProjectRuntime", () => {
     expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
   });
 
+  it("starts and continues a conversation through the active project chat service", async () => {
+    // Verify new and continuing messages share one conversation and remain project-bound.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "chat.cleo"));
+    await fixture.runtime.open(project.root);
+
+    const first = await fixture.runtime.sendMessage({
+      prompt: "开始讨论",
+      provider: new FakeModelProvider("第一次回答"),
+      model: "fake-model",
+    });
+    const continued = await fixture.runtime.sendMessage({
+      conversationId: first.conversation.id,
+      prompt: "继续讨论",
+      provider: new FakeModelProvider("第二次回答"),
+      model: "fake-model",
+    });
+
+    expect(continued.conversation.id).toBe(first.conversation.id);
+    expect(continued.messages.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: "user", content: "开始讨论" },
+      { role: "assistant", content: "第一次回答" },
+      { role: "user", content: "继续讨论" },
+      { role: "assistant", content: "第二次回答" },
+    ]);
+    await fixture.runtime.dispose();
+  });
+
   it("returns only stable error fields across the desktop boundary", () => {
     // Verify that unexpected errors are reduced to stable public fields without private paths.
     const safeError = toDesktopOperationError(new Error("D:\\private\\secret.txt"));
@@ -152,6 +181,11 @@ async function createRuntimeFixture(): Promise<{
     runtime: new DesktopProjectRuntime({
       ...TEST_DATABASE_OPTIONS,
       appStateService,
+      chat: {
+        maxToolRounds: TEST_CHAT_OPTIONS.maxToolRounds,
+        defaultContextBudgetPolicy: TEST_CHAT_OPTIONS.defaultContextBudgetPolicy,
+        compaction: TEST_CHAT_OPTIONS.compaction,
+      },
     }),
   };
 }

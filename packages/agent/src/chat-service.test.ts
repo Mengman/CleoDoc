@@ -12,6 +12,7 @@ import type {
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
+import { ProjectDatabase } from "../../database/src/index.js";
 import { FakeModelProvider } from "../../model-providers/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
@@ -29,6 +30,21 @@ afterEach(async () => {
 });
 
 describe("ChatService", () => {
+  it("does not close a project database supplied by its caller", async () => {
+    // Verify the desktop runtime can share one database and retain lifecycle ownership.
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "shared-database.cleo"),
+    );
+    const database = await ProjectDatabase.open(project.root, TEST_DATABASE_OPTIONS);
+    const chat = await ChatService.usingDatabase(project.root, database, TEST_CHAT_OPTIONS);
+
+    await chat.close();
+
+    expect(database.quickCheck()).toBe(true);
+    await database.close();
+  });
+
   it("persists a streamed generation and only saves it after an explicit call", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

@@ -69,6 +69,7 @@ export class ChatService {
     private readonly database: ProjectDatabase,
     private readonly options: ChatServiceOptions,
     dependencies: ChatServiceDependencies,
+    private readonly ownsDatabase = true,
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
@@ -94,6 +95,19 @@ export class ChatService {
       options,
       dependencies,
     );
+    await service.sessions.recoverInterruptedJobs();
+    await service.modelCalls.recoverInterruptedCalls();
+    return service;
+  }
+
+  static async usingDatabase(
+    projectRoot: string,
+    database: ProjectDatabase,
+    options: ChatServiceOptions,
+    dependencies: ChatServiceDependencies = {},
+  ): Promise<ChatService> {
+    // Attach chat behavior to an already-open project database without taking ownership of it.
+    const service = new ChatService(projectRoot, database, options, dependencies, false);
     await service.sessions.recoverInterruptedJobs();
     await service.modelCalls.recoverInterruptedCalls();
     return service;
@@ -509,7 +523,7 @@ export class ChatService {
 
   async close(): Promise<void> {
     this.toolRuntimes.clear();
-    await this.database.close();
+    if (this.ownsDatabase) await this.database.close();
   }
 
   private getToolRuntime(conversation: ConversationRecord): ProjectToolRuntime {

@@ -5,7 +5,9 @@ import {
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
   desktopLlmApiSettingsSchema,
+  desktopConversationHistoryResultSchema,
   saveDesktopLlmApiSettingsInputSchema,
+  sendDesktopChatMessageInputSchema,
   showWindowMenuInputSchema,
 } from "./desktop-api.js";
 
@@ -143,5 +145,49 @@ describe("desktopLlmApiSettingsSchema", () => {
         secureStorageAvailable: true,
       }),
     ).toThrow();
+  });
+});
+
+describe("desktopConversationHistoryResultSchema", () => {
+  it("accepts visible history fields and rejects internal message identifiers", () => {
+    // Verify desktop history exposes reasoning but no session, model-call, or row identifiers.
+    const message = {
+      id: "9e564f20-70ec-4a3d-b820-54299948635d",
+      role: "assistant" as const,
+      content: "回答",
+      reasoningContent: "思考过程",
+      sequence: 8,
+      createdAt: "2026-08-13T12:00:00.000Z",
+    };
+    expect(
+      desktopConversationHistoryResultSchema.parse({
+        outcome: "success",
+        conversation: { id: "7e564f20-70ec-4a3d-b820-54299948635d", title: "章节讨论" },
+        messages: [message],
+      }),
+    ).toMatchObject({ outcome: "success", messages: [message] });
+    expect(() =>
+      desktopConversationHistoryResultSchema.parse({
+        outcome: "success",
+        conversation: { id: "7e564f20-70ec-4a3d-b820-54299948635d", title: "章节讨论" },
+        messages: [{ ...message, sessionId: "private-session" }],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("sendDesktopChatMessageInputSchema", () => {
+  it("distinguishes a new conversation from a continuation", () => {
+    // Verify omission starts a conversation while an explicit identifier continues one.
+    expect(sendDesktopChatMessageInputSchema.parse({ prompt: "新对话" })).toEqual({
+      prompt: "新对话",
+    });
+    expect(
+      sendDesktopChatMessageInputSchema.parse({
+        conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
+        prompt: "继续对话",
+      }),
+    ).toMatchObject({ conversationId: "7e564f20-70ec-4a3d-b820-54299948635d" });
+    expect(() => sendDesktopChatMessageInputSchema.parse({ prompt: "   " })).toThrow();
   });
 });

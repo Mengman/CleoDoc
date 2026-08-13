@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
-import { AppError, asAppError } from "../../../../packages/contracts/src/index.js";
+import {
+  ChatService,
+  ConversationHistoryService,
+  type ChatServiceOptions,
+} from "../../../../packages/agent/src/index.js";
+import {
+  AppError,
+  asAppError,
+  type ModelProvider,
+} from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import {
   DocumentService,
@@ -29,11 +38,14 @@ interface ActiveProject {
   readonly documentCount: number;
   readonly controller: AbortController;
   readonly tasks: Map<string, Promise<unknown>>;
+  readonly conversations: ConversationHistoryService;
+  readonly chat: ChatService;
 }
 
 export interface DesktopProjectRuntimeOptions {
   readonly busyTimeoutMs: number;
   readonly appStateService?: AppStateService;
+  readonly chat: Omit<ChatServiceOptions, "database">;
 }
 
 export class DesktopProjectRuntime {
@@ -146,6 +158,35 @@ export class DesktopProjectRuntime {
     await this.enqueue(async () => this.closeActiveProject(false));
   }
 
+  listConversations() {
+    return this.requireActiveProject().conversations.listConversations();
+  }
+
+  getRecentConversationHistory(conversationId: string) {
+    return this.requireActiveProject().conversations.getRecentHistory(conversationId, 20);
+  }
+
+  getConversationModel(conversationId: string): { providerId: string; model: string } {
+    const conversation = this.getRecentConversationHistory(conversationId).conversation;
+    return { providerId: conversation.providerId, model: conversation.model };
+  }
+
+  async sendMessage(input: {
+    readonly conversationId?: string;
+    readonly prompt: string;
+    readonly provider: ModelProvider;
+    readonly model: string;
+    readonly contextBudgetPolicy?: Parameters<ChatService["send"]>[0]["contextBudgetPolicy"];
+  }) {
+    // Send through the active project's chat service and return its refreshed visible messages.
+    const active = this.requireActiveProject();
+    const task = this.startTask(async ({ projectId, signal }) => {
+      const result = await active.chat.send({ ...input, projectId, signal });
+      return active.conversations.getRecentHistory(result.conversationId, 20);
+    });
+    return task.promise;
+  }
+
   private async openActiveProject(directory: string): Promise<void> {
     // Open and validate all resources required by a new active project session.
     // 1. Resolve the project manifest and open its SQLite database.
@@ -162,12 +203,18 @@ export class DesktopProjectRuntime {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");
       }
       const documentCount = (await new DocumentService(project.root).list()).length;
+      const chat = await ChatService.usingDatabase(project.root, database, {
+        database: { busyTimeoutMs: this.options.busyTimeoutMs },
+        ...this.options.chat,
+      });
       const activeProject: ActiveProject = {
         project,
         database,
         documentCount,
         controller: new AbortController(),
         tasks: new Map(),
+        conversations: new ConversationHistoryService(database, project.manifest.id),
+        chat,
       };
       await this.appStateService.setCurrentProject(project.root);
       this.activeProject = activeProject;
@@ -185,6 +232,7 @@ export class DesktopProjectRuntime {
     if (active !== undefined) {
       active.controller.abort(new AppError("GENERATION_CANCELLED", "项目已关闭。"));
       await Promise.allSettled(active.tasks.values());
+      await active.chat.close();
       await active.database.close();
     }
     if (clearRememberedProject) await this.appStateService.clearCurrentProject();
@@ -198,6 +246,13 @@ export class DesktopProjectRuntime {
       () => undefined,
     );
     return pending;
+  }
+
+  private requireActiveProject(): ActiveProject {
+    if (this.activeProject === undefined) {
+      throw new AppError("PROJECT_NOT_FOUND", "请先打开一个 CleoDoc 项目。");
+    }
+    return this.activeProject;
   }
 }
 

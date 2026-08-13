@@ -2,11 +2,16 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } fr
 
 import {
   desktopChannels,
+  desktopConversationHistoryResultSchema,
+  desktopConversationListResultSchema,
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
+  getDesktopConversationHistoryInputSchema,
+  sendDesktopChatMessageInputSchema,
+  sendDesktopChatMessageResultSchema,
   showWindowMenuInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
   type DesktopProjectOperationResult,
@@ -14,6 +19,7 @@ import {
 import { toDesktopOperationError } from "./desktop-project-runtime.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
 import type { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
+import type { DesktopChatService } from "./desktop-chat-service.js";
 import { createWindowMenuTemplate } from "./window-menu-template.js";
 
 function broadcastProjectState(runtime: DesktopProjectRuntime): void {
@@ -68,6 +74,7 @@ export async function chooseAndOpenProject(
 export function registerDesktopIpc(
   runtime: DesktopProjectRuntime,
   llmSettings: DesktopLlmSettingsService,
+  chat: DesktopChatService,
 ): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
   // 1. Register read-only runtime and project-state queries.
@@ -126,6 +133,81 @@ export function registerDesktopIpc(
       });
     } catch (error) {
       return desktopLlmApiSettingsResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.listConversations, (event) => {
+    // Return only the current project's renderer-safe conversation list.
+    requireMainWindow(event);
+    try {
+      return desktopConversationListResultSchema.parse({
+        outcome: "success",
+        conversations: runtime.listConversations().map(({ id, title }) => ({ id, title })),
+      });
+    } catch (error) {
+      return desktopConversationListResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.getConversationHistory, (event, rawInput: unknown) => {
+    // Return a validated and bounded projection of the selected conversation history.
+    // 1. Validate the conversation identifier supplied by the renderer.
+    // 2. Query through the current project runtime so project ownership is enforced.
+    // 3. Remove internal message fields and validate the complete response contract.
+    requireMainWindow(event);
+    try {
+      const input = getDesktopConversationHistoryInputSchema.parse(rawInput);
+      const history = runtime.getRecentConversationHistory(input.conversationId);
+      return desktopConversationHistoryResultSchema.parse({
+        outcome: "success",
+        conversation: { id: history.conversation.id, title: history.conversation.title },
+        messages: history.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          ...(message.reasoningContent === undefined
+            ? {}
+            : { reasoningContent: message.reasoningContent }),
+          sequence: message.sequence,
+          createdAt: message.createdAt,
+        })),
+      });
+    } catch (error) {
+      return desktopConversationHistoryResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.sendChatMessage, async (event, rawInput: unknown) => {
+    // Send a validated prompt and return only the refreshed renderer-safe conversation projection.
+    requireMainWindow(event);
+    try {
+      const input = sendDesktopChatMessageInputSchema.parse(rawInput);
+      const result = await chat.send(input);
+      return sendDesktopChatMessageResultSchema.parse({
+        outcome: "success",
+        conversation: { id: result.conversation.id, title: result.conversation.title },
+        messages: result.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          ...(message.reasoningContent === undefined
+            ? {}
+            : { reasoningContent: message.reasoningContent }),
+          sequence: message.sequence,
+          createdAt: message.createdAt,
+        })),
+      });
+    } catch (error) {
+      return sendDesktopChatMessageResultSchema.parse({
         outcome: "error",
         error: toDesktopOperationError(error),
       });

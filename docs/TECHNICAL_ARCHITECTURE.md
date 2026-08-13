@@ -218,6 +218,7 @@ flowchart TB
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
 - LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
 - Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
+- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接；Renderer 只提交 Conversation ID 和文本，Main 使用安全存储中的 API Key 创建 Provider，并把新建或续聊请求交给该服务。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 

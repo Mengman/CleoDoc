@@ -8,6 +8,7 @@ import {
   initializeSoftwareConfig,
 } from "../../../../packages/config/src/index.js";
 import { DesktopCredentialStore } from "./desktop-credential-store.js";
+import { createDesktopChatServiceOptions, DesktopChatService } from "./desktop-chat-service.js";
 import { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 import { resolveDesktopDefaultConfigPath } from "./desktop-resource-paths.js";
@@ -78,6 +79,7 @@ async function startDesktop(): Promise<void> {
   });
   const projectRuntime = new DesktopProjectRuntime({
     busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
+    chat: createDesktopChatServiceOptions(),
   });
   const credentialStore = new DesktopCredentialStore(
     path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
@@ -95,6 +97,7 @@ async function startDesktop(): Promise<void> {
     },
   );
   const llmSettings = new DesktopLlmSettingsService(credentialStore);
+  const desktopChat = new DesktopChatService(projectRuntime, llmSettings);
   let restoreError: { code: string; message: string } | undefined;
   try {
     await projectRuntime.restorePreviousProject();
@@ -102,7 +105,7 @@ async function startDesktop(): Promise<void> {
     restoreError = toDesktopOperationError(error);
   }
 
-  registerDesktopIpc(projectRuntime, llmSettings);
+  registerDesktopIpc(projectRuntime, llmSettings, desktopChat);
   const window = createMainWindow();
   if (restoreError !== undefined) {
     window.once("ready-to-show", () => {

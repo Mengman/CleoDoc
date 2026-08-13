@@ -150,6 +150,27 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
+  getRecentVisibleMessages(conversationId: string, limit = 20): StoredMessage[] {
+    // Read the newest user-visible messages without loading the complete conversation history.
+    const rows = this.projectDatabase.read(
+      (database) =>
+        database
+          .prepare(
+            `SELECT * FROM messages
+             WHERE conversation_id = ?
+               AND role IN ('user', 'assistant')
+               AND (
+                 TRIM(content) <> ''
+                 OR (role = 'assistant' AND TRIM(COALESCE(reasoning_content, '')) <> '')
+               )
+             ORDER BY sequence DESC
+             LIMIT ?`,
+          )
+          .all(conversationId, limit) as unknown as MessageRow[],
+    );
+    return rows.reverse().map(mapMessage);
+  }
+
   getToolMessages(conversationId: string, toolName: string): StoredMessage[] {
     const rows = this.projectDatabase.read(
       (database) =>

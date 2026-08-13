@@ -5,11 +5,16 @@ import {
   desktopChannels,
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
+  desktopConversationHistoryResultSchema,
+  desktopConversationListResultSchema,
+  sendDesktopChatMessageResultSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
   showWindowMenuInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
+  getDesktopConversationHistoryInputSchema,
+  sendDesktopChatMessageInputSchema,
 } from "../shared/desktop-api.js";
 
 const desktopApi: CleoDocDesktopApi = {
@@ -47,6 +52,24 @@ const desktopApi: CleoDocDesktopApi = {
       await ipcRenderer.invoke(
         desktopChannels.saveLlmApiSettings,
         saveDesktopLlmApiSettingsInputSchema.parse(input),
+      ),
+    ),
+  listConversations: async () =>
+    desktopConversationListResultSchema.parse(
+      await ipcRenderer.invoke(desktopChannels.listConversations),
+    ),
+  getConversationHistory: async (input) =>
+    desktopConversationHistoryResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.getConversationHistory,
+        getDesktopConversationHistoryInputSchema.parse(input),
+      ),
+    ),
+  sendChatMessage: async (input) =>
+    sendDesktopChatMessageResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.sendChatMessage,
+        sendDesktopChatMessageInputSchema.parse(input),
       ),
     ),
 };

@@ -124,6 +124,8 @@ Conversation 的完整不可变消息日志。
 
 `messages_immutable_update` Trigger 拒绝所有 UPDATE。需要更正时只能追加新 Message，不能改写历史。
 
+Desktop 当前对话视图首版按 `sequence DESC` 在数据库层直接读取最近 20 条 `user`/`assistant` 可见消息，再恢复为正序展示。System、Tool 以及同时缺少 Content 和 Reasoning 的空 Assistant 消息不计入该窗口；查询前必须验证 Conversation 属于当前活动 Project。该读取不改变完整不可变消息日志的存储语义，用户可从该视图继续向同一 Conversation 写入消息。
+
 ### 5.5 `generations`
 
 一次用户可见的生成任务。一个 Generation 可以经过多个 Tool Loop ModelCall；它不取代 Message 日志。

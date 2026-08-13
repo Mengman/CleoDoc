@@ -27,7 +27,10 @@ export function CreativeWorkspace({
         <MaterialsSidebar projectState={projectState} />
       )}
       <DocumentWorkspace runtimeInfo={runtimeInfo} />
-      <ChatPanel />
+      <ChatPanel
+        key={projectState.status === "open" ? projectState.project.id : "closed"}
+        projectState={projectState}
+      />
     </div>
   );
 }
