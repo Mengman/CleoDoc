@@ -14,6 +14,7 @@ import {
   showWindowMenuInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
   type DesktopProjectOperationResult,
+  type DesktopProjectState,
 } from "../shared/desktop-api.js";
 import { toDesktopOperationError } from "./desktop-project-runtime.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
@@ -21,16 +22,35 @@ import type { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import type { DesktopChatService } from "./desktop-chat-service.js";
 import { createWindowMenuTemplate } from "./window-menu-template.js";
 
-function broadcastProjectState(runtime: DesktopProjectRuntime): void {
-  const state = runtime.getState();
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(desktopChannels.projectStateChanged, state);
-  }
+type MainWindowResolver = () => BrowserWindow | null;
+
+export interface DesktopProjectStateTarget {
+  readonly isDestroyed: () => boolean;
+  readonly webContents: {
+    readonly send: (channel: string, state: DesktopProjectState) => void;
+  };
 }
 
-function requireMainWindow(event: IpcMainInvokeEvent): BrowserWindow {
+export function sendProjectState(
+  target: DesktopProjectStateTarget,
+  state: DesktopProjectState,
+): void {
+  if (target.isDestroyed()) return;
+  target.webContents.send(desktopChannels.projectStateChanged, state);
+}
+
+function requireMainWindow(
+  event: IpcMainInvokeEvent,
+  resolveMainWindow: MainWindowResolver,
+): BrowserWindow {
+  // Accept IPC only from the live primary window's main frame.
   const window = BrowserWindow.fromWebContents(event.sender);
-  if (window === null || event.senderFrame !== event.sender.mainFrame) {
+  if (
+    window === null ||
+    window !== resolveMainWindow() ||
+    window.isDestroyed() ||
+    event.senderFrame !== event.sender.mainFrame
+  ) {
     throw new Error("拒绝来自非 CleoDoc 主窗口的 IPC 请求。");
   }
   return window;
@@ -43,7 +63,7 @@ export async function chooseAndOpenProject(
   // Let the user select a project and return a validated, renderer-safe result.
   // 1. Open the native directory picker and preserve the current state on cancellation.
   // 2. Ask the project runtime to close the old project and open the selected project.
-  // 3. Broadcast the resulting state and convert failures into the public error contract.
+  // 3. Notify only the supplied main window and convert failures into the public contract.
   const selection = await dialog.showOpenDialog(window, {
     title: "打开 CleoDoc 项目",
     buttonLabel: "打开项目",
@@ -58,10 +78,10 @@ export async function chooseAndOpenProject(
 
   try {
     const state = await runtime.open(selection.filePaths[0]);
-    broadcastProjectState(runtime);
+    sendProjectState(window, state);
     return desktopProjectOperationResultSchema.parse({ outcome: "success", state });
   } catch (error) {
-    broadcastProjectState(runtime);
+    sendProjectState(window, runtime.getState());
     return desktopProjectOperationResultSchema.parse({
       outcome: "error",
       state: runtime.getState(),
@@ -74,6 +94,7 @@ export function registerDesktopIpc(
   runtime: DesktopProjectRuntime,
   llmSettings: DesktopLlmSettingsService,
   chat: DesktopChatService,
+  resolveMainWindow: MainWindowResolver,
 ): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
   // 1. Register read-only runtime and project-state queries.
@@ -81,7 +102,7 @@ export function registerDesktopIpc(
   // 3. Register native menu handling and connect its existing project action.
   ipcMain.handle(desktopChannels.getRuntimeInfo, (event) => {
     // Validate the caller and return a schema-checked runtime projection.
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     return desktopRuntimeInfoSchema.parse({
       appVersion: app.getVersion(),
       electronVersion: process.versions.electron,
@@ -91,21 +112,21 @@ export function registerDesktopIpc(
   });
 
   ipcMain.handle(desktopChannels.getProjectState, (event) => {
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     return runtime.getState();
   });
 
   ipcMain.handle(desktopChannels.chooseAndOpenProject, async (event) => {
-    const window = requireMainWindow(event);
+    const window = requireMainWindow(event, resolveMainWindow);
     return chooseAndOpenProject(window, runtime);
   });
 
   ipcMain.handle(desktopChannels.closeProject, async (event) => {
     // Close the active project and return its final state through the public result contract.
-    requireMainWindow(event);
+    const window = requireMainWindow(event, resolveMainWindow);
     try {
       const state = await runtime.close();
-      broadcastProjectState(runtime);
+      sendProjectState(window, state);
       return desktopProjectOperationResultSchema.parse({ outcome: "success", state });
     } catch (error) {
       return desktopProjectOperationResultSchema.parse({
@@ -117,13 +138,13 @@ export function registerDesktopIpc(
   });
 
   ipcMain.handle(desktopChannels.getLlmApiSettings, async (event) => {
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     return desktopLlmApiSettingsSchema.parse(await llmSettings.get());
   });
 
   ipcMain.handle(desktopChannels.saveLlmApiSettings, async (event, rawInput: unknown) => {
     // Validate the settings write and return only renderer-safe state or a stable error.
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     try {
       const input = saveDesktopLlmApiSettingsInputSchema.parse(rawInput);
       return desktopLlmApiSettingsResultSchema.parse({
@@ -140,7 +161,7 @@ export function registerDesktopIpc(
 
   ipcMain.handle(desktopChannels.listConversations, (event) => {
     // Return only the current project's renderer-safe conversation list.
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     try {
       return desktopConversationListResultSchema.parse({
         outcome: "success",
@@ -159,7 +180,7 @@ export function registerDesktopIpc(
     // 1. Validate the conversation identifier supplied by the renderer.
     // 2. Query through the current project runtime so project ownership is enforced.
     // 3. Remove internal message fields and validate the complete response contract.
-    requireMainWindow(event);
+    requireMainWindow(event, resolveMainWindow);
     try {
       const input = getDesktopConversationHistoryInputSchema.parse(rawInput);
       const history = runtime.getRecentConversationHistory(input.conversationId);
@@ -187,7 +208,7 @@ export function registerDesktopIpc(
 
   ipcMain.handle(desktopChannels.sendChatMessage, async (event, rawInput: unknown) => {
     // Validate one desktop chat command and bind its stream to the invoking main window.
-    const window = requireMainWindow(event);
+    const window = requireMainWindow(event, resolveMainWindow);
     try {
       const input = sendDesktopChatMessageInputSchema.parse(rawInput);
       const result = await chat.send(input, (streamEvent) => {
@@ -209,7 +230,7 @@ export function registerDesktopIpc(
   ipcMain.handle(desktopChannels.showWindowMenu, (event, rawInput: unknown) => {
     // Validate a menu request and display the matching native menu for the calling window.
     const input = showWindowMenuInputSchema.parse(rawInput);
-    const window = requireMainWindow(event);
+    const window = requireMainWindow(event, resolveMainWindow);
 
     Menu.buildFromTemplate(
       createWindowMenuTemplate(input.menuId, process.env.ELECTRON_RENDERER_URL !== undefined, {

@@ -226,6 +226,7 @@ flowchart TB
 - Main 中的 `DesktopChatService` 是桌面聊天用例入口：它从项目所属 Conversation 读取固定的 Provider/模型身份，调用 `ChatService`，并将模型事件投影为 Renderer 可见的 Reasoning/Content 流。IPC Handler 只负责请求校验、窗口绑定和响应契约。
 - Conversation 首次打开时读取最近 20 条可见消息；发送时 `ChatService` 直接返回本轮落库的 User/Assistant 消息，Desktop 不再重新查询历史。Renderer 按 Conversation 保存已加载列表，用本轮真实消息替换临时消息，因此连续发送后列表可以超过 20 条，切换 Conversation 也不会丢失本次运行中已加载的消息。
 - `DesktopProjectRuntime` 负责构造并校验 Renderer-safe 的 `DesktopProjectState`；Main IPC 直接传递该可信投影，不重复解析。Preload 仍对跨进程收到的状态执行 Schema 校验，Renderer 输入和 Main 新构造的其他公共响应也继续在各自边界校验。
+- Desktop 组合层只维护一个当前主窗口引用，IPC 仅接受该窗口主 Frame 的请求。项目打开、切换或关闭后的状态只定向发送给这个窗口，窗口销毁后停止发送；不遍历全部窗口，也不维护多窗口路由或 Project/Window 映射。
 - Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接，只向桌面聊天用例提供当前项目的 ID、取消信号、`ChatService` 和 Conversation 查询边界；Provider、模型和上下文预算不再作为 Runtime 调用参数。
 - Renderer 只提交 Conversation ID 和文本，`ChatService` 通过共享 `ProviderService` 发送，由它读取安全凭据并复用当前 Provider 实例。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。

@@ -107,8 +107,19 @@ async function startDesktop(): Promise<void> {
     restoreError = toDesktopOperationError(error);
   }
 
-  registerDesktopIpc(projectRuntime, llmSettings, desktopChat);
-  const window = createMainWindow();
+  let mainWindow: BrowserWindow | null = null;
+  const openMainWindow = (): BrowserWindow => {
+    // Create the only main window and clear its reference after native destruction.
+    const window = createMainWindow();
+    mainWindow = window;
+    window.once("closed", () => {
+      if (mainWindow === window) mainWindow = null;
+    });
+    return window;
+  };
+
+  registerDesktopIpc(projectRuntime, llmSettings, desktopChat, () => mainWindow);
+  const window = openMainWindow();
   if (restoreError !== undefined) {
     window.once("ready-to-show", () => {
       void dialog.showMessageBox(window, {
@@ -120,7 +131,7 @@ async function startDesktop(): Promise<void> {
   }
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    if (mainWindow === null) openMainWindow();
   });
 
   let projectClosedForExit = false;
