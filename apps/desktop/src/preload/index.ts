@@ -29,6 +29,7 @@ const desktopApi: CleoDocDesktopApi = {
       await ipcRenderer.invoke(desktopChannels.closeProject),
     ),
   onProjectStateChanged: (listener) => {
+    // Validate project-state events and return a disposer for the wrapped IPC listener.
     const handleStateChanged = (_event: Electron.IpcRendererEvent, rawState: unknown): void => {
       listener(desktopProjectStateSchema.parse(rawState));
     };

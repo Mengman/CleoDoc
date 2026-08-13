@@ -82,6 +82,10 @@ const emptyCopy: Record<SectionId, { title: string; body: string }> = {
 };
 
 export function App(): ReactNode {
+  // Render the current CleoDoc workspace and synchronize it with desktop process state.
+  // 1. Maintain local navigation, runtime information, and the public project-state snapshot.
+  // 2. Subscribe to project changes and load initial desktop state through the preload API.
+  // 3. Render the existing navigation, library, reader, and conversation workspace regions.
   const [activeSection, setActiveSection] = useState<SectionId>("works");
   const [runtimeInfo, setRuntimeInfo] = useState<DesktopRuntimeInfo | null>(null);
   const [projectState, setProjectState] = useState<DesktopProjectState>({ status: "closed" });
@@ -89,6 +93,7 @@ export function App(): ReactNode {
   const copy = emptyCopy[activeSection];
 
   useEffect(() => {
+    // Load the initial desktop state and keep the project snapshot synchronized until unmount.
     let active = true;
     const stopListening = window.cleodoc.onProjectStateChanged((state) => {
       if (active) setProjectState(state);
@@ -116,22 +121,26 @@ export function App(): ReactNode {
             <span />
           </div>
           <nav className="window-menu" aria-label="应用菜单">
-            {windowMenus.map((menu) => (
-              <button
-                key={menu.id}
-                type="button"
-                onClick={(event) => {
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  void window.cleodoc.showWindowMenu({
-                    menuId: menu.id,
-                    x: Math.round(bounds.left),
-                    y: Math.round(bounds.bottom),
-                  });
-                }}
-              >
-                {menu.label}
-              </button>
-            ))}
+            {windowMenus.map((menu) => {
+              // Render a title-bar menu that anchors its native popup below the clicked button.
+              return (
+                <button
+                  key={menu.id}
+                  type="button"
+                  onClick={(event) => {
+                    // Measure the clicked menu button and request its native popup at that position.
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    void window.cleodoc.showWindowMenu({
+                      menuId: menu.id,
+                      x: Math.round(bounds.left),
+                      y: Math.round(bounds.bottom),
+                    });
+                  }}
+                >
+                  {menu.label}
+                </button>
+              );
+            })}
           </nav>
           <div className="window-title">CleoDoc</div>
         </div>
@@ -139,18 +148,21 @@ export function App(): ReactNode {
 
       <nav className="rail" aria-label="主导航">
         <div className="rail-items">
-          {mainSections.map((section) => (
-            <button
-              key={section.id}
-              className={activeSection === section.id ? "rail-item active" : "rail-item"}
-              type="button"
-              onClick={() => setActiveSection(section.id)}
-              aria-current={activeSection === section.id ? "page" : undefined}
-            >
-              {section.icon}
-              <span>{section.label}</span>
-            </button>
-          ))}
+          {mainSections.map((section) => {
+            // Render a navigation item that selects its corresponding workspace section.
+            return (
+              <button
+                key={section.id}
+                className={activeSection === section.id ? "rail-item active" : "rail-item"}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+                aria-current={activeSection === section.id ? "page" : undefined}
+              >
+                {section.icon}
+                <span>{section.label}</span>
+              </button>
+            );
+          })}
         </div>
         <div className="rail-items rail-bottom">
           <button

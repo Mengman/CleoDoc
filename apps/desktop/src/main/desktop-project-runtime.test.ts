@@ -20,7 +20,12 @@ afterEach(async () => {
 });
 
 describe("DesktopProjectRuntime", () => {
+  // Verify the complete desktop project-session lifecycle and its public safety boundary.
+  // 1. Check safe state projection and single-project switching behavior.
+  // 2. Check restoration, cancellation, cleanup, and remembered-project semantics.
+  // 3. Check that desktop errors expose no internal implementation details.
   it("exposes a safe project summary without the project path", async () => {
+    // Verify that renderer state contains project metadata but never its absolute path.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(
       path.join(fixture.root, "private-location", "novel.cleo"),
@@ -38,6 +43,10 @@ describe("DesktopProjectRuntime", () => {
   });
 
   it("closes the previous project and cancels its tasks before switching", async () => {
+    // Verify that switching waits for old project tasks before publishing the new session.
+    // 1. Open two projects and start a cancellable task under the first project.
+    // 2. Switch to the second project and wait for the first task to observe cancellation.
+    // 3. Confirm that memory and persisted state both reference only the second project.
     const fixture = await createRuntimeFixture();
     const first = await fixture.projectService.create(path.join(fixture.root, "first.cleo"), "甲");
     const second = await fixture.projectService.create(
@@ -48,6 +57,7 @@ describe("DesktopProjectRuntime", () => {
 
     let observedProjectId = "";
     const task = fixture.runtime.startTask(async ({ projectId, signal }) => {
+      // Record the bound project and resolve only after project shutdown cancels the task.
       observedProjectId = projectId;
       await new Promise<void>((resolve) => {
         if (signal.aborted) return resolve();
@@ -66,6 +76,7 @@ describe("DesktopProjectRuntime", () => {
   });
 
   it("keeps no project active when a switch target is invalid", async () => {
+    // Verify that a failed switch cannot retain the previous project as an active session.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(path.join(fixture.root, "valid.cleo"));
     await fixture.runtime.open(project.root);
@@ -81,6 +92,7 @@ describe("DesktopProjectRuntime", () => {
   });
 
   it("restores the last project and clears a stale project reference", async () => {
+    // Verify successful restoration and removal of a remembered path that no longer exists.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(path.join(fixture.root, "restore.cleo"));
     await fixture.appStateService.setCurrentProject(project.root);
@@ -99,6 +111,7 @@ describe("DesktopProjectRuntime", () => {
   });
 
   it("releases resources on application exit while remembering the last project", async () => {
+    // Verify that application disposal closes resources without clearing restart state.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(path.join(fixture.root, "remember.cleo"));
     await fixture.runtime.open(project.root);
@@ -110,6 +123,7 @@ describe("DesktopProjectRuntime", () => {
   });
 
   it("returns only stable error fields across the desktop boundary", () => {
+    // Verify that unexpected errors are reduced to stable public fields without private paths.
     const safeError = toDesktopOperationError(new Error("D:\\private\\secret.txt"));
 
     expect(safeError).toEqual({
@@ -127,6 +141,7 @@ async function createRuntimeFixture(): Promise<{
   projectService: ProjectService;
   appStateService: AppStateService;
 }> {
+  // Create isolated project, state, and runtime services for one lifecycle test.
   const root = await mkdtemp(path.join(tmpdir(), "cleodoc-desktop-project-"));
   temporaryDirectories.push(root);
   const appStateService = new AppStateService({ CLEODOC_HOME: path.join(root, "app-state") });

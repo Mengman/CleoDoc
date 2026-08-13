@@ -31,6 +31,10 @@ export async function chooseAndOpenProject(
   window: BrowserWindow,
   runtime: DesktopProjectRuntime,
 ): Promise<DesktopProjectOperationResult> {
+  // Let the user select a project and return a validated, renderer-safe result.
+  // 1. Open the native directory picker and preserve the current state on cancellation.
+  // 2. Ask the project runtime to close the old project and open the selected project.
+  // 3. Broadcast the resulting state and convert failures into the public error contract.
   const selection = await dialog.showOpenDialog(window, {
     title: "打开 CleoDoc 项目",
     buttonLabel: "打开项目",
@@ -58,7 +62,12 @@ export async function chooseAndOpenProject(
 }
 
 export function registerDesktopIpc(runtime: DesktopProjectRuntime): void {
+  // Register the complete whitelist of IPC capabilities exposed to the renderer.
+  // 1. Register read-only runtime and project-state queries.
+  // 2. Register project lifecycle operations with caller validation and safe results.
+  // 3. Register native menu handling and connect its existing project action.
   ipcMain.handle(desktopChannels.getRuntimeInfo, (event) => {
+    // Validate the caller and return a schema-checked runtime projection.
     requireMainWindow(event);
     return desktopRuntimeInfoSchema.parse({
       appVersion: app.getVersion(),
@@ -79,6 +88,7 @@ export function registerDesktopIpc(runtime: DesktopProjectRuntime): void {
   });
 
   ipcMain.handle(desktopChannels.closeProject, async (event) => {
+    // Close the active project and return its final state through the public result contract.
     requireMainWindow(event);
     try {
       const state = await runtime.close();
@@ -94,13 +104,16 @@ export function registerDesktopIpc(runtime: DesktopProjectRuntime): void {
   });
 
   ipcMain.handle(desktopChannels.showWindowMenu, (event, rawInput: unknown) => {
+    // Validate a menu request and display the matching native menu for the calling window.
     const input = showWindowMenuInputSchema.parse(rawInput);
     const window = requireMainWindow(event);
 
     Menu.buildFromTemplate(
       createWindowMenuTemplate(input.menuId, process.env.ELECTRON_RENDERER_URL !== undefined, {
         onOpenProject: () => {
+          // Run the project picker and show a native error dialog when opening fails.
           void chooseAndOpenProject(window, runtime).then((result) => {
+            // Ignore successful or cancelled selections and report only failed opens.
             if (result.outcome !== "error") return;
             void dialog.showMessageBox(window, {
               type: "error",

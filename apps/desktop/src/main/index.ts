@@ -11,6 +11,10 @@ import { registerDesktopIpc } from "./desktop-ipc.js";
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 function createMainWindow(): BrowserWindow {
+  // Create and load the hardened primary CleoDoc window.
+  // 1. Configure the native window and disable renderer Node.js access.
+  // 2. Block new windows and renderer-driven navigation.
+  // 3. Load the development renderer or the packaged local HTML entry.
   const window = new BrowserWindow({
     width: 1600,
     height: 960,
@@ -52,6 +56,10 @@ function createMainWindow(): BrowserWindow {
 }
 
 async function startDesktop(): Promise<void> {
+  // Initialize the desktop process, restore project state, and manage application shutdown.
+  // 1. Load software configuration and construct the single project runtime.
+  // 2. Restore the remembered project before registering IPC and creating the window.
+  // 3. Handle window recreation and release project resources before application exit.
   await app.whenReady();
   app.setAppUserModelId("org.cleodoc.desktop");
   Menu.setApplicationMenu(null);
@@ -91,6 +99,7 @@ async function startDesktop(): Promise<void> {
 
   let projectClosedForExit = false;
   app.on("before-quit", (event) => {
+    // Delay the first quit request until all project-scoped resources are released.
     if (projectClosedForExit) return;
     event.preventDefault();
     void projectRuntime.dispose().finally(() => {

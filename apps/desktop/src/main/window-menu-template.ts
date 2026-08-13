@@ -11,6 +11,10 @@ export function createWindowMenuTemplate(
   isDevelopment: boolean,
   actions: WindowMenuActions = {},
 ): MenuItemConstructorOptions[] {
+  // Build the native menu template for one title-bar menu.
+  // 1. Connect available product actions and keep unavailable actions disabled.
+  // 2. Use native Electron roles for editing, window, and application commands.
+  // 3. Expose developer tools only when the desktop application runs in development.
   switch (menuId) {
     case "file":
       return [

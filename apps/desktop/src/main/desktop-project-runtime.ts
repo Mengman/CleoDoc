@@ -48,6 +48,7 @@ export class DesktopProjectRuntime {
   }
 
   getState(): DesktopProjectState {
+    // Build the renderer-safe state projection for the current project session.
     const active = this.activeProject;
     if (active === undefined) return { status: "closed" };
 
@@ -64,7 +65,9 @@ export class DesktopProjectRuntime {
   }
 
   async restorePreviousProject(): Promise<DesktopProjectState> {
+    // Restore the remembered project inside the serialized lifecycle queue.
     return this.enqueue(async () => {
+      // Open the remembered project or clear stale state when restoration fails.
       const state = await this.appStateService.read();
       if (state.currentProject === null) return this.getState();
 
@@ -79,7 +82,9 @@ export class DesktopProjectRuntime {
   }
 
   async open(directory: string): Promise<DesktopProjectState> {
+    // Replace the active project with the project selected by the user.
     return this.enqueue(async () => {
+      // Close the old session before opening the new one and leave no stale session on failure.
       await this.closeActiveProject();
       try {
         await this.openActiveProject(directory);
@@ -101,6 +106,10 @@ export class DesktopProjectRuntime {
   startTask<T>(
     operation: (context: DesktopProjectTaskContext) => Promise<T>,
   ): DesktopProjectTask<T> {
+    // Start a cancellable task that is strictly bound to the active project session.
+    // 1. Require an active project and create a task-scoped cancellation controller.
+    // 2. Forward project shutdown cancellation and provide only the current project context.
+    // 3. Track the promise until settlement and return a caller-controlled cancel handle.
     const active = this.activeProject;
     if (active === undefined) {
       throw new AppError("PROJECT_NOT_FOUND", "请先打开一个 CleoDoc 项目。");
@@ -138,6 +147,11 @@ export class DesktopProjectRuntime {
   }
 
   private async openActiveProject(directory: string): Promise<void> {
+    // Open and validate all resources required by a new active project session.
+    // 1. Resolve the project manifest and open its SQLite database.
+    // 2. Verify database integrity and calculate the initial document count.
+    // 3. Persist the selected project before publishing the new in-memory session.
+    // 4. Close the database when any initialization step fails.
     const project = await this.projectService.open(directory);
     const database = await ProjectDatabase.open(project.root, {
       busyTimeoutMs: this.options.busyTimeoutMs,
@@ -164,6 +178,7 @@ export class DesktopProjectRuntime {
   }
 
   private async closeActiveProject(clearRememberedProject = true): Promise<void> {
+    // Cancel project tasks, release the database, and optionally forget the project path.
     const active = this.activeProject;
     this.activeProject = undefined;
 
@@ -176,6 +191,7 @@ export class DesktopProjectRuntime {
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    // Serialize project lifecycle mutations while allowing later operations after a failure.
     const pending = this.operationTail.then(operation, operation);
     this.operationTail = pending.then(
       () => undefined,
