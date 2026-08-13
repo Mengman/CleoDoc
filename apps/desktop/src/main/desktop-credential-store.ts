@@ -21,6 +21,10 @@ export class DesktopCredentialStore {
     return this.protection.isAvailable();
   }
 
+  async isPersistenceAvailable(): Promise<boolean> {
+    return this.isAvailable();
+  }
+
   async hasApiKey(): Promise<boolean> {
     return access(this.credentialPath).then(
       () => true,
@@ -28,7 +32,7 @@ export class DesktopCredentialStore {
     );
   }
 
-  async saveApiKey(apiKey: string): Promise<void> {
+  async saveApiKey(_providerId: string, apiKey: string): Promise<void> {
     // Encrypt and atomically persist an API key outside project and YAML storage.
     const encrypted = await this.encryptApiKey(apiKey);
     await writeBufferAtomic(this.credentialPath, encrypted);
@@ -43,7 +47,9 @@ export class DesktopCredentialStore {
     if (encrypted === undefined) return undefined;
     try {
       const decrypted = await this.protection.decrypt(encrypted);
-      if (decrypted.shouldReEncrypt) await this.saveApiKey(decrypted.result);
+      if (decrypted.shouldReEncrypt) {
+        await this.saveApiKey("openai-compatible", decrypted.result);
+      }
       return decrypted.result;
     } catch (error) {
       throw new AppError("CONFIG_ERROR", "无法解密已保存的 API Key。", { cause: error });

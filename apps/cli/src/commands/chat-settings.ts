@@ -1,37 +1,51 @@
 import { createContextBudgetPolicy } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
+import { AppError, type ContextBudgetPolicy } from "../../../../packages/contracts/src/index.js";
 import {
-  AppError,
-  type ContextBudgetPolicy,
-  type ModelProvider,
-} from "../../../../packages/contracts/src/index.js";
-import { createProvider } from "../../../../packages/model-providers/src/index.js";
+  EnvironmentProviderCredentialStore,
+  ProviderService,
+} from "../../../../packages/model-providers/src/index.js";
 import { optionString, type ParsedArguments } from "../arguments.js";
 import { optionPositiveInteger, parsePositiveEnvironmentInteger } from "./command-utils.js";
 
-export function providerFromArguments(providerId: string, parsed: ParsedArguments): ModelProvider {
+export function providerServiceFromArguments(
+  providerId: string,
+  modelId: string,
+  parsed: ParsedArguments,
+): ProviderService {
+  // Create the CLI-facing service with command-scoped endpoint and timeout overrides.
+  // 1. Validate the selected Provider against the software catalog.
+  // 2. Resolve CLI and environment overrides without changing persisted configuration.
+  // 3. Keep credentials and concrete Provider construction behind ProviderService.
   const config = getSoftwareConfig();
   const configuredProvider = config.llm.providers[providerId];
   if (configuredProvider === undefined) {
     throw new AppError("VALIDATION_ERROR", `软件配置中没有 Provider：${providerId}`);
   }
-  return createProvider(providerId, {
-    baseUrl:
-      optionString(parsed, "base-url") ??
-      (providerId === "ollama" ? process.env.OLLAMA_BASE_URL : process.env.OPENAI_BASE_URL) ??
-      configuredProvider.baseUrl,
-    connectionTimeoutMs:
-      optionPositiveInteger(parsed, "connect-timeout-ms") ??
-      parsePositiveEnvironmentInteger("CLEODOC_LLM_CONNECT_TIMEOUT_MS") ??
-      config.llm.timeouts.connectionMs,
-    streamIdleTimeoutMs:
-      optionPositiveInteger(parsed, "stream-idle-timeout-ms") ??
-      parsePositiveEnvironmentInteger("CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS") ??
-      config.llm.timeouts.streamIdleMs,
-    overallTimeoutMs:
-      optionPositiveInteger(parsed, "generation-timeout-ms") ??
-      parsePositiveEnvironmentInteger("CLEODOC_LLM_OVERALL_TIMEOUT_MS") ??
-      config.llm.timeouts.overallMs,
+  const environment = process.env;
+  return new ProviderService({
+    credentials: new EnvironmentProviderCredentialStore(environment),
+    environment,
+    overrides: {
+      providerId,
+      modelId,
+      baseUrl:
+        optionString(parsed, "base-url") ??
+        (providerId === "ollama" ? environment.OLLAMA_BASE_URL : environment.OPENAI_BASE_URL) ??
+        configuredProvider.baseUrl,
+      connectionTimeoutMs:
+        optionPositiveInteger(parsed, "connect-timeout-ms") ??
+        parsePositiveEnvironmentInteger("CLEODOC_LLM_CONNECT_TIMEOUT_MS") ??
+        config.llm.timeouts.connectionMs,
+      streamIdleTimeoutMs:
+        optionPositiveInteger(parsed, "stream-idle-timeout-ms") ??
+        parsePositiveEnvironmentInteger("CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS") ??
+        config.llm.timeouts.streamIdleMs,
+      overallTimeoutMs:
+        optionPositiveInteger(parsed, "generation-timeout-ms") ??
+        parsePositiveEnvironmentInteger("CLEODOC_LLM_OVERALL_TIMEOUT_MS") ??
+        config.llm.timeouts.overallMs,
+    },
   });
 }
 

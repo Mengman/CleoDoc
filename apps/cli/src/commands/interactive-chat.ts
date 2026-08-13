@@ -12,8 +12,8 @@ import {
   asAppError,
   type ContextBudgetPolicy,
   type ConversationSummary,
-  type ModelProvider,
 } from "../../../../packages/contracts/src/index.js";
+import type { ProviderService } from "../../../../packages/model-providers/src/index.js";
 import type { DocumentService } from "../../../../packages/project/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
 import {
@@ -30,10 +30,10 @@ import { generateOnce } from "./send-chat-message.js";
 
 export interface InteractiveChatOptions {
   readonly projectId: string;
-  readonly provider: ModelProvider;
+  readonly provider: ProviderService;
   readonly model: string;
   readonly initialConversationId?: string;
-  readonly createProvider: (providerId: string) => ModelProvider;
+  readonly createProviderService: (providerId: string, model: string) => ProviderService;
   readonly documents: DocumentService;
   readonly contextBudgetPolicy: ContextBudgetPolicy;
   readonly createContextBudgetPolicy: (providerId: string, model: string) => ContextBudgetPolicy;
@@ -65,7 +65,7 @@ export async function runInteractiveChat(
   }
 
   const resumeConversation = (conversation: ConversationSummary): void => {
-    provider = options.createProvider(conversation.providerId);
+    provider = options.createProviderService(conversation.providerId, conversation.model);
     model = conversation.model;
     contextBudgetPolicy = options.createContextBudgetPolicy(conversation.providerId, model);
     conversationId = conversation.id;

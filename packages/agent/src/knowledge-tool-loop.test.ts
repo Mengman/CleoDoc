@@ -18,6 +18,7 @@ import {
   TEST_CHAT_OPTIONS,
   TEST_DATABASE_OPTIONS,
 } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import { ChatService } from "./chat-service.js";
 
 const temporaryDirectories: string[] = [];
@@ -50,7 +51,7 @@ describe("ChatService knowledge tool loop", () => {
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "knowledge-loop-model",
         prompt: "资料中夜间列车用什么照明？",
         signal: new AbortController().signal,
@@ -100,7 +101,7 @@ describe("ChatService knowledge tool loop", () => {
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider,
+        provider: senderForProvider(provider),
         model: "repair-model",
         prompt: "值夜人使用什么照明？",
         signal: new AbortController().signal,
@@ -147,7 +148,7 @@ describe("ChatService knowledge tool loop", () => {
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider,
+        provider: senderForProvider(provider),
         model: "fallback-model",
         prompt: "旧地图记录了什么？",
         signal: new AbortController().signal,

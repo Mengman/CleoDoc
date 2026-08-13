@@ -12,7 +12,7 @@ import {
 import { LlmDebugFileLogger } from "../debug-log.js";
 import {
   chatServiceOptions,
-  providerFromArguments,
+  providerServiceFromArguments,
   resolveContextBudgetPolicy,
 } from "./chat-settings.js";
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
@@ -50,7 +50,6 @@ export async function runChatCommand(
   const project = await context.projectService.open(root);
   const providerId =
     optionString(parsed, "provider") ?? config.llm.selectedProvider ?? "openai-compatible";
-  const provider = providerFromArguments(providerId, parsed);
   const model =
     optionString(parsed, "model") ??
     process.env.CLEODOC_MODEL ??
@@ -59,6 +58,7 @@ export async function runChatCommand(
   if (!model) {
     throw new AppError("VALIDATION_ERROR", "请使用 --model 或 CLEODOC_MODEL 指定模型。");
   }
+  const provider = providerServiceFromArguments(providerId, model, parsed);
   const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
   const contextBudgetPolicy = resolveContextBudgetPolicy(providerId, model, parsed);
   const knowledge = await KnowledgeToolService.open(project.root, createMaterialServiceOptions());
@@ -103,7 +103,8 @@ export async function runChatCommand(
       provider,
       model,
       initialConversationId,
-      createProvider: (selectedProviderId) => providerFromArguments(selectedProviderId, parsed),
+      createProviderService: (selectedProviderId, selectedModel) =>
+        providerServiceFromArguments(selectedProviderId, selectedModel, parsed),
       documents: new DocumentService(project.root),
       contextBudgetPolicy,
       createContextBudgetPolicy: (selectedProviderId, selectedModel) =>

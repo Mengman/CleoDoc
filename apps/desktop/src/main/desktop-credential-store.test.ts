@@ -23,7 +23,7 @@ describe("DesktopCredentialStore", () => {
   it("persists only protected API key bytes and decrypts them after restart", async () => {
     // Verify that the credential file never contains the plaintext API key.
     const fixture = await createFixture();
-    await fixture.store.saveApiKey("sk-private-value");
+    await fixture.store.saveApiKey("openai-compatible", "sk-private-value");
 
     expect((await readFile(fixture.credentialPath)).toString("utf8")).not.toContain(
       "sk-private-value",
@@ -35,7 +35,9 @@ describe("DesktopCredentialStore", () => {
     // Verify that an unavailable system key store cannot fall back to plaintext persistence.
     const fixture = await createFixture(false);
 
-    await expect(fixture.store.saveApiKey("sk-private-value")).rejects.toMatchObject({
+    await expect(
+      fixture.store.saveApiKey("openai-compatible", "sk-private-value"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
     await expect(fixture.store.hasApiKey()).resolves.toBe(false);

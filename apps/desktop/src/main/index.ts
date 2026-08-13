@@ -8,6 +8,7 @@ import {
   initializeSoftwareConfig,
 } from "../../../../packages/config/src/index.js";
 import { DesktopCredentialStore } from "./desktop-credential-store.js";
+import { ProviderService } from "../../../../packages/model-providers/src/index.js";
 import { createDesktopChatServiceOptions, DesktopChatService } from "./desktop-chat-service.js";
 import { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
@@ -96,8 +97,9 @@ async function startDesktop(): Promise<void> {
       decrypt: (encrypted) => safeStorage.decryptStringAsync(encrypted),
     },
   );
-  const llmSettings = new DesktopLlmSettingsService(credentialStore);
-  const desktopChat = new DesktopChatService(projectRuntime, llmSettings);
+  const providerService = new ProviderService({ credentials: credentialStore });
+  const llmSettings = new DesktopLlmSettingsService(providerService);
+  const desktopChat = new DesktopChatService(projectRuntime, providerService);
   let restoreError: { code: string; message: string } | undefined;
   try {
     await projectRuntime.restorePreviousProject();

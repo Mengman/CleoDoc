@@ -17,6 +17,7 @@ import { FakeModelProvider } from "../../model-providers/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
@@ -59,7 +60,7 @@ describe("ChatService", () => {
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "fake-model",
         prompt: "写一个悬疑开场",
         signal: new AbortController().signal,
@@ -92,7 +93,7 @@ describe("ChatService", () => {
       const continuation = await chat.send({
         conversationId: result.conversationId,
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "fake-model",
         prompt: "继续",
         signal: new AbortController().signal,
@@ -128,7 +129,7 @@ describe("ChatService", () => {
     try {
       const successful = await chat.send({
         projectId: project.manifest.id,
-        provider: new FakeModelProvider("第一次回答"),
+        provider: senderForProvider(new FakeModelProvider("第一次回答")),
         model: "stable-model",
         prompt: "第一次提问",
         signal: new AbortController().signal,
@@ -139,7 +140,7 @@ describe("ChatService", () => {
         chat.send({
           conversationId,
           projectId: project.manifest.id,
-          provider: new TimeoutModelProvider(),
+          provider: senderForProvider(new TimeoutModelProvider()),
           model: "stable-model",
           prompt: "超时的提问",
           signal: new AbortController().signal,
@@ -177,7 +178,7 @@ describe("ChatService", () => {
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "tool-model",
         prompt: "总结并保存到项目",
         signal: new AbortController().signal,
@@ -271,7 +272,7 @@ describe("ChatService", () => {
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "instruction-tool-model",
         prompt: "把第三人称限知写入项目指令",
         signal: new AbortController().signal,
@@ -301,7 +302,7 @@ describe("ChatService", () => {
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "persistent-tool-model",
         prompt: "加载历史搜索工具",
         signal: new AbortController().signal,
@@ -314,7 +315,7 @@ describe("ChatService", () => {
       const second = await chat.send({
         conversationId: first.conversationId,
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "persistent-tool-model",
         prompt: "现在搜索旧对话",
         signal: new AbortController().signal,

@@ -6,7 +6,7 @@ import type {
 import type {
   ChatGenerationResult,
   ContextBudgetPolicy,
-  ModelProvider,
+  ModelMessageSender,
 } from "../../../../packages/contracts/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
 import { installInterruptHandler } from "./command-utils.js";
@@ -16,7 +16,7 @@ export async function generateOnce(
   chat: ChatService,
   inputValue: {
     projectId: string;
-    provider: ModelProvider;
+    provider: ModelMessageSender;
     model: string;
     prompt: string;
     conversationId?: string;

@@ -1,10 +1,8 @@
 import { createContextBudgetPolicy } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
-import { AppError } from "../../../../packages/contracts/src/index.js";
-import type { ModelEvent } from "../../../../packages/contracts/src/index.js";
-import { createProvider } from "../../../../packages/model-providers/src/index.js";
+import { AppError, type ModelEvent } from "../../../../packages/contracts/src/index.js";
+import type { ProviderService } from "../../../../packages/model-providers/src/index.js";
 import type { SendDesktopChatMessageInput } from "../shared/desktop-api.js";
-import type { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
 
 export function createDesktopChatServiceOptions() {
@@ -26,42 +24,28 @@ export function createDesktopChatServiceOptions() {
 export class DesktopChatService {
   constructor(
     private readonly projects: DesktopProjectRuntime,
-    private readonly llmSettings: DesktopLlmSettingsService,
+    private readonly providerService: ProviderService,
   ) {}
 
   async send(input: SendDesktopChatMessageInput, onEvent?: (event: ModelEvent) => void) {
     // Send a new or continuing message with the currently saved desktop model configuration.
-    // 1. Resolve the fixed transitional provider and model from validated software settings.
-    // 2. Read the API key only in the main process and construct the provider locally.
-    // 3. Run the message inside the active project session and return its latest visible messages.
-    const config = getSoftwareConfig();
+    // Resolve the conversation target and send it through the shared ProviderService.
+    // 1. Read the immutable Provider and model identity stored with the conversation.
+    // 2. Resolve its context budget from validated software configuration.
+    // 3. Send through the shared service without exposing credentials or concrete Providers.
     const existingTarget = this.projects.getConversationModel(input.conversationId);
     const providerId = existingTarget.providerId;
     const model = existingTarget.model;
+    const config = getSoftwareConfig();
     const providerConfig = config.llm.providers[providerId];
-    if (providerConfig === undefined || model === null) {
-      throw new AppError("CONFIG_ERROR", "请先完成模型 API 配置。");
-    }
-    const configuredModel = providerConfig.models[model];
+    const configuredModel = providerConfig?.models[model];
     if (configuredModel === undefined) {
       throw new AppError("CONFIG_ERROR", `模型 ${providerId}/${model} 缺少能力配置。`);
     }
-
-    const apiKey = await this.llmSettings.readApiKey();
-    if (providerId === "openai-compatible" && apiKey === undefined) {
-      throw new AppError("CONFIG_ERROR", "请先在设置中填写并保存 API Key。");
-    }
-    const provider = createProvider(providerId, {
-      baseUrl: providerConfig.baseUrl,
-      connectionTimeoutMs: config.llm.timeouts.connectionMs,
-      streamIdleTimeoutMs: config.llm.timeouts.streamIdleMs,
-      overallTimeoutMs: config.llm.timeouts.overallMs,
-      environment: apiKey === undefined ? {} : { CLEODOC_API_KEY: apiKey },
-    });
     return this.projects.sendMessage({
       conversationId: input.conversationId,
       prompt: input.prompt,
-      provider,
+      provider: this.providerService,
       model,
       contextBudgetPolicy: createContextBudgetPolicy(configuredModel, config.context),
       ...(onEvent === undefined ? {} : { onEvent }),

@@ -6,7 +6,7 @@ import type {
   ContextBudgetStatus,
   ContextBudgetPolicy,
   CompactionEvent,
-  ModelProvider,
+  ModelMessageSender,
   ModelRequest,
   ModelToolCall,
   ModelToolDefinition,
@@ -199,7 +199,10 @@ export class ChatService {
         });
 
         try {
-          for await (const event of input.provider.stream(modelRequest, input.signal)) {
+          for await (const event of input.provider.send(
+            { providerId: input.provider.id, model: input.model, request: modelRequest },
+            input.signal,
+          )) {
             if (event.type === "reasoning-delta") {
               roundReasoning += event.text;
             } else if (event.type === "text-delta") {
@@ -454,7 +457,7 @@ export class ChatService {
 
   async compactConversation(input: {
     conversationId: string;
-    provider: ModelProvider;
+    provider: ModelMessageSender;
     model: string;
     contextBudgetPolicy?: ContextBudgetPolicy;
     trigger?: "automatic" | "manual";
@@ -479,7 +482,8 @@ export class ChatService {
     ).compact({
       conversationId: input.conversationId,
       session,
-      provider: input.provider,
+      providerId: input.provider.id,
+      sender: input.provider,
       model: input.model,
       contextBudgetPolicy: this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
       trigger: input.trigger ?? "manual",

@@ -24,6 +24,7 @@ import {
   TEST_CONTEXT_POLICY,
   TEST_DATABASE_OPTIONS,
 } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import {
   projectMessagesForCompaction,
   segmentMessagesForCompaction,
@@ -55,7 +56,7 @@ describe("session compaction", () => {
     );
     await setProjectInstructions(project.root, "数据库项目规则");
     await writeFile(path.join(project.root, "AGENTS.md"), "第一版文件规则", "utf8");
-    const provider = new CompactionAwareProvider();
+    const provider = senderForProvider(new CompactionAwareProvider());
     const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 
@@ -160,7 +161,7 @@ describe("session compaction", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const provider = new EmptyCompactionProvider();
+    const provider = senderForProvider(new EmptyCompactionProvider());
     const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 
@@ -215,7 +216,7 @@ describe("session compaction", () => {
       path.join(directory, "novel.cleo"),
     );
     await setProjectInstructions(project.root, "连续压缩项目规则");
-    const provider = new CumulativeCompactionProvider();
+    const provider = senderForProvider(new CumulativeCompactionProvider());
     const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
 
     try {
@@ -308,7 +309,7 @@ describe("session compaction", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const provider = new HierarchicalCompactionProvider();
+    const provider = senderForProvider(new HierarchicalCompactionProvider());
     const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const debugEvents: LlmDebugEvent[] = [];
 

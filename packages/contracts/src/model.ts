@@ -85,3 +85,15 @@ export interface ModelProvider {
   validateConfiguration(signal?: AbortSignal): Promise<ProviderHealth>;
   stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent>;
 }
+
+export interface ModelSendInput {
+  readonly providerId: string;
+  readonly model: string;
+  readonly request: ModelRequest;
+}
+
+export interface ModelMessageSender {
+  readonly id: string;
+  readonly displayName: string;
+  send(input: ModelSendInput, signal: AbortSignal): AsyncIterable<ModelEvent>;
+}

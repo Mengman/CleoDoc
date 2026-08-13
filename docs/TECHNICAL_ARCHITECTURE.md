@@ -38,7 +38,9 @@ flowchart TB
     APP --> KNOWLEDGE["packages/knowledge"]
     APP --> AGENT["packages/agent"]
     APP --> CONFIG["packages/config"]
-    AGENT --> PROVIDERS["packages/model-providers"]
+    CLI --> PROVIDER_SERVICE["ProviderService"]
+    AGENT --> PROVIDER_SERVICE
+    PROVIDER_SERVICE --> PROVIDERS["OpenAI-compatible / Ollama"]
     KNOWLEDGE --> INGEST["packages/document-ingestion"]
     KNOWLEDGE --> RAG["packages/rag"]
     INGEST --> CDM["packages/cdm"]
@@ -63,7 +65,7 @@ flowchart TB
 | `packages/document-ingestion` | TXT/Markdown 到临时 CDM、来源范围、语言检测和 ChunkDraft |
 | `packages/knowledge` | 资料 CRUD、恢复、索引编排以及面向 Tool 的知识服务 |
 | `packages/rag` | GGUF 模型定义、Tokenizer、Embedding Worker、混合召回和证据组装 |
-| `packages/model-providers` | OpenAI-compatible、Ollama、流协议、超时、Reasoning 和 Debug 事件 |
+| `packages/model-providers` | `ProviderService`、Provider 配置与密钥边界、实例缓存、OpenAI-compatible/Ollama 协议适配 |
 | `packages/agent` | Context、Tool Catalog/Runtime、Tool Loop、Session 压缩和历史回查 |
 
 `packages/cdm` 是叶子协议包；Document Ingestion 可以依赖 CDM，但不访问 Project 或 SQLite。RAG 从纯文本 Chunk 开始，不解析或持久化 CDM。CleoDoc 业务通过 Knowledge/Application Service 使用 RAG，不把 Repository 直接暴露给 Agent。
@@ -73,6 +75,8 @@ flowchart TB
 v0.1 CLI 在一个 Node.js 主进程中运行，Embedding 在 Worker Thread 中执行：
 
 - 软件配置在命令启动时加载一次，形成进程内只读快照；当前修改配置后需要重启命令才生效。
+- CLI 和 Desktop Main 只持有 `ProviderService`；具体 Provider 实例、API Key 读取和构造细节都留在 `packages/model-providers` 内。
+- `ProviderService` 按当前生效配置复用一个 Provider 实例；配置修改后使缓存失效，下一次发送再构造新实例。
 - 项目打开时建立项目服务、数据库连接和知识服务。
 - `ProjectToolCatalog` 在应用/项目组合阶段创建一次，持有无执行状态的 Tool 实例与 Schema。
 - `ProjectToolRuntime` 按 Conversation 创建并缓存，持有 `projectId + conversationId`、已加载 Tool 版本和“退出前允许”审批；不持有 Session ID。
@@ -129,7 +133,7 @@ Project 1 ── N Conversation 1 ── N Session 1 ── N Message
 
 1. ContextBuilder 组装 System Prompt、数据库当前项目指令、当前 Session 的累计摘要和当前消息。
 2. Runtime 每轮从 Catalog 获取最新 `full` Tool 定义，并加入已通过 Catalog 加载的 Tool。
-3. Provider 流式返回 Reasoning、Content 和 Tool Call；Reasoning 与 Content 分流显示和保存。
+3. `ChatService` 通过统一 `send` 边界调用 `ProviderService`；内部 Provider 流式返回 Reasoning、Content 和 Tool Call，Reasoning 与 Content 分流显示和保存。
 4. Tool 参数完整拼接后进行 Schema 校验、审批和执行；Runtime 注入可信的 Project/Conversation 范围。
 5. Tool Result 使用统一 `{ tool, status, data | error }` 结构返回模型并写入 Message。
 6. 模型继续调用 Tool，或返回有效 Assistant Content 结束回合；默认最多 8 轮。
@@ -218,7 +222,7 @@ flowchart TB
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
 - LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
 - Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
-- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接；Renderer 只提交 Conversation ID 和文本，Main 使用安全存储中的 API Key 创建 Provider，并把新建或续聊请求交给该服务。
+- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接；Renderer 只提交 Conversation ID 和文本，Main 把请求交给共享 `ProviderService`，由它读取安全凭据并复用当前 Provider 实例。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 

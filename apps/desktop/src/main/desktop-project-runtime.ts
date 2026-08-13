@@ -10,7 +10,7 @@ import {
   AppError,
   asAppError,
   type ModelEvent,
-  type ModelProvider,
+  type ModelMessageSender,
 } from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import {
@@ -175,7 +175,7 @@ export class DesktopProjectRuntime {
   async sendMessage(input: {
     readonly conversationId?: string;
     readonly prompt: string;
-    readonly provider: ModelProvider;
+    readonly provider: ModelMessageSender;
     readonly model: string;
     readonly contextBudgetPolicy?: Parameters<ChatService["send"]>[0]["contextBudgetPolicy"];
     readonly onEvent?: (event: ModelEvent) => void;

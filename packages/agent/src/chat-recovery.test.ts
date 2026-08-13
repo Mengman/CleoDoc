@@ -13,6 +13,7 @@ import type {
 import { AppError } from "../../contracts/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import { ChatService } from "./chat-service.js";
 
 const temporaryDirectories: string[] = [];
@@ -36,7 +37,7 @@ describe("ChatService failure recovery", () => {
       const cancelledError = await chat
         .send({
           projectId: project.manifest.id,
-          provider: new CancelAfterFirstChunkProvider(),
+          provider: senderForProvider(new CancelAfterFirstChunkProvider()),
           model: "recovery-model",
           prompt: "生成一段随后取消的正文",
           signal: controller.signal,
@@ -67,7 +68,7 @@ describe("ChatService failure recovery", () => {
       const resumed = await chat.send({
         conversationId,
         projectId: project.manifest.id,
-        provider: new RecoveryProvider(),
+        provider: senderForProvider(new RecoveryProvider()),
         model: "recovery-model",
         prompt: "取消后继续正常交流",
         signal: new AbortController().signal,
@@ -89,7 +90,7 @@ describe("ChatService failure recovery", () => {
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "sequential-model",
         prompt: "生成初稿",
         signal: new AbortController().signal,
@@ -99,7 +100,7 @@ describe("ChatService failure recovery", () => {
       const second = await chat.send({
         conversationId: first.conversationId,
         projectId: project.manifest.id,
-        provider,
+        provider: senderForProvider(provider),
         model: "sequential-model",
         prompt: "生成修订稿",
         signal: new AbortController().signal,
@@ -128,7 +129,7 @@ describe("ChatService failure recovery", () => {
       const loopError = await chat
         .send({
           projectId: project.manifest.id,
-          provider: new LoopingToolProvider(),
+          provider: senderForProvider(new LoopingToolProvider()),
           model: "loop-model",
           prompt: "不要无限调用工具",
           signal: new AbortController().signal,
@@ -151,7 +152,7 @@ describe("ChatService failure recovery", () => {
       const recovered = await chat.send({
         conversationId,
         projectId: project.manifest.id,
-        provider: new LoopRecoveryProvider(),
+        provider: senderForProvider(new LoopRecoveryProvider()),
         model: "loop-model",
         prompt: "停止调用工具并直接回答",
         signal: new AbortController().signal,

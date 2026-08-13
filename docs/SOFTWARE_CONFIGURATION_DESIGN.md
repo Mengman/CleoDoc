@@ -39,7 +39,7 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 
 应用启动层只加载一次 YAML，并通过 `initializeSoftwareConfig()` 发布进程级配置快照。CLI 命令和 CleoDoc 组合模块在需要配置时直接调用 `getSoftwareConfig()`，不再把完整 `SoftwareConfig` 作为参数逐层传递。配置不会自动热更新；只有再次显式初始化才会替换当前快照。
 
-这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和 Provider 等可独立模块不自行读取 YAML，也不直接导入全局配置；组合层从快照读取值后，只把子系统真正需要的窄参数或运行对象交给它们。这样既减少上层接口泄漏，又保留模块测试、复用和未来独立拆分 RAG 的能力。
+这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和具体 Provider 适配器不自行读取 YAML。`packages/model-providers` 中的 `ProviderService` 作为 Provider 配置和运行时的统一应用服务，可以消费进程级配置快照；它只向 CLI、Desktop 和 `ChatService` 暴露当前 Provider 信息、配置修改与 `send` 边界，不暴露具体 Provider 实例和密钥。
 
 ## 3. 当前默认配置
 
@@ -134,6 +134,8 @@ debug:
 
 ## 4. Provider、模型与密钥
 
+- `ProviderService` 是 CLI 和 Desktop 的统一 Provider 入口：读取当前 Provider/模型信息、修改已支持的配置，并通过 `send` 向 `ChatService` 提供流式模型调用。
+- 具体 Provider 和 API Key 仅在 `ProviderService` 内部组合；同一有效配置复用同一 Provider 实例，配置或密钥修改后使缓存失效。
 - `contextWindowTokens` 和 `maxOutputTokens` 属于准确的 Provider + Model 能力条目，不是公共模型参数。
 - CLI 的 `--context-window-tokens`、`--max-output-tokens` 及对应环境变量只用于未知模型调试和临时覆盖，不是普通用户的常规配置方式。
 - CLI 继续从 `CLEODOC_API_KEY` 读取 API Key；Desktop 将 API Key 交给 Electron Main，通过 `safeStorage` 使用 Windows DPAPI、macOS Keychain 或 Linux 系统密钥服务保护后持久化。

@@ -4,7 +4,7 @@ import type {
   ModelRequest,
   ModelUsage,
 } from "../../contracts/src/index.js";
-import type { ModelProvider } from "../../contracts/src/index.js";
+import type { ModelMessageSender } from "../../contracts/src/index.js";
 import type { LlmDebugHandler } from "./debug-events.js";
 import type { ToolApprovalHandler } from "./tool/index.js";
 
@@ -21,7 +21,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是 CleoDoc 的中文小说主笔。你
 export interface SendMessageInput {
   conversationId?: string;
   projectId: string;
-  provider: ModelProvider;
+  provider: ModelMessageSender;
   model: string;
   prompt: string;
   signal: AbortSignal;

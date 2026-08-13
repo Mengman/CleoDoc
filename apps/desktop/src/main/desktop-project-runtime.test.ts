@@ -8,6 +8,7 @@ import { AppStateService } from "../../../../packages/config/src/index.js";
 import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import { senderForProvider } from "../../../../test/model-sender.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
 const temporaryDirectories: string[] = [];
@@ -129,15 +130,17 @@ describe("DesktopProjectRuntime", () => {
     const project = await fixture.projectService.create(path.join(fixture.root, "chat.cleo"));
     await fixture.runtime.open(project.root);
 
+    const firstProvider = new FakeModelProvider("第一次回答");
     const first = await fixture.runtime.sendMessage({
       prompt: "开始讨论",
-      provider: new FakeModelProvider("第一次回答"),
+      provider: senderForProvider(firstProvider),
       model: "fake-model",
     });
+    const secondProvider = new FakeModelProvider("第二次回答");
     const continued = await fixture.runtime.sendMessage({
       conversationId: first.conversation.id,
       prompt: "继续讨论",
-      provider: new FakeModelProvider("第二次回答"),
+      provider: senderForProvider(secondProvider),
       model: "fake-model",
     });
 
