@@ -1,41 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, Menu } from "electron";
 
-import {
-  desktopChannels,
-  desktopRuntimeInfoSchema,
-  showWindowMenuInputSchema,
-} from "../shared/desktop-api.js";
-import { createWindowMenuTemplate } from "./window-menu-template.js";
+import { initializeSoftwareConfig } from "../../../../packages/config/src/index.js";
+import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
+import { resolveDesktopDefaultConfigPath } from "./desktop-resource-paths.js";
+import { registerDesktopIpc } from "./desktop-ipc.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-
-function registerDesktopIpc(): void {
-  ipcMain.handle(desktopChannels.getRuntimeInfo, () =>
-    desktopRuntimeInfoSchema.parse({
-      appVersion: app.getVersion(),
-      electronVersion: process.versions.electron,
-      nodeVersion: process.versions.node,
-      platform: process.platform,
-    }),
-  );
-
-  ipcMain.handle(desktopChannels.showWindowMenu, (event, rawInput: unknown) => {
-    const input = showWindowMenuInputSchema.parse(rawInput);
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (window === null) throw new Error("找不到请求窗口菜单的 CleoDoc 窗口。");
-
-    Menu.buildFromTemplate(
-      createWindowMenuTemplate(input.menuId, process.env.ELECTRON_RENDERER_URL !== undefined),
-    ).popup({
-      window,
-      x: input.x,
-      y: input.y,
-    });
-  });
-}
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -78,15 +51,59 @@ function createMainWindow(): BrowserWindow {
   return window;
 }
 
-app.whenReady().then(() => {
+async function startDesktop(): Promise<void> {
+  await app.whenReady();
   app.setAppUserModelId("org.cleodoc.desktop");
   Menu.setApplicationMenu(null);
-  registerDesktopIpc();
-  createMainWindow();
+
+  const loadedConfig = await initializeSoftwareConfig({
+    defaultConfigPath: resolveDesktopDefaultConfigPath({
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      isPackaged: app.isPackaged,
+    }),
+  });
+  const projectRuntime = new DesktopProjectRuntime({
+    busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
+  });
+  let restoreError: { code: string; message: string } | undefined;
+  try {
+    await projectRuntime.restorePreviousProject();
+  } catch (error) {
+    restoreError = toDesktopOperationError(error);
+  }
+
+  registerDesktopIpc(projectRuntime);
+  const window = createMainWindow();
+  if (restoreError !== undefined) {
+    window.once("ready-to-show", () => {
+      void dialog.showMessageBox(window, {
+        type: "warning",
+        title: "未能恢复上次项目",
+        message: restoreError.message,
+      });
+    });
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
+
+  let projectClosedForExit = false;
+  app.on("before-quit", (event) => {
+    if (projectClosedForExit) return;
+    event.preventDefault();
+    void projectRuntime.dispose().finally(() => {
+      projectClosedForExit = true;
+      app.quit();
+    });
+  });
+}
+
+void startDesktop().catch((error: unknown) => {
+  const safeError = toDesktopOperationError(error);
+  dialog.showErrorBox("CleoDoc 启动失败", safeError.message);
+  app.exit(1);
 });
 
 app.on("window-all-closed", () => {

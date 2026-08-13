@@ -39,9 +39,17 @@ export class AppStateService {
   }
 
   async setCurrentProject(projectRoot: string): Promise<AppState> {
+    return this.writeCurrentProject(path.resolve(projectRoot));
+  }
+
+  async clearCurrentProject(): Promise<AppState> {
+    return this.writeCurrentProject(null);
+  }
+
+  private async writeCurrentProject(currentProject: string | null): Promise<AppState> {
     const state: AppState = {
       schemaVersion: 1,
-      currentProject: path.resolve(projectRoot),
+      currentProject,
       updatedAt: new Date().toISOString(),
     };
     await writeYamlAtomic(this.statePath, state);

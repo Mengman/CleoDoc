@@ -14,7 +14,7 @@ import {
   Sparkles as SparkleIcon,
 } from "lucide-react";
 
-import type { DesktopRuntimeInfo } from "../../shared/desktop-api.js";
+import type { DesktopProjectState, DesktopRuntimeInfo } from "../../shared/desktop-api.js";
 
 type SectionId = "works" | "materials" | "search" | "settings";
 
@@ -84,16 +84,25 @@ const emptyCopy: Record<SectionId, { title: string; body: string }> = {
 export function App(): ReactNode {
   const [activeSection, setActiveSection] = useState<SectionId>("works");
   const [runtimeInfo, setRuntimeInfo] = useState<DesktopRuntimeInfo | null>(null);
+  const [projectState, setProjectState] = useState<DesktopProjectState>({ status: "closed" });
   const currentSection = sections.find((section) => section.id === activeSection) ?? sections[0]!;
   const copy = emptyCopy[activeSection];
 
   useEffect(() => {
     let active = true;
-    void window.cleodoc.getRuntimeInfo().then((info) => {
-      if (active) setRuntimeInfo(info);
+    const stopListening = window.cleodoc.onProjectStateChanged((state) => {
+      if (active) setProjectState(state);
     });
+    void Promise.all([window.cleodoc.getRuntimeInfo(), window.cleodoc.getProjectState()]).then(
+      ([info, state]) => {
+        if (!active) return;
+        setRuntimeInfo(info);
+        setProjectState(state);
+      },
+    );
     return () => {
       active = false;
+      stopListening();
     };
   }, []);
 
@@ -183,14 +192,19 @@ export function App(): ReactNode {
           </div>
           <div>
             <span>当前项目</span>
-            <strong>未打开</strong>
+            <strong>{projectState.status === "open" ? projectState.project.name : "未打开"}</strong>
           </div>
           <ChevronIcon />
         </div>
 
         <div className="list-heading">
           <span>{currentSection.label === "works" ? "作品目录" : currentSection.label}</span>
-          <small>0 项</small>
+          <small>
+            {projectState.status === "open" && activeSection === "works"
+              ? projectState.project.documentCount
+              : 0}{" "}
+            项
+          </small>
         </div>
 
         <div className="panel-empty">

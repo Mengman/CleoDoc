@@ -37,4 +37,16 @@ describe("AppStateService", () => {
 
     expect((await service.read()).currentProject).toBeNull();
   });
+
+  it("clears the current project without retaining its path", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "cleodoc-state-"));
+    temporaryDirectories.push(home);
+    const service = new AppStateService({ CLEODOC_HOME: home });
+    await service.setCurrentProject(path.join(home, "novel.cleo"));
+
+    const cleared = await service.clearCurrentProject();
+
+    expect(cleared.currentProject).toBeNull();
+    await expect(service.read()).resolves.toEqual(cleared);
+  });
 });
