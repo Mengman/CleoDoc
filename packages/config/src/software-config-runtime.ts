@@ -9,6 +9,7 @@ interface SoftwareConfigRuntimeState {
   readonly config: SoftwareConfig;
   readonly defaultConfigPath: string;
   readonly userConfigPath: string;
+  readonly service: SoftwareConfigService;
 }
 
 let state: SoftwareConfigRuntimeState | undefined;
@@ -23,7 +24,21 @@ export async function initializeSoftwareConfig(
     config,
     defaultConfigPath: service.defaultConfigPath,
     userConfigPath: service.userConfigPath,
+    service,
   };
+  return { config, warnings: result.warnings };
+}
+
+export async function saveOpenAiCompatibleSoftwareConfig(
+  baseUrl: string,
+  modelName: string,
+): Promise<SoftwareConfigLoadResult> {
+  // Persist the desktop LLM selection and publish a fresh immutable runtime snapshot.
+  const current = getState();
+  await current.service.saveOpenAiCompatibleSelection(baseUrl, modelName);
+  const result = await current.service.load();
+  const config = deepFreeze(result.config);
+  state = { ...current, config };
   return { config, warnings: result.warnings };
 }
 

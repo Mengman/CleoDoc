@@ -172,20 +172,19 @@ v0.2 采用已确认的深色三栏工作室作为第一版视觉与信息架构
 
 需要实现：
 
-- 选择 OpenAI-compatible/Ollama 和模型。
-- 配置 OpenAI-compatible Base URL，并读取环境变量中的 API Key。
-- 允许为当前应用运行临时输入 API Key，不做明文持久化。
-- UI 化 Provider 连接测试。
-- 展示和编辑当前已公开的软件配置，包括现有超时、上下文能力和 GPU 加速选项。
-- 展示最终生效配置和现有单项回退警告。
+- Provider 正式适配模块完成前，以 `openai-compatible` 作为 DeepSeek 调试入口。
+- 设置界面只配置 Base URL、API Key 和模型名称；当前模型限定为发行配置中的 `deepseek-v4-flash`。
+- Base URL 和模型选择写入用户软件配置；API Key 通过 Electron `safeStorage` 使用操作系统凭据能力加密持久化。
+- Renderer 只获得 API Key 是否已配置的状态，不能读取或回显密钥。
 
 检查点：
 
-- 两个现有 Provider 都能完成连接测试和真实对话。
-- 恢复 Conversation 时不能静默切换 Provider 或模型。
-- API Key 不进入项目、配置、日志、Git 或界面回显。
+- Desktop 重启后可以继续使用已保存的 API Key，不要求用户再次输入。
+- 用户配置最终生效为 `openai-compatible`、填写的 Base URL 和 `deepseek-v4-flash`。
+- API Key 不明文进入项目、软件 YAML、数据库、日志、Git 或界面回显。
+- 操作系统安全凭据能力不可用时拒绝持久化，不允许退化为明文保存。
 - UI 生效值与 Core 实际配置一致。
-- 不新增 Provider、厂商专属调用记录或诊断页面。
+- 不新增 Provider 适配、模型发现、连接诊断、调用记录或其他软件配置界面。
 
 ### 4.7 AI 主笔聊天与 Conversation 管理界面
 

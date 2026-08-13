@@ -49,11 +49,11 @@ gpuAcceleration: true
 
 llm:
   selectedProvider: openai-compatible
-  selectedModel: null
+  selectedModel: deepseek-v4-flash
   providers:
     openai-compatible:
       displayName: OpenAI-compatible
-      baseUrl: https://api.openai.com/v1
+      baseUrl: https://api.deepseek.com
       models:
         deepseek-v4-flash:
           displayName: DeepSeek V4 Flash
@@ -130,14 +130,16 @@ debug:
 
 顶层 `gpuAcceleration` 是用户可覆盖的 CleoDoc 全局 GPU 加速开关。启用后，所有支持 GPU 的功能都应消费这个统一开关，不能在 RAG、Embedding 或其他子系统中再定义同义配置。当前完整 Embedding Runtime 与 `vocabOnly` Tokenizer 会向 `node-llama-cpp` 传入 `gpu: "auto"` 和 `gpuLayers: "auto"`，由运行库按当前平台、可用预编译绑定和硬件自动选择。关闭时保持 CPU Baseline；Apple Silicon 仍加载发行包可用的 Metal 绑定，但以 `gpuLayers: 0` 禁止模型层卸载。
 
-`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程或 llama.cpp Token Batch 等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。`rag.retrieval` 保存召回候选数、RRF 常数、证据字符预算和单一来源占比。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖全局 GPU 加速、超时、上下文策略、Agent、检索、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
+`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Provider 正式适配模块完成前，Desktop 只允许覆盖 `llm.providers.openai-compatible.baseUrl`，并固定选择发行目录中的 `deepseek-v4-flash`，不得通过用户 YAML 改写其他 Provider 字段或模型能力。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程或 llama.cpp Token Batch 等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。`rag.retrieval` 保存召回候选数、RRF 常数、证据字符预算和单一来源占比。其他公开用户配置继续允许覆盖全局 GPU 加速、超时、上下文策略、Agent、检索、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等参数。
 
 ## 4. Provider、模型与密钥
 
 - `contextWindowTokens` 和 `maxOutputTokens` 属于准确的 Provider + Model 能力条目，不是公共模型参数。
 - CLI 的 `--context-window-tokens`、`--max-output-tokens` 及对应环境变量只用于未知模型调试和临时覆盖，不是普通用户的常规配置方式。
-- Provider API Key 统一从 `CLEODOC_API_KEY` 读取，不把环境变量名称或密钥写入 YAML。
-- OpenAI-compatible 与 Ollama 的 Base URL 可以由 CLI 或现有环境变量临时覆盖；默认地址来自发行配置。
+- CLI 继续从 `CLEODOC_API_KEY` 读取 API Key；Desktop 将 API Key 交给 Electron Main，通过 `safeStorage` 使用 Windows DPAPI、macOS Keychain 或 Linux 系统密钥服务保护后持久化。
+- 加密结果保存在 CleoDoc 用户配置目录的独立凭据文件中，不进入软件 YAML、项目、数据库、日志或 Git。Renderer 只能读取“已配置”状态和密钥字符长度，用等长掩码表达保存状态，不能读取密钥内容。
+- Linux 选中 `basic_text` 或系统安全凭据能力不可用时，Desktop 必须拒绝持久化 API Key，不得自动退化为明文保护。
+- 当前 Desktop 调试入口固定为 `openai-compatible` 和 `deepseek-v4-flash`；Base URL 由用户填写并写入用户 YAML。CLI 的 Base URL 仍可由参数或现有环境变量临时覆盖。
 - Thinking、Reasoning Effort、Temperature、单次生成 `maxTokens` 等参数暂不进入软件 YAML，因为不同 Provider 的接口语义尚未统一。
 - Provider 适配层不得根据模型名称猜测上下文窗口，也不得静默切换 Provider 或模型。
 

@@ -2,14 +2,18 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } fr
 
 import {
   desktopChannels,
+  desktopLlmApiSettingsResultSchema,
+  desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
   showWindowMenuInputSchema,
+  saveDesktopLlmApiSettingsInputSchema,
   type DesktopProjectOperationResult,
 } from "../shared/desktop-api.js";
 import { toDesktopOperationError } from "./desktop-project-runtime.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
+import type { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import { createWindowMenuTemplate } from "./window-menu-template.js";
 
 function broadcastProjectState(runtime: DesktopProjectRuntime): void {
@@ -61,10 +65,13 @@ export async function chooseAndOpenProject(
   }
 }
 
-export function registerDesktopIpc(runtime: DesktopProjectRuntime): void {
+export function registerDesktopIpc(
+  runtime: DesktopProjectRuntime,
+  llmSettings: DesktopLlmSettingsService,
+): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
   // 1. Register read-only runtime and project-state queries.
-  // 2. Register project lifecycle operations with caller validation and safe results.
+  // 2. Register project lifecycle and LLM settings operations with validated safe results.
   // 3. Register native menu handling and connect its existing project action.
   ipcMain.handle(desktopChannels.getRuntimeInfo, (event) => {
     // Validate the caller and return a schema-checked runtime projection.
@@ -98,6 +105,28 @@ export function registerDesktopIpc(runtime: DesktopProjectRuntime): void {
       return desktopProjectOperationResultSchema.parse({
         outcome: "error",
         state: runtime.getState(),
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.getLlmApiSettings, async (event) => {
+    requireMainWindow(event);
+    return desktopLlmApiSettingsSchema.parse(await llmSettings.get());
+  });
+
+  ipcMain.handle(desktopChannels.saveLlmApiSettings, async (event, rawInput: unknown) => {
+    // Validate the settings write and return only renderer-safe state or a stable error.
+    requireMainWindow(event);
+    try {
+      const input = saveDesktopLlmApiSettingsInputSchema.parse(rawInput);
+      return desktopLlmApiSettingsResultSchema.parse({
+        outcome: "success",
+        settings: await llmSettings.save(input),
+      });
+    } catch (error) {
+      return desktopLlmApiSettingsResultSchema.parse({
+        outcome: "error",
         error: toDesktopOperationError(error),
       });
     }

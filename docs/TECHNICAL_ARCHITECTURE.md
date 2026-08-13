@@ -196,7 +196,7 @@ v0.1 在 Project、`material`、可选唯一 title 和当前 Source Revision 范
 
 配置优先级为：发行默认 YAML < 用户配置 YAML < 环境变量/CLI 临时覆盖。默认文件位于 `resources/config/software-default.yaml`，用户文件位于操作系统配置目录。错误用户字段单项回退并产生警告，不覆盖用户文件。
 
-Provider/模型能力目录维护 `contextWindowTokens`、`maxOutputTokens` 和端点；API Key 统一读取 `CLEODOC_API_KEY`。Thinking、Temperature 和生成 `maxTokens` 不作为通用配置。详细规则见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
+Provider/模型能力目录维护 `contextWindowTokens`、`maxOutputTokens` 和端点。CLI 从 `CLEODOC_API_KEY` 读取 API Key；Desktop 通过 Main 进程和操作系统安全凭据能力加密持久化，Renderer 不接触密钥。Thinking、Temperature 和生成 `maxTokens` 不作为通用配置。详细规则见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
 
 ## 8. v0.2 目标架构
 
@@ -216,6 +216,7 @@ flowchart TB
 - Renderer 启用 sandbox、context isolation 和严格 CSP，关闭 Node integration。
 - Renderer 不直接访问文件系统、SQLite、模型密钥或原始 `ipcRenderer`。
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
+- LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
 - Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
@@ -242,7 +243,7 @@ CDM/TipTap、Draft、Git/语义 Diff、知识图、设定审批、阶段 Agent�
 
 ### 9.1 安全
 
-- API Key 不进入项目、配置、日志或 Git。
+- API Key 不明文进入项目、软件 YAML、数据库、日志或 Git；Desktop 加密凭据文件位于用户配置目录，操作系统保护不可用时拒绝保存。
 - 所有项目路径解析后必须位于允许根目录内，并拒绝符号链接逃逸。
 - 远程调用前可以还原 Provider、模型、请求选项、Tool 版本和实际证据。
 - Debug 默认关闭；显式开启后写项目本地文件，鉴权 Header 必须脱敏。

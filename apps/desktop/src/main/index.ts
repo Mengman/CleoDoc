@@ -1,9 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, dialog, Menu } from "electron";
+import { app, BrowserWindow, dialog, Menu, safeStorage } from "electron";
 
-import { initializeSoftwareConfig } from "../../../../packages/config/src/index.js";
+import {
+  getSoftwareUserConfigPath,
+  initializeSoftwareConfig,
+} from "../../../../packages/config/src/index.js";
+import { DesktopCredentialStore } from "./desktop-credential-store.js";
+import { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 import { resolveDesktopDefaultConfigPath } from "./desktop-resource-paths.js";
 import { registerDesktopIpc } from "./desktop-ipc.js";
@@ -74,6 +79,22 @@ async function startDesktop(): Promise<void> {
   const projectRuntime = new DesktopProjectRuntime({
     busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
   });
+  const credentialStore = new DesktopCredentialStore(
+    path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
+    {
+      isAvailable: async () => {
+        // Reject Electron's insecure Linux plaintext fallback.
+        const available = await safeStorage.isAsyncEncryptionAvailable();
+        return (
+          available &&
+          (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text")
+        );
+      },
+      encrypt: (plainText) => safeStorage.encryptStringAsync(plainText),
+      decrypt: (encrypted) => safeStorage.decryptStringAsync(encrypted),
+    },
+  );
+  const llmSettings = new DesktopLlmSettingsService(credentialStore);
   let restoreError: { code: string; message: string } | undefined;
   try {
     await projectRuntime.restorePreviousProject();
@@ -81,7 +102,7 @@ async function startDesktop(): Promise<void> {
     restoreError = toDesktopOperationError(error);
   }
 
-  registerDesktopIpc(projectRuntime);
+  registerDesktopIpc(projectRuntime, llmSettings);
   const window = createMainWindow();
   if (restoreError !== undefined) {
     window.once("ready-to-show", () => {

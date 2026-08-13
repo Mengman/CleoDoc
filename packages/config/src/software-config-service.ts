@@ -22,6 +22,7 @@ const USER_FIELD_SCHEMAS = new Map<string, z.ZodType>([
   ["schemaVersion", z.literal(1)],
   ["llm.selectedProvider", z.string().min(1).nullable()],
   ["llm.selectedModel", z.string().min(1).nullable()],
+  ["llm.providers.openai-compatible.baseUrl", z.url()],
   ["llm.timeouts.connectionMs", positiveInteger],
   ["llm.timeouts.streamIdleMs", positiveInteger],
   ["llm.timeouts.overallMs", positiveInteger],
@@ -119,6 +120,32 @@ export class SoftwareConfigService {
     return { config: parsed.data, warnings };
   }
 
+  async saveOpenAiCompatibleSelection(baseUrl: string, modelName: string): Promise<void> {
+    // Preserve existing user overrides while updating the temporary desktop LLM connection.
+    // 1. Read and validate the current user YAML before making any changes.
+    // 2. Merge only the provider, model, and OpenAI-compatible endpoint fields.
+    // 3. Atomically replace the user YAML so interrupted writes cannot corrupt it.
+    const userConfig = await this.readUserConfigForUpdate();
+    const llm = isRecord(userConfig.llm) ? userConfig.llm : {};
+    const providers = isRecord(llm.providers) ? llm.providers : {};
+    const openAiCompatible = isRecord(providers["openai-compatible"])
+      ? providers["openai-compatible"]
+      : {};
+    await writeYamlAtomic(this.userConfigPath, {
+      ...userConfig,
+      schemaVersion: 1,
+      llm: {
+        ...llm,
+        selectedProvider: "openai-compatible",
+        selectedModel: modelName,
+        providers: {
+          ...providers,
+          "openai-compatible": { ...openAiCompatible, baseUrl },
+        },
+      },
+    });
+  }
+
   get defaultConfigPath(): string {
     if (this.resolvedDefaultConfigPath === null) {
       throw new AppError("CONFIG_ERROR", "软件默认配置尚未加载。");
@@ -146,6 +173,25 @@ export class SoftwareConfigService {
       });
     }
     return parsed.data;
+  }
+
+  private async readUserConfigForUpdate(): Promise<Record<string, unknown>> {
+    // Read a writable user configuration without silently replacing malformed content.
+    const content = await readFile(this.userConfigPath, "utf8").catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return "schemaVersion: 1\n";
+        throw error;
+      },
+    );
+    const document = parseDocument(content, { uniqueKeys: true });
+    if (document.errors.length > 0) {
+      throw new AppError("CONFIG_ERROR", "用户配置 YAML 无效，无法保存模型配置。");
+    }
+    const raw = document.toJS({ maxAliasCount: 0 });
+    if (!isRecord(raw)) {
+      throw new AppError("CONFIG_ERROR", "用户配置必须是对象，无法保存模型配置。");
+    }
+    return raw;
   }
 
   private async resolveDefaultConfigPath(): Promise<string> {

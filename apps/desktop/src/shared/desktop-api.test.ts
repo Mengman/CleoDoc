@@ -4,6 +4,8 @@ import {
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
+  desktopLlmApiSettingsSchema,
+  saveDesktopLlmApiSettingsInputSchema,
   showWindowMenuInputSchema,
 } from "./desktop-api.js";
 
@@ -97,5 +99,49 @@ describe("showWindowMenuInputSchema", () => {
 
   it("rejects unknown menus and unbounded coordinates", () => {
     expect(() => showWindowMenuInputSchema.parse({ menuId: "developer", x: -1, y: 40 })).toThrow();
+  });
+});
+
+describe("saveDesktopLlmApiSettingsInputSchema", () => {
+  it("accepts only the temporary DeepSeek catalog model", () => {
+    // Verify the desktop boundary cannot select an undeclared model during the transition.
+    expect(
+      saveDesktopLlmApiSettingsInputSchema.parse({
+        baseUrl: "https://api.deepseek.com/v1",
+        modelName: "deepseek-v4-flash",
+        apiKey: "sk-private",
+      }),
+    ).toMatchObject({ modelName: "deepseek-v4-flash" });
+    expect(() =>
+      saveDesktopLlmApiSettingsInputSchema.parse({
+        baseUrl: "https://api.deepseek.com/v1",
+        modelName: "unknown-model",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("desktopLlmApiSettingsSchema", () => {
+  it("exposes only API key status and length", () => {
+    // Verify the settings response can size its mask without returning secret content.
+    expect(
+      desktopLlmApiSettingsSchema.parse({
+        baseUrl: "https://api.deepseek.com",
+        modelName: "deepseek-v4-flash",
+        apiKeyConfigured: true,
+        apiKeyLength: 32,
+        secureStorageAvailable: true,
+      }),
+    ).toMatchObject({ apiKeyConfigured: true, apiKeyLength: 32 });
+    expect(() =>
+      desktopLlmApiSettingsSchema.parse({
+        baseUrl: "https://api.deepseek.com",
+        modelName: "deepseek-v4-flash",
+        apiKeyConfigured: true,
+        apiKeyLength: 32,
+        apiKey: "sk-private",
+        secureStorageAvailable: true,
+      }),
+    ).toThrow();
   });
 });

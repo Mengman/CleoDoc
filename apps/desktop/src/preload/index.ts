@@ -3,10 +3,13 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   type CleoDocDesktopApi,
   desktopChannels,
+  desktopLlmApiSettingsResultSchema,
+  desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
   showWindowMenuInputSchema,
+  saveDesktopLlmApiSettingsInputSchema,
 } from "../shared/desktop-api.js";
 
 const desktopApi: CleoDocDesktopApi = {
@@ -37,6 +40,15 @@ const desktopApi: CleoDocDesktopApi = {
     return () =>
       ipcRenderer.removeListener(desktopChannels.projectStateChanged, handleStateChanged);
   },
+  getLlmApiSettings: async () =>
+    desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),
+  saveLlmApiSettings: async (input) =>
+    desktopLlmApiSettingsResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.saveLlmApiSettings,
+        saveDesktopLlmApiSettingsInputSchema.parse(input),
+      ),
+    ),
 };
 
 contextBridge.exposeInMainWorld("cleodoc", desktopApi);

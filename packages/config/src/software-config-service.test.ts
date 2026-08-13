@@ -126,6 +126,27 @@ agent:
       expect.arrayContaining([expect.objectContaining({ path: "gpuAcceleration" })]),
     );
   });
+
+  it("persists the desktop OpenAI-compatible selection without removing other overrides", async () => {
+    // Verify the desktop connection writer changes only its authorized configuration fields.
+    const home = await createHome();
+    const service = createService(home);
+    await writeFile(
+      path.join(home, "config.yaml"),
+      "schemaVersion: 1\ngpuAcceleration: false\n",
+      "utf8",
+    );
+
+    await service.saveOpenAiCompatibleSelection("https://api.deepseek.com/v1", "deepseek-v4-flash");
+    const result = await service.load();
+
+    expect(result.config.gpuAcceleration).toBe(false);
+    expect(result.config.llm.selectedProvider).toBe("openai-compatible");
+    expect(result.config.llm.selectedModel).toBe("deepseek-v4-flash");
+    expect(result.config.llm.providers["openai-compatible"]?.baseUrl).toBe(
+      "https://api.deepseek.com/v1",
+    );
+  });
 });
 
 async function createHome(): Promise<string> {

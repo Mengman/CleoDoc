@@ -1,7 +1,9 @@
 import { Settings as SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-const settingsSections = ["软件配置"] as const;
+import { LlmApiSettings } from "./LlmApiSettings.js";
+
+const settingsSections = ["模型 API"] as const;
 
 export function SettingsWorkspace(): ReactNode {
   // Render settings as a full feature workspace with category and content columns.
@@ -30,8 +32,8 @@ export function SettingsWorkspace(): ReactNode {
       </aside>
       <main className="settings-content">
         <p className="eyebrow">CLEODOC SETTINGS</p>
-        <h2>软件配置</h2>
-        <p>Provider、模型和软件配置将在这里接入现有 Application Service。</p>
+        <h2>模型 API 配置</h2>
+        <LlmApiSettings />
       </main>
     </div>
   );
