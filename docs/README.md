@@ -24,6 +24,7 @@
 | [资料解析与切片](./DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md) | TXT/Markdown 到临时 CDM、ChunkDraft 和原文定位 | Embedding、检索排序和表字段 |
 | [本地 RAG 与索引](./LOCAL_RAG_INGESTION_DESIGN.md) | Chunk 入库、FTS、Embedding、向量与混合检索 | 解析器细节和 Tool 通用协议 |
 | [软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md) | 默认 YAML、用户覆盖和配置生效规则 | Provider 协议实现 |
+| [桌面 UI 结构设计](./DESKTOP_UI_STRUCTURE_DESIGN.md) | Windows-titlebar、全局导航、功能区，以及作品/资料共享文档工作区和聊天窗口的结构关系 | 视觉样式、尺寸、具体控件和未授权的 UI 元素 |
 | [Embedding 基准](./EMBEDDING_BENCHMARK_BASELINE.md) | 可复现的 CPU/GPU 测量记录 | 产品要求和路线图 |
 
 ## 当前基线

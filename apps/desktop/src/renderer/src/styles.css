@@ -38,12 +38,33 @@ svg {
   --purple: #7b66ff;
   --purple-soft: #2c2450;
   display: grid;
-  grid-template-columns: 68px 292px minmax(480px, 1fr) 370px;
+  grid-template-columns: 1fr;
   grid-template-rows: 40px minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 1120px;
   background: #0b111a;
+}
+.app-body {
+  grid-column: 1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+.feature-area {
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+}
+.creative-workspace {
+  display: grid;
+  grid-template-columns: 292px minmax(480px, 1fr) 370px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 .panel-heading,
@@ -72,7 +93,7 @@ svg {
 
 .rail {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -124,8 +145,8 @@ svg {
   height: 22px;
 }
 .library-panel {
-  grid-column: 2;
-  grid-row: 2;
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -257,8 +278,8 @@ svg {
   font-size: 10px;
 }
 .reader-panel {
-  grid-column: 3;
-  grid-row: 2;
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 42px;
   min-width: 0;
@@ -400,8 +421,8 @@ svg {
 }
 
 .chat-panel {
-  grid-column: 4;
-  grid-row: 2;
+  grid-column: 3;
+  grid-row: 1;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
@@ -530,9 +551,70 @@ svg {
   font-size: 8px;
 }
 
+.settings-workspace {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #0a111a;
+}
+.settings-navigation {
+  padding: 24px 16px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+.settings-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 20px;
+}
+.settings-heading svg {
+  color: #9a8cff;
+}
+.settings-heading h1 {
+  margin: 0;
+  font-size: 17px;
+}
+.settings-navigation nav {
+  display: grid;
+  gap: 6px;
+}
+.settings-navigation-item {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: #7f8ba0;
+  background: transparent;
+  text-align: left;
+}
+.settings-navigation-item.active {
+  color: #ddd9ff;
+  background: #18172c;
+}
+.settings-content {
+  min-width: 0;
+  padding: 48px;
+  background: #0a111a;
+}
+.settings-content h2 {
+  margin: 0;
+  font-size: 24px;
+}
+.settings-content > p:last-child {
+  max-width: 620px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
 @media (max-width: 1320px) {
-  .app-shell {
-    grid-template-columns: 64px 260px minmax(430px, 1fr) 330px;
+  .app-body {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .creative-workspace {
+    grid-template-columns: 260px minmax(430px, 1fr) 330px;
   }
   .document-surface {
     padding: 44px;

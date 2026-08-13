@@ -10,6 +10,7 @@
 - [资料解析与切片设计](./docs/DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)
 - [本地 RAG 与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
 - [软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)
+- [桌面 UI 结构设计](./docs/DESKTOP_UI_STRUCTURE_DESIGN.md)
 - [文档索引与职责](./docs/README.md)
 
 修改架构、版本范围或数据语义时，必须同步更新相关文档，不能只修改代码或本文件。发现文档冲突时，不要自行扩大范围；先遵循已经明确的版本边界，并向用户说明冲突。
