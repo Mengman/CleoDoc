@@ -141,7 +141,7 @@ export class ChatService {
       throw new AppError("VALIDATION_ERROR", "正在进行上下文压缩，完成后再提交消息。");
     }
 
-    await this.repository.addMessage(
+    const userMessage = await this.repository.addMessage(
       conversation.id,
       { role: "user", content: input.prompt },
       session.id,
@@ -320,7 +320,7 @@ export class ChatService {
           continue;
         }
 
-        await this.repository.finishGeneration({
+        const assistantMessage = await this.repository.finishGeneration({
           generationId: generation.id,
           status: "completed",
           content: roundContent,
@@ -330,6 +330,9 @@ export class ChatService {
           ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
           modelCallId: modelCall.id,
         });
+        if (assistantMessage === null) {
+          throw new AppError("DATABASE_ERROR", "生成完成后未能写入 Assistant 消息。");
+        }
         const status = this.getContextStatus(
           conversation.id,
           this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
@@ -347,6 +350,8 @@ export class ChatService {
           generationId: generation.id,
           content: roundContent,
           usage: usage ?? null,
+          userMessage,
+          assistantMessage,
         };
       }
       throw new AppError(

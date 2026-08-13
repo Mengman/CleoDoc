@@ -4,6 +4,7 @@ import {
   AppError,
   type ModelEvent,
   type ModelMessageSender,
+  type StoredMessage,
 } from "../../../../packages/contracts/src/index.js";
 import {
   desktopChatMessageEventSchema,
@@ -14,14 +15,16 @@ import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
 
 export interface DesktopChatResult {
   readonly conversation: { readonly id: string; readonly title: string | null };
-  readonly messages: readonly {
-    readonly id: string;
-    readonly role: "user" | "assistant";
-    readonly content: string;
-    readonly reasoningContent?: string;
-    readonly sequence: number;
-    readonly createdAt: string;
-  }[];
+  readonly messages: readonly [DesktopTurnMessage<"user">, DesktopTurnMessage<"assistant">];
+}
+
+interface DesktopTurnMessage<Role extends "user" | "assistant"> {
+  readonly id: string;
+  readonly role: Role;
+  readonly content: string;
+  readonly reasoningContent?: string;
+  readonly sequence: number;
+  readonly createdAt: string;
 }
 
 export function createDesktopChatServiceOptions() {
@@ -53,7 +56,7 @@ export class DesktopChatService {
     // Continue one existing conversation through the active project and desktop stream contract.
     // 1. Resolve the immutable Provider and model identity from the project-owned conversation.
     // 2. Send through ChatService and translate model deltas into renderer-safe desktop events.
-    // 3. Return the current persisted conversation projection after the generation settles.
+    // 3. Return only the two visible messages persisted by the completed turn.
     return this.projects.runChatTask(async ({ projectId, signal, chat, conversations }) => {
       const conversation = conversations.getConversation(input.conversationId);
       const contextBudgetPolicy = resolveConversationContextBudget(
@@ -72,26 +75,31 @@ export class DesktopChatService {
         onEvent: (event) => stream.accept(event),
       });
       stream.completeReasoning();
-      const history = conversations.getRecentHistory(result.conversationId, 20);
-      const visibleMessages = history.messages.filter(
-        (message): message is typeof message & { role: "user" | "assistant" } =>
-          message.role === "user" || message.role === "assistant",
-      );
       return {
-        conversation: { id: history.conversation.id, title: history.conversation.title },
-        messages: visibleMessages.map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          ...(message.reasoningContent === undefined
-            ? {}
-            : { reasoningContent: message.reasoningContent }),
-          sequence: message.sequence,
-          createdAt: message.createdAt,
-        })),
+        conversation: { id: conversation.id, title: conversation.title },
+        messages: [
+          toDesktopTurnMessage(result.userMessage),
+          toDesktopTurnMessage(result.assistantMessage),
+        ],
       };
     });
   }
+}
+
+function toDesktopTurnMessage<Role extends "user" | "assistant">(
+  message: StoredMessage & { role: Role },
+): DesktopTurnMessage<Role> {
+  // Remove persistence-only fields from one message before it crosses the desktop boundary.
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    ...(message.reasoningContent === undefined
+      ? {}
+      : { reasoningContent: message.reasoningContent }),
+    sequence: message.sequence,
+    createdAt: message.createdAt,
+  };
 }
 
 class DesktopChatEventStream {

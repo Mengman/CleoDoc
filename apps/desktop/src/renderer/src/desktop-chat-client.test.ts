@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { CleoDocDesktopApi, DesktopChatMessageEvent } from "../../shared/desktop-api.js";
+import { sendDesktopChatMessageResultSchema } from "../../shared/desktop-api.js";
 import { DesktopChatClient } from "./desktop-chat-client.js";
 
 describe("DesktopChatClient", () => {
@@ -8,11 +9,28 @@ describe("DesktopChatClient", () => {
     // Verify one renderer chat operation owns its stream correlation and listener lifetime.
     let listener: ((event: DesktopChatMessageEvent) => void) | undefined;
     const dispose = vi.fn();
-    const sendChatMessage = vi.fn(async () => ({
-      outcome: "success" as const,
-      conversation: { id: conversationId, title: "测试对话" },
-      messages: [],
-    }));
+    const sendChatMessage: CleoDocDesktopApi["sendChatMessage"] = vi.fn(async () =>
+      sendDesktopChatMessageResultSchema.parse({
+        outcome: "success",
+        conversation: { id: conversationId, title: "测试对话" },
+        messages: [
+          {
+            id: "9e564f20-70ec-4a3d-b820-54299948635d",
+            role: "user",
+            content: "继续",
+            sequence: 2,
+            createdAt: "2026-08-13T12:00:00.000Z",
+          },
+          {
+            id: "ae564f20-70ec-4a3d-b820-54299948635d",
+            role: "assistant",
+            content: "回答",
+            sequence: 3,
+            createdAt: "2026-08-13T12:00:01.000Z",
+          },
+        ],
+      }),
+    );
     const api: Pick<CleoDocDesktopApi, "sendChatMessage" | "onChatMessageEvent"> = {
       sendChatMessage,
       onChatMessageEvent: (registered) => {

@@ -185,12 +185,12 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
-  async addMessage(
+  async addMessage<Message extends ChatMessage>(
     conversationId: string,
-    message: ChatMessage,
+    message: Message,
     sessionId: string,
     modelCallId: string | null = null,
-  ): Promise<StoredMessage> {
+  ): Promise<StoredMessage & Message> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const inserted = await this.projectDatabase.transaction((database) => {
@@ -278,9 +278,9 @@ export class ConversationRepository {
     sessionId?: string;
     reasoningContent?: string;
     modelCallId?: string;
-  }): Promise<void> {
+  }): Promise<(StoredMessage & { role: "assistant" }) | null> {
     const completedAt = new Date().toISOString();
-    await this.projectDatabase.transaction((database) => {
+    return this.projectDatabase.transaction((database) => {
       const row = database
         .prepare("SELECT conversation_id FROM generations WHERE id = ?")
         .get(input.generationId) as { conversation_id: string } | undefined;
@@ -313,26 +313,40 @@ export class ConversationRepository {
             "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence FROM messages WHERE conversation_id = ?",
           )
           .get(row.conversation_id) as { next_sequence: number };
-        this.insertMessage(
+        const id = randomUUID();
+        const sequence = Number(sequenceRow.next_sequence);
+        const message = {
+          role: "assistant",
+          content: input.content,
+          ...(input.reasoningContent === undefined
+            ? {}
+            : { reasoningContent: input.reasoningContent }),
+        } as const satisfies ChatMessage;
+        const messageRowid = this.insertMessage(
           database,
           row.conversation_id,
-          {
-            role: "assistant",
-            content: input.content,
-            ...(input.reasoningContent === undefined
-              ? {}
-              : { reasoningContent: input.reasoningContent }),
-          },
-          Number(sequenceRow.next_sequence),
+          message,
+          sequence,
           completedAt,
-          undefined,
+          id,
           sessionId,
           input.modelCallId ?? null,
         );
         database
           .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
           .run(completedAt, row.conversation_id);
+        return {
+          ...message,
+          messageRowid,
+          id,
+          conversationId: row.conversation_id,
+          sessionId,
+          modelCallId: input.modelCallId ?? null,
+          sequence,
+          createdAt: completedAt,
+        };
       }
+      return null;
     });
   }
 

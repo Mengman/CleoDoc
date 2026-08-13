@@ -61,4 +61,6 @@ export interface ChatGenerationResult {
   generationId: string;
   content: string;
   usage: ModelUsage | null;
+  userMessage: StoredMessage & { role: "user" };
+  assistantMessage: StoredMessage & { role: "assistant" };
 }

@@ -27,7 +27,7 @@ afterEach(async () => {
 
 describe("DesktopChatService", () => {
   it("continues a project conversation and emits only desktop chat events", async () => {
-    // Verify the desktop use case owns model targeting, stream projection, and persisted output.
+    // Verify the desktop use case returns only this turn instead of reloading recent history.
     const fixture = await createFixture();
     const initial = await fixture.runtime.runChatTask(({ projectId, signal, chat }) =>
       chat.send({
@@ -59,8 +59,6 @@ describe("DesktopChatService", () => {
     ]);
     expect(result.conversation.id).toBe(initial.conversationId);
     expect(result.messages.map(({ role, content }) => ({ role, content }))).toEqual([
-      { role: "user", content: "开始对话" },
-      { role: "assistant", content: "初始回答" },
       { role: "user", content: "继续对话" },
       { role: "assistant", content: "最终回答" },
     ]);

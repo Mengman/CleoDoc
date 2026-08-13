@@ -73,6 +73,16 @@ describe("ChatService", () => {
       });
 
       expect(streamed.join("")).toBe(result.content);
+      expect(result.userMessage).toMatchObject({
+        role: "user",
+        content: "写一个悬疑开场",
+        conversationId: result.conversationId,
+      });
+      expect(result.assistantMessage).toMatchObject({
+        role: "assistant",
+        content: result.content,
+        conversationId: result.conversationId,
+      });
       expect(debugEvents).toContainEqual(
         expect.objectContaining({
           type: "llm-response",

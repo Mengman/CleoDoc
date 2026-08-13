@@ -124,6 +124,14 @@ export const desktopConversationMessageSchema = z
   })
   .strict();
 
+const desktopUserMessageSchema = desktopConversationMessageSchema.extend({
+  role: z.literal("user"),
+});
+
+const desktopAssistantMessageSchema = desktopConversationMessageSchema.extend({
+  role: z.literal("assistant"),
+});
+
 export const getDesktopConversationHistoryInputSchema = z
   .object({ conversationId: z.uuid() })
   .strict();
@@ -183,7 +191,16 @@ export const desktopConversationHistoryResultSchema = z.discriminatedUnion("outc
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
-export const sendDesktopChatMessageResultSchema = desktopConversationHistoryResultSchema;
+export const sendDesktopChatMessageResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      conversation: desktopConversationItemSchema,
+      messages: z.tuple([desktopUserMessageSchema, desktopAssistantMessageSchema]),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
 
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;

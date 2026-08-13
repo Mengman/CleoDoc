@@ -9,6 +9,7 @@ import {
   desktopChatMessageEventSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
+  sendDesktopChatMessageResultSchema,
   showWindowMenuInputSchema,
 } from "./desktop-api.js";
 
@@ -191,6 +192,43 @@ describe("sendDesktopChatMessageInputSchema", () => {
       sendDesktopChatMessageInputSchema.parse({
         requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
         prompt: "创建对话",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("sendDesktopChatMessageResultSchema", () => {
+  it("returns exactly the persisted user and assistant messages for the completed turn", () => {
+    // Verify a send result is incremental and cannot be confused with a history page.
+    const identity = {
+      conversation: { id: "7e564f20-70ec-4a3d-b820-54299948635d", title: "章节讨论" },
+    };
+    const messages = [
+      {
+        id: "8e564f20-70ec-4a3d-b820-54299948635d",
+        role: "user",
+        content: "继续写",
+        sequence: 20,
+        createdAt: "2026-08-13T12:00:00.000Z",
+      },
+      {
+        id: "9e564f20-70ec-4a3d-b820-54299948635d",
+        role: "assistant",
+        content: "回答",
+        reasoningContent: "思考",
+        sequence: 21,
+        createdAt: "2026-08-13T12:00:01.000Z",
+      },
+    ];
+
+    expect(
+      sendDesktopChatMessageResultSchema.parse({ outcome: "success", ...identity, messages }),
+    ).toMatchObject({ outcome: "success", messages });
+    expect(() =>
+      sendDesktopChatMessageResultSchema.parse({
+        outcome: "success",
+        ...identity,
+        messages: [...messages, messages[0]],
       }),
     ).toThrow();
   });
