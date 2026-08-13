@@ -7,7 +7,6 @@ import {
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
-  desktopProjectStateSchema,
   desktopRuntimeInfoSchema,
   getDesktopConversationHistoryInputSchema,
   sendDesktopChatMessageInputSchema,
@@ -23,7 +22,7 @@ import type { DesktopChatService } from "./desktop-chat-service.js";
 import { createWindowMenuTemplate } from "./window-menu-template.js";
 
 function broadcastProjectState(runtime: DesktopProjectRuntime): void {
-  const state = desktopProjectStateSchema.parse(runtime.getState());
+  const state = runtime.getState();
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(desktopChannels.projectStateChanged, state);
   }
@@ -93,7 +92,7 @@ export function registerDesktopIpc(
 
   ipcMain.handle(desktopChannels.getProjectState, (event) => {
     requireMainWindow(event);
-    return desktopProjectStateSchema.parse(runtime.getState());
+    return runtime.getState();
   });
 
   ipcMain.handle(desktopChannels.chooseAndOpenProject, async (event) => {

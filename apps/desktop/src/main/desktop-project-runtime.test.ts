@@ -34,9 +34,15 @@ describe("DesktopProjectRuntime", () => {
 
     const state = await fixture.runtime.open(project.root);
 
-    expect(state).toMatchObject({
+    expect(state).toEqual({
       status: "open",
-      project: { id: project.manifest.id, name: "边界测试", documentCount: 0 },
+      project: {
+        id: project.manifest.id,
+        name: "边界测试",
+        language: project.manifest.language,
+        documentCount: 0,
+        database: "ok",
+      },
     });
     expect(JSON.stringify(state)).not.toContain(project.root);
     await fixture.runtime.dispose();
