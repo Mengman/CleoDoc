@@ -2,10 +2,12 @@ import { MessageSquareText } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type {
+  DesktopChatMessageEvent,
   DesktopConversationItem,
   DesktopConversationMessage,
   DesktopProjectState,
 } from "../../../../shared/desktop-api.js";
+import { DesktopChatClient } from "../../desktop-chat-client.js";
 import { ChatComposer } from "./ChatComposer.js";
 import { ConversationChat } from "./ConversationChat.js";
 import { ConversationList } from "./ConversationList.js";
@@ -21,6 +23,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   // 3. Keep an independent unsent draft for every opened conversation.
   // 4. Stream reasoning and content only while continuing an existing conversation.
   const projectId = projectState.status === "open" ? projectState.project.id : null;
+  const desktopChatClient = useRef(new DesktopChatClient(window.cleodoc)).current;
   const requestVersion = useRef(0);
   const selectedConversationId = useRef<string | null>(null);
   const [conversations, setConversations] = useState<readonly DesktopConversationItem[]>([]);
@@ -69,26 +72,6 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     };
   }, [projectId]);
 
-  useEffect(() => {
-    // Merge validated model deltas into the temporary assistant message for the active request.
-    return window.cleodoc.onChatMessageEvent((event) => {
-      if (
-        event.requestId !== activeRequestId.current ||
-        event.conversationId !== selectedConversationId.current
-      )
-        return;
-      const messageId = `streaming-${event.requestId}`;
-      if (event.type === "reasoning-complete") {
-        setStreamingReasoningMessageId(null);
-        return;
-      }
-      setMessages((current) =>
-        updateStreamingAssistantMessage(current, messageId, event.type, event.text),
-      );
-      if (event.type === "reasoning-delta") setStreamingReasoningMessageId(messageId);
-    });
-  }, []);
-
   function openConversation(conversation: DesktopConversationItem): void {
     // Load the selected conversation without allowing an older response to replace it.
     // 1. Publish the selection immediately and invalidate earlier requests.
@@ -123,30 +106,28 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     if (selected !== null) setDrafts((current) => ({ ...current, [selected.id]: value }));
   }
 
-  async function sendMessage(): Promise<void> {
-    // Continue the selected conversation while rendering its reply from streamed deltas.
-    // 1. Require an existing conversation and append an optimistic user message.
-    // 2. Correlate reasoning and content events with this specific request.
-    // 3. Replace temporary messages with persisted results after generation settles.
+  async function sendMessage(prompt: string): Promise<void> {
+    // Continue the selected conversation while applying desktop-client results to UI state.
+    // 1. Append the submitted text optimistically and clear only that conversation's draft.
+    // 2. Delegate IPC correlation and stream subscription lifetime to DesktopChatClient.
+    // 3. Replace temporary messages with persisted results or restore the draft on failure.
     const conversation = selected;
     if (conversation === null) return;
     const draftKey = conversation.id;
-    const prompt = (drafts[draftKey] ?? "").trim();
     if (prompt.length === 0 || activeRequestId.current !== null) return;
 
     requestVersion.current += 1;
-    const requestId = crypto.randomUUID();
+    const request = desktopChatClient.continueConversation(conversation.id, prompt, (event) =>
+      acceptChatEvent(event),
+    );
+    const requestId = request.requestId;
     activeRequestId.current = requestId;
     setActiveSendingConversationId(conversation.id);
     setError(null);
     setDrafts((current) => ({ ...current, [draftKey]: "" }));
     setMessages((current) => [...current, createOptimisticUserMessage(requestId, prompt)]);
     try {
-      const result = await window.cleodoc.sendChatMessage({
-        requestId,
-        conversationId: conversation.id,
-        prompt,
-      });
+      const result = await request.result;
       if (result.outcome === "error") {
         if (selectedConversationId.current === conversation.id) {
           setError(result.error.message);
@@ -174,6 +155,20 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
       setStreamingReasoningMessageId(null);
       setActiveSendingConversationId(null);
     }
+  }
+
+  function acceptChatEvent(event: DesktopChatMessageEvent): void {
+    // Merge one correlated desktop stream event into the current conversation view.
+    if (event.conversationId !== selectedConversationId.current) return;
+    const messageId = `streaming-${event.requestId}`;
+    if (event.type === "reasoning-complete") {
+      setStreamingReasoningMessageId(null);
+      return;
+    }
+    setMessages((current) =>
+      updateStreamingAssistantMessage(current, messageId, event.type, event.text),
+    );
+    if (event.type === "reasoning-delta") setStreamingReasoningMessageId(messageId);
   }
 
   if (projectState.status === "closed") {
@@ -220,7 +215,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
           disabled={activeSendingConversationId === selected.id}
           placeholder="继续当前对话…"
           onChange={updateDraft}
-          onSend={() => void sendMessage()}
+          onSubmit={(prompt) => void sendMessage(prompt)}
         />
       )}
     </aside>

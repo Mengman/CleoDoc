@@ -3,7 +3,6 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } fr
 import {
   desktopChannels,
   desktopConversationHistoryResultSchema,
-  desktopChatMessageEventSchema,
   desktopConversationListResultSchema,
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
@@ -188,73 +187,17 @@ export function registerDesktopIpc(
   });
 
   ipcMain.handle(desktopChannels.sendChatMessage, async (event, rawInput: unknown) => {
-    // Continue an existing conversation and stream only its reasoning and content deltas.
-    // 1. Validate the caller and require an existing conversation identifier.
-    // 2. Forward schema-checked text deltas only to the invoking renderer frame.
-    // 3. Return the refreshed persisted conversation projection after generation settles.
+    // Validate one desktop chat command and bind its stream to the invoking main window.
     const window = requireMainWindow(event);
     try {
       const input = sendDesktopChatMessageInputSchema.parse(rawInput);
-      let reasoningStarted = false;
-      let reasoningCompleted = false;
-      let contentStarted = false;
-      const completeReasoning = (): void => {
-        if (!reasoningStarted || reasoningCompleted || window.isDestroyed()) return;
-        reasoningCompleted = true;
-        window.webContents.send(
-          desktopChannels.chatMessageEvent,
-          desktopChatMessageEventSchema.parse({
-            type: "reasoning-complete",
-            requestId: input.requestId,
-            conversationId: input.conversationId,
-          }),
-        );
-      };
-      const result = await chat.send(input, (modelEvent) => {
+      const result = await chat.send(input, (streamEvent) => {
         if (window.isDestroyed()) return;
-        if (modelEvent.type === "reasoning-delta" && modelEvent.text !== "") {
-          if (contentStarted) return;
-          reasoningStarted = true;
-          reasoningCompleted = false;
-          window.webContents.send(
-            desktopChannels.chatMessageEvent,
-            desktopChatMessageEventSchema.parse({
-              type: "reasoning-delta",
-              requestId: input.requestId,
-              conversationId: input.conversationId,
-              text: modelEvent.text,
-            }),
-          );
-        } else if (modelEvent.type === "text-delta" && modelEvent.text !== "") {
-          contentStarted = true;
-          completeReasoning();
-          window.webContents.send(
-            desktopChannels.chatMessageEvent,
-            desktopChatMessageEventSchema.parse({
-              type: "content-delta",
-              requestId: input.requestId,
-              conversationId: input.conversationId,
-              text: modelEvent.text,
-            }),
-          );
-        } else if (modelEvent.type === "done") {
-          completeReasoning();
-        }
+        window.webContents.send(desktopChannels.chatMessageEvent, streamEvent);
       });
-      completeReasoning();
       return sendDesktopChatMessageResultSchema.parse({
         outcome: "success",
-        conversation: { id: result.conversation.id, title: result.conversation.title },
-        messages: result.messages.map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          ...(message.reasoningContent === undefined
-            ? {}
-            : { reasoningContent: message.reasoningContent }),
-          sequence: message.sequence,
-          createdAt: message.createdAt,
-        })),
+        ...result,
       });
     } catch (error) {
       return sendDesktopChatMessageResultSchema.parse({

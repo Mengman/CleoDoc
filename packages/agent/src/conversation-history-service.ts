@@ -25,12 +25,18 @@ export class ConversationHistoryService {
     return this.repository.listConversations(this.projectId);
   }
 
-  getRecentHistory(conversationId: string, limit = 20): ConversationHistoryResult {
-    // Validate project ownership before returning a bounded visible history.
+  getConversation(conversationId: string): ConversationRecord {
+    // Return one conversation only after enforcing current-project ownership.
     const conversation = this.repository.getConversation(conversationId);
     if (conversation === null || conversation.projectId !== this.projectId) {
       throw new AppError("VALIDATION_ERROR", "指定的对话不属于当前项目。");
     }
+    return conversation;
+  }
+
+  getRecentHistory(conversationId: string, limit = 20): ConversationHistoryResult {
+    // Validate project ownership before returning a bounded visible history.
+    const conversation = this.getConversation(conversationId);
     return {
       conversation,
       messages: this.repository.getRecentVisibleMessages(conversationId, limit),

@@ -222,7 +222,10 @@ flowchart TB
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
 - LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
 - Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
-- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接；Renderer 只提交 Conversation ID 和文本，Main 把请求交给共享 `ProviderService`，由它读取安全凭据并复用当前 Provider 实例。
+- Renderer 中的桌面聊天客户端把一次发送与其流式事件订阅绑定；`ChatPanel` 只管理当前 Conversation、草稿和界面状态，`ChatComposer` 只负责输入与提交交互。
+- Main 中的 `DesktopChatService` 是桌面聊天用例入口：它从项目所属 Conversation 读取固定的 Provider/模型身份，调用 `ChatService`，并将模型事件投影为 Renderer 可见的 Reasoning/Content 流。IPC Handler 只负责请求校验、窗口绑定和响应契约。
+- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接，只向桌面聊天用例提供当前项目的 ID、取消信号、`ChatService` 和 Conversation 查询边界；Provider、模型和上下文预算不再作为 Runtime 调用参数。
+- Renderer 只提交 Conversation ID 和文本，`ChatService` 通过共享 `ProviderService` 发送，由它读取安全凭据并复用当前 Provider 实例。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 

@@ -5,10 +5,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
-import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
-import { senderForProvider } from "../../../../test/model-sender.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
 const temporaryDirectories: string[] = [];
@@ -124,33 +122,27 @@ describe("DesktopProjectRuntime", () => {
     expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
   });
 
-  it("starts and continues a conversation through the active project chat service", async () => {
-    // Verify new and continuing messages share one conversation and remain project-bound.
+  it("runs chat operations with only the active project's services", async () => {
+    // Verify the runtime exposes project-scoped chat capabilities without model configuration.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(path.join(fixture.root, "chat.cleo"));
     await fixture.runtime.open(project.root);
 
-    const firstProvider = new FakeModelProvider("第一次回答");
-    const first = await fixture.runtime.sendMessage({
-      prompt: "开始讨论",
-      provider: senderForProvider(firstProvider),
-      model: "fake-model",
-    });
-    const secondProvider = new FakeModelProvider("第二次回答");
-    const continued = await fixture.runtime.sendMessage({
-      conversationId: first.conversation.id,
-      prompt: "继续讨论",
-      provider: senderForProvider(secondProvider),
-      model: "fake-model",
-    });
+    const result = await fixture.runtime.runChatTask(
+      async ({ projectId, signal, chat, conversations }) => ({
+        projectId,
+        aborted: signal.aborted,
+        canSend: typeof chat.send === "function",
+        canReadHistory: typeof conversations.getRecentHistory === "function",
+      }),
+    );
 
-    expect(continued.conversation.id).toBe(first.conversation.id);
-    expect(continued.messages.map(({ role, content }) => ({ role, content }))).toEqual([
-      { role: "user", content: "开始讨论" },
-      { role: "assistant", content: "第一次回答" },
-      { role: "user", content: "继续讨论" },
-      { role: "assistant", content: "第二次回答" },
-    ]);
+    expect(result).toEqual({
+      projectId: project.manifest.id,
+      aborted: false,
+      canSend: true,
+      canReadHistory: true,
+    });
     await fixture.runtime.dispose();
   });
 

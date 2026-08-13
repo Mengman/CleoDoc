@@ -62,6 +62,8 @@
 - 新建和续聊依然使用 Conversation 中已保存的 Provider/模型身份。
 - 取消、Reasoning、Content、Tool Call 和错误事件的流式行为不变。
 
+当前情况：本阶段已实现。
+
 ## 4. 阶段三：改为消息增量更新
 
 对应问题：第 3 项。

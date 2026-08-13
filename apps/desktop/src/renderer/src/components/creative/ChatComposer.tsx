@@ -6,7 +6,7 @@ export interface ChatComposerProps {
   readonly disabled: boolean;
   readonly placeholder: string;
   readonly onChange: (value: string) => void;
-  readonly onSend: () => void;
+  readonly onSubmit: (value: string) => void;
 }
 
 export function ChatComposer({
@@ -14,7 +14,7 @@ export function ChatComposer({
   disabled,
   placeholder,
   onChange,
-  onSend,
+  onSubmit,
 }: ChatComposerProps): ReactNode {
   // Render a controlled composer that supports keyboard and button submission.
   // 1. Keep the textarea value owned by the parent so conversation drafts can be switched.
@@ -22,13 +22,18 @@ export function ChatComposer({
   // 3. Disable every submission path while a request is active or the draft is empty.
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (!disabled && value.trim().length > 0) onSend();
+    submitValue();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (!disabled && value.trim().length > 0) onSend();
+    submitValue();
+  }
+
+  function submitValue(): void {
+    const prompt = value.trim();
+    if (!disabled && prompt.length > 0) onSubmit(prompt);
   }
 
   return (

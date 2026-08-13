@@ -6,12 +6,7 @@ import {
   ConversationHistoryService,
   type ChatServiceOptions,
 } from "../../../../packages/agent/src/index.js";
-import {
-  AppError,
-  asAppError,
-  type ModelEvent,
-  type ModelMessageSender,
-} from "../../../../packages/contracts/src/index.js";
+import { AppError, asAppError } from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import {
   DocumentService,
@@ -31,6 +26,13 @@ export interface DesktopProjectTask<T> {
   readonly id: string;
   readonly promise: Promise<T>;
   readonly cancel: () => void;
+}
+
+export interface DesktopProjectChatContext {
+  readonly projectId: string;
+  readonly signal: AbortSignal;
+  readonly chat: Pick<ChatService, "send">;
+  readonly conversations: Pick<ConversationHistoryService, "getConversation" | "getRecentHistory">;
 }
 
 interface ActiveProject {
@@ -167,24 +169,16 @@ export class DesktopProjectRuntime {
     return this.requireActiveProject().conversations.getRecentHistory(conversationId, 20);
   }
 
-  getConversationModel(conversationId: string): { providerId: string; model: string } {
-    const conversation = this.getRecentConversationHistory(conversationId).conversation;
-    return { providerId: conversation.providerId, model: conversation.model };
-  }
-
-  async sendMessage(input: {
-    readonly conversationId?: string;
-    readonly prompt: string;
-    readonly provider: ModelMessageSender;
-    readonly model: string;
-    readonly contextBudgetPolicy?: Parameters<ChatService["send"]>[0]["contextBudgetPolicy"];
-    readonly onEvent?: (event: ModelEvent) => void;
-  }) {
-    // Send through the active project's chat service and return its refreshed visible messages.
+  runChatTask<T>(operation: (context: DesktopProjectChatContext) => Promise<T>): Promise<T> {
+    // Run one chat use case against services owned by the current project session.
     const active = this.requireActiveProject();
     const task = this.startTask(async ({ projectId, signal }) => {
-      const result = await active.chat.send({ ...input, projectId, signal });
-      return active.conversations.getRecentHistory(result.conversationId, 20);
+      return operation({
+        projectId,
+        signal,
+        chat: active.chat,
+        conversations: active.conversations,
+      });
     });
     return task.promise;
   }
