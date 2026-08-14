@@ -8,9 +8,14 @@ import {
   AppStateService,
   initializeSoftwareConfig,
 } from "../../../../packages/config/src/index.js";
-import type { ModelEvent, ModelMessageSender } from "../../../../packages/contracts/src/index.js";
+import type {
+  ModelEvent,
+  ModelProvider,
+  ProviderHealth,
+} from "../../../../packages/contracts/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import { MutableModelMessageSender } from "../../../../test/model-sender.js";
 import type { DesktopChatMessageEvent } from "../shared/desktop-api.js";
 import { DesktopChatService } from "./desktop-chat-service.js";
 import { DesktopProjectRuntime } from "./desktop-project-runtime.js";
@@ -32,18 +37,14 @@ describe("DesktopChatService", () => {
     const initial = await fixture.runtime.runChatTask(({ projectId, signal, chat }) =>
       chat.send({
         projectId,
-        provider: new ScriptedSender("初始回答"),
-        model: "deepseek-v4-flash",
         prompt: "开始对话",
         signal,
       }),
     );
     const events: DesktopChatMessageEvent[] = [];
 
-    const result = await new DesktopChatService(
-      fixture.runtime,
-      new ScriptedSender("最终回答", "先思考"),
-    ).send(
+    fixture.provider.use(new ScriptedProvider("最终回答", "先思考"), "deepseek-v4-flash");
+    const result = await new DesktopChatService(fixture.runtime).send(
       {
         requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
         conversationId: initial.conversationId,
@@ -66,7 +67,7 @@ describe("DesktopChatService", () => {
   });
 });
 
-class ScriptedSender implements ModelMessageSender {
+class ScriptedProvider implements ModelProvider {
   readonly id = "openai-compatible";
   readonly displayName = "OpenAI-compatible";
 
@@ -75,7 +76,11 @@ class ScriptedSender implements ModelMessageSender {
     private readonly reasoning?: string,
   ) {}
 
-  async *send(): AsyncIterable<ModelEvent> {
+  async validateConfiguration(): Promise<ProviderHealth> {
+    return { ok: true, message: "ready" };
+  }
+
+  async *stream(): AsyncIterable<ModelEvent> {
     if (this.reasoning !== undefined) yield { type: "reasoning-delta", text: this.reasoning };
     yield { type: "text-delta", text: this.content };
     yield { type: "done", finishReason: "stop" };
@@ -84,6 +89,7 @@ class ScriptedSender implements ModelMessageSender {
 
 async function createFixture(): Promise<{
   readonly runtime: DesktopProjectRuntime;
+  readonly provider: MutableModelMessageSender;
 }> {
   // Create one open project with isolated application and database state.
   const root = await mkdtemp(path.join(tmpdir(), "cleodoc-desktop-chat-"));
@@ -95,14 +101,19 @@ async function createFixture(): Promise<{
   const appStateService = new AppStateService({
     CLEODOC_HOME: path.join(root, "home"),
   });
+  const provider = new MutableModelMessageSender(
+    new ScriptedProvider("初始回答"),
+    "deepseek-v4-flash",
+  );
   const runtime = new DesktopProjectRuntime({
     busyTimeoutMs: TEST_DATABASE_OPTIONS.busyTimeoutMs,
     appStateService,
     chat: TEST_CHAT_OPTIONS,
+    provider,
   });
   const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
     path.join(root, "chat.cleo"),
   );
   await runtime.open(project.root);
-  return { runtime };
+  return { runtime, provider };
 }

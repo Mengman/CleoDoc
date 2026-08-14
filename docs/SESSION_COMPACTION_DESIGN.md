@@ -309,7 +309,7 @@ M = C - O - S - P
 - 压缩失败不改变旧 Session。
 - 压缩使用独立参数、用量记录和超时状态。
 
-默认使用当前 Conversation 相同的 Provider 和模型，不静默切换。未来可以允许用户显式配置压缩模型。
+压缩与普通聊天一样，从 `ProviderService` 获取当前 Provider、模型和模型参数的执行快照。Conversation 不绑定 Provider 或模型；压缩业务也不要求 `ProviderService` 识别“压缩”这一用途。
 
 建议参数：
 
@@ -517,7 +517,7 @@ DeepSeek V4 模型的思考模式默认为启用；如果省略 `thinking`，模
 }
 ```
 
-普通压缩、超长会话的分段压缩与归并压缩都返回相同的 Markdown 摘要格式。分段中间摘要只存在于当前 CompactionJob 的执行内存中，最终只有归并后的累计摘要写入 `session_summaries`。
+普通压缩、超长会话的分段压缩与归并压缩都返回相同的 Markdown 摘要格式。分段中间摘要只存在于当前 CompactionJob 的执行内存中，最终只有归并后的累计摘要写入该 Job 的 `summary` 字段。
 
 ### 6.3 流式拼接与 Debug 日志
 
@@ -548,16 +548,11 @@ type CompactionModelOutput = string; // 完整 summary
 ```ts
 interface SessionSummary {
   id: string;
-  conversationId: string;
   sourceSessionId: string;
   summary: string;
   firstMessageId: string;
   lastMessageId: string;
-  messageCount: number;
   promptVersion: string;
-  providerId: string;
-  model: string;
-  usage: ModelUsage | null;
   createdAt: string;
 }
 ```
@@ -567,11 +562,12 @@ interface SessionSummary {
 | 字段 | 来源 |
 |---|---|
 | `summary` | LLM 流式 `text-delta` 的完整拼接结果 |
-| `id`、`createdAt` | CleoDoc 生成 |
-| `conversationId`、`sourceSessionId` | 当前压缩任务 |
-| `firstMessageId`、`lastMessageId`、`messageCount` | CompactionJob 冻结的输入消息 |
+| `id`、`createdAt` | CompactionJob |
+| `sourceSessionId` | 当前压缩任务 |
+| `firstMessageId`、`lastMessageId` | CompactionJob 冻结的输入消息 |
 | `promptVersion` | 当前压缩 Prompt 版本 |
-| `providerId`、`model`、`usage` | 实际 Provider 调用 |
+
+该结构是 Repository 从已完成 CompactionJob 投影出的运行时摘要，不对应独立数据表。实际 Provider、模型、参数和用量保存在 Job 关联的 `model_calls` 中。
 
 最低校验：
 
@@ -672,7 +668,7 @@ interface ConversationSession {
   status: "active" | "compacting" | "closed";
   trigger: "conversation_started" | "automatic" | "manual";
   systemPromptSnapshot: string;
-  inheritedSummaryId: string | null;
+  inheritedCompactionJobId: string | null;
   estimatedInputTokens: number;
   actualInputTokens: number | null;
   compactionRequired: boolean;
@@ -683,30 +679,25 @@ interface ConversationSession {
 
 同一 Conversation 必须通过唯一约束或事务保证最多一个 active Session。
 
-`inheritedSummaryId` 形成明确的逐次继承链，而不是“查询 Conversation 中创建时间最新的摘要”：首个 S1 为 `null`；S1 压缩得到 Summary1 后，S2 指向 Summary1；S2 再压缩得到 Summary2 后，S3 只指向 Summary2。Repository 按该 ID 精确读取摘要；ID 缺失或跨 Conversation 时视为数据库一致性错误，不静默退回其他摘要。
+`inheritedCompactionJobId` 形成明确的逐次继承链，而不是“查询 Conversation 中创建时间最新的摘要”：首个 S1 为 `null`；S1 压缩完成 Job1 后，S2 指向 Job1；S2 再压缩完成 Job2 后，S3 只指向 Job2。Repository 按该 ID 精确读取 Job 的累计摘要；ID 缺失、Job 未完成或跨 Conversation 时视为数据库一致性错误，不静默退回其他摘要。
 
-### 10.2 `session_summaries`
+### 10.2 CompactionJob 摘要
 
-目标表只保存成功采用的 `summary` Markdown、来源 Session、覆盖消息范围、Prompt 版本、Provider、模型、Token 用量和创建时间：
+已完成 CompactionJob 同时承担摘要身份，保存成功采用的 `summary` Markdown、来源 Session、覆盖消息范围、Prompt 版本和创建时间：
 
 ```ts
 interface SessionSummaryRecord {
   id: string;
-  conversationId: string;
   sourceSessionId: string;
   summary: string;
   firstMessageId: string;
   lastMessageId: string;
-  messageCount: number;
   promptVersion: string;
-  providerId: string;
-  model: string;
-  usage: ModelUsage | null;
   createdAt: string;
 }
 ```
 
-`session_summaries` 使用单一 Markdown `summary`，不包含 `model_call_id` 或 `compaction_job_id`；由 `compaction_jobs.summary_id` 指向最终摘要。当前字段见[数据库设计](./DATABASE_DESIGN.md#58-session_summaries)。
+不再存在 `session_summaries` 表。`compaction_jobs.summary` 仅在 Job 为 `completed` 时非空；新 Session 通过 `inherited_compaction_job_id` 指向该 Job。当前字段见[数据库设计](./DATABASE_DESIGN.md#58-compaction_jobs)。
 
 ### 10.3 `compaction_jobs`
 
@@ -720,7 +711,7 @@ type CompactionJobStatus =
   | "cancelled";
 ```
 
-任务保存输入快照边界、上一摘要 ID、失败错误码、尝试次数、累计用量和 `orchestration_config_json`。逐次模型请求参数保存在 `model_calls.request_options_json`，各调用通过 `compaction_job_model_call_mapping` 按阶段和顺序关联。不得保存密钥。
+任务保存输入快照边界、最终摘要、失败错误码和 `orchestration_config_json`。逐次 Provider、模型、请求参数和用量保存在 `model_calls`，各调用通过 `compaction_job_model_call_mapping` 按阶段和顺序关联。Job 不重复保存 Provider 或模型，不得保存密钥。
 
 ### 10.4 `messages`
 
@@ -764,10 +755,10 @@ ProjectToolRuntime
 └─ 注入当前 Project/Conversation 作用域并执行历史 Tool
 
 ContextBuilder
-└─ Core → Project Instructions → inherited_summary_id 对应的 Summary → Active Messages
+└─ Core → Project Instructions → inherited_compaction_job_id 对应的 Summary → Active Messages
 ```
 
-ChatService 不再读取 Conversation 的全部消息，也不通过创建时间猜测“最新摘要”，而是按当前 Session 的 `inherited_summary_id` 精确读取一份累计摘要，再通过 ContextBuilder 组装当前 Session。
+ChatService 不再读取 Conversation 的全部消息，也不通过创建时间猜测“最新摘要”，而是按当前 Session 的 `inherited_compaction_job_id` 精确读取一份累计摘要，再通过 ContextBuilder 组装当前 Session。
 
 ## 12. 运行流程
 
@@ -897,7 +888,7 @@ type CompactionEvent =
 - 压缩器不得调用 Tool。
 - 历史工具只能访问运行时绑定的当前项目和 Conversation。
 - 项目指令和摘要内容都会进入远程模型上下文，应在调用详情中可查看。
-- 摘要、覆盖消息边界、模型和 Prompt 版本必须可还原。
+- 摘要、覆盖消息边界和 Prompt 版本可由 CompactionJob 还原；实际模型可由关联的 ModelCall 还原。
 - 普通日志不记录完整历史、摘要原文、Prompt 或密钥。
 - 显式 `--debug` 日志会记录请求和完整拼接摘要，必须只写入项目 `.cleo/logs/`、在终端提示隐私风险并排除在 Git 之外；鉴权 Header 继续脱敏。
 
@@ -936,7 +927,7 @@ v0.1 基线包括普通累计压缩、单层 Map-Reduce、按完整用户回合�
 - 摘要失败、断网、取消或退出不会丢失旧 Session、历史消息或用户草稿。
 - 重启 CLI 后能恢复唯一的 active Session 和未完成压缩状态。
 - 连续多次压缩只注入最新累计摘要，不重复注入所有旧摘要。
-- `session_summaries` 只保存一份 `summary` 正文，不再重复保存 JSON 和注入文本。
+- 已完成 CompactionJob 只保存一份 `summary` 正文，不再通过独立摘要表重复保存。
 
 ## 19. 明确不做
 

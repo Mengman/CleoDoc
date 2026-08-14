@@ -32,8 +32,6 @@ describe("ConversationHistoryService", () => {
     try {
       const conversation = await fixture.conversations.createConversation({
         projectId: "project-a",
-        providerId: "fake",
-        model: "model",
         title: "章节讨论",
       });
       const session = await fixture.sessions.createInitialSession({
@@ -82,8 +80,6 @@ describe("ConversationHistoryService", () => {
     try {
       const conversation = await fixture.conversations.createConversation({
         projectId: "project-b",
-        providerId: "fake",
-        model: "model",
       });
 
       expect(() => fixture.service.getRecentHistory(conversation.id)).toThrow(

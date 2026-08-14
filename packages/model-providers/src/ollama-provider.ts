@@ -4,7 +4,7 @@ import type {
   ChatMessage,
   ModelEvent,
   ModelProvider,
-  ModelRequest,
+  ProviderModelRequest,
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
@@ -96,7 +96,10 @@ export class OllamaProvider implements ModelProvider {
     }
   }
 
-  async *stream(request: ModelRequest, callerSignal: AbortSignal): AsyncIterable<ModelEvent> {
+  async *stream(
+    request: ProviderModelRequest,
+    callerSignal: AbortSignal,
+  ): AsyncIterable<ModelEvent> {
     const timeouts = new ProviderStreamTimeoutController(callerSignal, this.streamTimeouts);
     const requestSignal = timeouts.signal;
     try {

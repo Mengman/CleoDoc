@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 10 as const;
+export const CURRENT_SCHEMA_VERSION = 11 as const;
 
 export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   CREATE TABLE knowledge_chunks (
@@ -79,8 +79,6 @@ export const CURRENT_SCHEMA_SQL = `
   CREATE TABLE conversations (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    model TEXT NOT NULL,
     title TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -89,8 +87,6 @@ export const CURRENT_SCHEMA_SQL = `
   CREATE TABLE generations (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    provider_id TEXT NOT NULL,
-    model TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
     content TEXT NOT NULL DEFAULT '',
     usage_json TEXT,
@@ -145,7 +141,7 @@ export const CURRENT_SCHEMA_SQL = `
     status TEXT NOT NULL CHECK (status IN ('active', 'compacting', 'closed')),
     trigger TEXT NOT NULL CHECK (trigger IN ('conversation_started', 'automatic', 'manual')),
     system_prompt_snapshot TEXT NOT NULL,
-    inherited_summary_id TEXT,
+    inherited_compaction_job_id TEXT REFERENCES compaction_jobs(id) ON DELETE SET NULL,
     estimated_input_tokens INTEGER NOT NULL DEFAULT 0,
     actual_input_tokens INTEGER,
     compaction_required INTEGER NOT NULL DEFAULT 0 CHECK (compaction_required IN (0, 1)),
@@ -158,47 +154,31 @@ export const CURRENT_SCHEMA_SQL = `
     ON conversation_sessions(conversation_id)
     WHERE status IN ('active', 'compacting');
 
-  CREATE TABLE session_summaries (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    source_session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
-    summary TEXT NOT NULL,
-    first_message_id TEXT NOT NULL,
-    last_message_id TEXT NOT NULL,
-    message_count INTEGER NOT NULL CHECK (message_count >= 0),
-    prompt_version TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    model TEXT NOT NULL,
-    usage_json TEXT,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE INDEX session_summaries_conversation_created
-    ON session_summaries(conversation_id, created_at DESC);
-  CREATE INDEX session_summaries_source_session
-    ON session_summaries(source_session_id);
-
   CREATE TABLE compaction_jobs (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     source_session_id TEXT NOT NULL REFERENCES conversation_sessions(id) ON DELETE CASCADE,
-    previous_summary_id TEXT,
     status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'validating', 'completed', 'failed', 'cancelled')),
     trigger TEXT NOT NULL,
-    provider_id TEXT NOT NULL,
-    model TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
     first_message_id TEXT NOT NULL,
     last_message_id TEXT NOT NULL,
-    message_count INTEGER NOT NULL,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
     orchestration_config_json TEXT NOT NULL,
-    usage_json TEXT,
-    summary_id TEXT,
+    summary TEXT,
     error_code TEXT,
     created_at TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    CHECK (
+      (status = 'completed' AND summary IS NOT NULL) OR
+      (status <> 'completed' AND summary IS NULL)
+    )
   );
+
+  CREATE UNIQUE INDEX compaction_jobs_one_active_per_session
+    ON compaction_jobs(source_session_id)
+    WHERE status IN ('pending', 'running', 'validating');
+  CREATE UNIQUE INDEX compaction_jobs_one_completed_per_session
+    ON compaction_jobs(source_session_id)
+    WHERE status = 'completed';
 
   CREATE TABLE model_calls (
     id TEXT PRIMARY KEY,

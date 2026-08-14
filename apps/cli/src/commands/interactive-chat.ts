@@ -8,11 +8,7 @@ import {
   type LlmDebugHandler,
   type ToolApprovalRequest,
 } from "../../../../packages/agent/src/index.js";
-import {
-  asAppError,
-  type ContextBudgetPolicy,
-  type ConversationSummary,
-} from "../../../../packages/contracts/src/index.js";
+import { asAppError, type ConversationSummary } from "../../../../packages/contracts/src/index.js";
 import type { ProviderService } from "../../../../packages/model-providers/src/index.js";
 import type { DocumentService } from "../../../../packages/project/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
@@ -31,12 +27,8 @@ import { generateOnce } from "./send-chat-message.js";
 export interface InteractiveChatOptions {
   readonly projectId: string;
   readonly provider: ProviderService;
-  readonly model: string;
   readonly initialConversationId?: string;
-  readonly createProviderService: (providerId: string, model: string) => ProviderService;
   readonly documents: DocumentService;
-  readonly contextBudgetPolicy: ContextBudgetPolicy;
-  readonly createContextBudgetPolicy: (providerId: string, model: string) => ContextBudgetPolicy;
   readonly onDebugEvent?: LlmDebugHandler;
 }
 
@@ -47,16 +39,16 @@ export async function runInteractiveChat(
 ): Promise<void> {
   let readline = createInterface({ input: context.input, output: context.output });
   let conversationId = options.initialConversationId;
-  let provider = options.provider;
-  let model = options.model;
-  let contextBudgetPolicy = options.contextBudgetPolicy;
   const inputController = new ChatInputController();
   let compaction: { promise: Promise<void>; controller: AbortController; hard: boolean } | null =
     null;
   let hardBlocked = false;
   const recentConversations = chat.listConversations(options.projectId).slice(0, 5);
 
-  context.output.write(`已连接 ${provider.displayName} / ${model}。输入 /help 查看命令。\n`);
+  const providerInfo = await options.provider.getCurrentInfo();
+  context.output.write(
+    `已连接 ${providerInfo.providerName} / ${providerInfo.modelName}。输入 /help 查看命令。\n`,
+  );
   printRecentConversations(context, recentConversations);
   if (conversationId !== undefined) {
     context.output.write(`已恢复命令行指定的对话 ${conversationId}。\n`);
@@ -65,12 +57,9 @@ export async function runInteractiveChat(
   }
 
   const resumeConversation = (conversation: ConversationSummary): void => {
-    provider = options.createProviderService(conversation.providerId, conversation.model);
-    model = conversation.model;
-    contextBudgetPolicy = options.createContextBudgetPolicy(conversation.providerId, model);
     conversationId = conversation.id;
     context.output.write(
-      `已恢复对话 [${conversation.id}]，使用 ${provider.displayName} / ${model}，共 ${conversation.messageCount} 条消息。\n`,
+      `已恢复对话 [${conversation.id}]，共 ${conversation.messageCount} 条消息。\n`,
     );
   };
 
@@ -88,9 +77,6 @@ export async function runInteractiveChat(
     const promise = chat
       .compactConversation({
         conversationId: targetConversationId,
-        provider,
-        model,
-        contextBudgetPolicy,
         trigger,
         signal: controller.signal,
         ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),
@@ -175,8 +161,7 @@ export async function runInteractiveChat(
       }
       if (line === "/context") {
         if (conversationId === undefined) context.output.write("请先发送一条消息创建对话。\n");
-        else
-          printContextStatus(context, chat.getContextStatus(conversationId, contextBudgetPolicy));
+        else printContextStatus(context, await chat.getContextStatus(conversationId));
         continue;
       }
       if (line === "/sessions") {
@@ -236,12 +221,7 @@ export async function runInteractiveChat(
         continue;
       }
       if (conversationId !== undefined) {
-        const preflight = chat.getContextStatus(
-          conversationId,
-          contextBudgetPolicy,
-          undefined,
-          line,
-        );
+        const preflight = await chat.getContextStatus(conversationId, undefined, line);
         if (preflight.hardLimitReached || hardBlocked) {
           inputController.captureDraft(rawLine);
           startCompaction("automatic", true);
@@ -252,16 +232,13 @@ export async function runInteractiveChat(
       try {
         const result = await generateOnce(context, chat, {
           projectId: options.projectId,
-          provider,
-          model,
           prompt: line,
           ...(conversationId === undefined ? {} : { conversationId }),
           approveToolCall: (request) => approveProjectWrite(context, chat, readline, request),
-          contextBudgetPolicy,
           ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),
         });
         conversationId = result.conversationId;
-        const budget = chat.getContextStatus(conversationId, contextBudgetPolicy);
+        const budget = await chat.getContextStatus(conversationId);
         if (budget.softLimitReached) startCompaction("automatic", budget.hardLimitReached);
       } catch (error) {
         const appError = asAppError(error);
@@ -285,7 +262,7 @@ export async function runInteractiveChat(
 
 function printContextStatus(
   context: CliCommandContext,
-  status: ReturnType<ChatService["getContextStatus"]>,
+  status: Awaited<ReturnType<ChatService["getContextStatus"]>>,
 ): void {
   context.output.write(`预计输入：${status.estimatedInputTokens} tokens\n`);
   context.output.write(`可用预算：${status.effectiveLimitTokens} tokens\n`);
@@ -342,7 +319,7 @@ function printSession(
   context.output.write(`Session ${session.ordinal} (${session.status})\n`);
   context.output.write(`ID：${session.id}\n触发：${session.trigger}\n开始：${session.startedAt}\n`);
   context.output.write(`结束：${session.closedAt ?? "未结束"}\n`);
-  context.output.write(`继承摘要：${session.inheritedSummaryId ?? "无"}\n`);
+  context.output.write(`继承压缩任务：${session.inheritedCompactionJobId ?? "无"}\n`);
   context.output.write(
     `消息范围：${details.firstMessageId ?? "无"} → ${details.lastMessageId ?? "无"}（${details.messageCount} 条）\n`,
   );

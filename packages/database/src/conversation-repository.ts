@@ -16,8 +16,6 @@ import type { ProjectDatabase } from "./project-database.js";
 interface ConversationRow {
   id: string;
   project_id: string;
-  provider_id: string;
-  model: string;
   title: string | null;
   created_at: string;
   updated_at: string;
@@ -46,8 +44,6 @@ interface MessageRow {
 interface GenerationRow {
   id: string;
   conversation_id: string;
-  provider_id: string;
-  model: string;
   status: GenerationStatus;
   content: string;
   usage_json: string | null;
@@ -63,8 +59,6 @@ export class ConversationRepository {
 
   async createConversation(input: {
     projectId: string;
-    providerId: string;
-    model: string;
     title?: string;
   }): Promise<ConversationRecord> {
     const id = randomUUID();
@@ -74,17 +68,15 @@ export class ConversationRepository {
       database
         .prepare(
           `INSERT INTO conversations
-           (id, project_id, provider_id, model, title, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, project_id, title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
         )
-        .run(id, input.projectId, input.providerId, input.model, input.title ?? null, now, now);
+        .run(id, input.projectId, input.title ?? null, now, now);
     });
 
     return {
       id,
       projectId: input.projectId,
-      providerId: input.providerId,
-      model: input.model,
       title: input.title ?? null,
       createdAt: now,
       updatedAt: now,
@@ -100,11 +92,7 @@ export class ConversationRepository {
     return row === undefined ? null : mapConversation(row);
   }
 
-  getLatestConversation(input: {
-    projectId: string;
-    providerId: string;
-    model: string;
-  }): ConversationSummary | null {
+  getLatestConversation(projectId: string): ConversationSummary | null {
     const row = this.projectDatabase.read(
       (database) =>
         database
@@ -112,13 +100,12 @@ export class ConversationRepository {
             `SELECT c.*, COUNT(m.id) AS message_count
              FROM conversations c
              LEFT JOIN messages m ON m.conversation_id = c.id
-             WHERE c.project_id = ? AND c.provider_id = ? AND c.model = ?
+             WHERE c.project_id = ?
              GROUP BY c.id
              ORDER BY c.updated_at DESC
              LIMIT 1`,
           )
-          .get(input.projectId, input.providerId, input.model) as
-          ConversationSummaryRow | undefined,
+          .get(projectId) as ConversationSummaryRow | undefined,
     );
     return row === undefined ? null : mapConversationSummary(row);
   }
@@ -235,28 +222,26 @@ export class ConversationRepository {
     };
   }
 
-  async beginGeneration(input: {
-    conversationId: string;
-    providerId: string;
-    model: string;
-  }): Promise<GenerationRecord> {
+  async beginGeneration(conversationId: string): Promise<GenerationRecord> {
+    // Create a provider-independent generation record before model execution starts.
+    // 1. Allocate stable identifiers and creation time.
+    // 2. Insert the running generation for the conversation.
+    // 3. Return its initial application representation.
     const id = randomUUID();
     const now = new Date().toISOString();
     await this.projectDatabase.write((database) => {
       database
         .prepare(
           `INSERT INTO generations
-           (id, conversation_id, provider_id, model, status, content, created_at)
-           VALUES (?, ?, ?, ?, 'running', '', ?)`,
+           (id, conversation_id, status, content, created_at)
+           VALUES (?, ?, 'running', '', ?)`,
         )
-        .run(id, input.conversationId, input.providerId, input.model, now);
+        .run(id, conversationId, now);
     });
 
     return {
       id,
-      conversationId: input.conversationId,
-      providerId: input.providerId,
-      model: input.model,
+      conversationId,
       status: "running",
       content: "",
       usage: null,
@@ -430,8 +415,6 @@ function mapConversation(row: ConversationRow): ConversationRecord {
   return {
     id: row.id,
     projectId: row.project_id,
-    providerId: row.provider_id,
-    model: row.model,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -469,8 +452,6 @@ function mapGeneration(row: GenerationRow): GenerationRecord {
   return {
     id: row.id,
     conversationId: row.conversation_id,
-    providerId: row.provider_id,
-    model: row.model,
     status: row.status,
     content: row.content,
     usage: row.usage_json === null ? null : (JSON.parse(row.usage_json) as ModelUsage),

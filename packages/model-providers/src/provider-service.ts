@@ -1,13 +1,18 @@
 import {
   getSoftwareConfig,
+  saveCurrentModelParameters,
+  saveCurrentModelSelection,
   saveOpenAiCompatibleSoftwareConfig,
   type SoftwareConfig,
 } from "../../config/src/index.js";
 import type {
+  ModelCapabilities,
   ModelEvent,
+  ModelExecution,
   ModelMessageSender,
+  ModelParameters,
   ModelProvider,
-  ModelSendInput,
+  ModelRequest,
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
@@ -22,6 +27,8 @@ export interface ProviderCredentialStore {
 export interface ProviderConfigurationStore {
   readonly get: () => SoftwareConfig;
   readonly updateOpenAiCompatible: (baseUrl: string, modelId: string) => Promise<void>;
+  readonly updateSelection: (providerId: string, modelId: string) => Promise<void>;
+  readonly updateModelParameters: (parameters: ModelParameters) => Promise<void>;
 }
 
 export interface ProviderServiceOverrides {
@@ -31,6 +38,8 @@ export interface ProviderServiceOverrides {
   readonly connectionTimeoutMs?: number;
   readonly streamIdleTimeoutMs?: number;
   readonly overallTimeoutMs?: number;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
 }
 
 export interface ProviderServiceOptions {
@@ -50,6 +59,8 @@ export interface ProviderInfo {
   readonly apiKeyConfigured: boolean;
   readonly apiKeyLength: number | null;
   readonly credentialPersistenceAvailable: boolean;
+  readonly parameters: ModelParameters;
+  readonly capabilities: ModelCapabilities;
 }
 
 export interface UpdateProviderConfigurationInput {
@@ -65,6 +76,8 @@ interface ResolvedProviderConfiguration {
   readonly modelName: string;
   readonly baseUrl: string;
   readonly requiresApiKey: boolean;
+  readonly parameters: ModelParameters;
+  readonly capabilities: ModelCapabilities;
   readonly factoryOptions: Omit<ProviderFactoryOptions, "environment">;
 }
 
@@ -77,6 +90,12 @@ const defaultConfiguration: ProviderConfigurationStore = {
   get: getSoftwareConfig,
   updateOpenAiCompatible: async (baseUrl, modelId) => {
     await saveOpenAiCompatibleSoftwareConfig(baseUrl, modelId);
+  },
+  updateSelection: async (providerId, modelId) => {
+    await saveCurrentModelSelection(providerId, modelId);
+  },
+  updateModelParameters: async (parameters) => {
+    await saveCurrentModelParameters(parameters);
   },
 };
 
@@ -92,16 +111,8 @@ export class ProviderService implements ModelMessageSender {
     this.providerFactory = options.providerFactory ?? createProvider;
   }
 
-  get id(): string {
-    return this.resolveConfiguration().providerId;
-  }
-
-  get displayName(): string {
-    return this.resolveConfiguration().providerName;
-  }
-
   async getCurrentInfo(): Promise<ProviderInfo> {
-    // Return the effective Provider and model selection without exposing its credential.
+    // Return the current selection, capabilities, and credential status without the secret.
     const resolved = this.resolveConfiguration();
     const apiKey = resolved.requiresApiKey
       ? await this.options.credentials.readApiKey(resolved.providerId)
@@ -115,17 +126,58 @@ export class ProviderService implements ModelMessageSender {
       apiKeyConfigured: !resolved.requiresApiKey || apiKey !== undefined,
       apiKeyLength: apiKey?.length ?? null,
       credentialPersistenceAvailable: await this.options.credentials.isPersistenceAvailable(),
+      parameters: resolved.parameters,
+      capabilities: resolved.capabilities,
     };
   }
 
+  async updateProvider(providerId: string): Promise<ProviderInfo> {
+    // Select a configured Provider and retain the current model when it is available there.
+    const config = this.configuration.get();
+    const provider = config.llm.providers[providerId];
+    if (provider === undefined) {
+      throw new AppError("CONFIG_ERROR", `Software configuration has no Provider: ${providerId}`);
+    }
+    const selectedModel = config.llm.selectedModel;
+    const modelId =
+      selectedModel !== null && provider.models[selectedModel] !== undefined
+        ? selectedModel
+        : Object.keys(provider.models)[0];
+    if (modelId === undefined) {
+      throw new AppError("CONFIG_ERROR", `Provider ${providerId} has no configured models.`);
+    }
+    await this.configuration.updateSelection(providerId, modelId);
+    this.invalidate();
+    return this.getCurrentInfo();
+  }
+
+  async updateModel(modelId: string): Promise<ProviderInfo> {
+    // Select a model from the current Provider catalog.
+    const current = this.resolveConfiguration();
+    const model = this.configuration.get().llm.providers[current.providerId]?.models[modelId];
+    if (model === undefined) {
+      throw new AppError("CONFIG_ERROR", `Provider ${current.providerId} has no model: ${modelId}`);
+    }
+    await this.configuration.updateSelection(current.providerId, modelId);
+    return this.getCurrentInfo();
+  }
+
+  async updateModelParameters(parameters: ModelParameters): Promise<ProviderInfo> {
+    // Persist model parameters after checking them against current capabilities.
+    const current = this.resolveConfiguration();
+    validateModelParameters(parameters, current.capabilities);
+    await this.configuration.updateModelParameters(parameters);
+    return this.getCurrentInfo();
+  }
+
   async updateConfiguration(input: UpdateProviderConfigurationInput): Promise<ProviderInfo> {
-    // Persist the current OpenAI-compatible selection and invalidate its Provider instance.
-    // 1. Restrict this transition API to the currently supported configurable Provider.
-    // 2. Persist an optional replacement secret before changing the ordinary configuration.
-    // 3. Clear the cached Provider so the next request uses the new effective settings.
+    // Persist OpenAI-compatible connection settings and invalidate its hidden client.
+    // 1. Validate the model in the current Provider catalog.
+    // 2. Persist an optional replacement secret before ordinary configuration.
+    // 3. Clear the cached Provider so later executions observe the saved settings.
     const current = this.resolveConfiguration();
     if (current.providerId !== "openai-compatible") {
-      throw new AppError("CONFIG_ERROR", "当前版本只支持修改 OpenAI-compatible 配置。");
+      throw new AppError("CONFIG_ERROR", "Only OpenAI-compatible configuration is editable.");
     }
     if (
       this.configuration.get().llm.providers[current.providerId]?.models[input.modelId] ===
@@ -133,11 +185,11 @@ export class ProviderService implements ModelMessageSender {
     ) {
       throw new AppError(
         "CONFIG_ERROR",
-        `Provider ${current.providerId} 中没有模型：${input.modelId}`,
+        `Provider ${current.providerId} has no model: ${input.modelId}`,
       );
     }
     if (input.apiKey !== undefined && !(await this.options.credentials.isPersistenceAvailable())) {
-      throw new AppError("CONFIG_ERROR", "当前系统没有可用的安全凭据存储，API Key 未保存。");
+      throw new AppError("CONFIG_ERROR", "Secure credential storage is unavailable.");
     }
     if (input.apiKey !== undefined) {
       await this.options.credentials.saveApiKey(current.providerId, input.apiKey);
@@ -149,26 +201,38 @@ export class ProviderService implements ModelMessageSender {
   }
 
   async validateCurrentConfiguration(signal?: AbortSignal): Promise<ProviderHealth> {
-    // Validate the effective Provider through its cached internal instance.
     const resolved = this.resolveConfiguration();
     return (await this.getProvider(resolved)).validateConfiguration(signal);
   }
 
-  async *send(input: ModelSendInput, signal: AbortSignal): AsyncIterable<ModelEvent> {
-    // Validate the requested identity and forward the model request through the cached Provider.
+  async createExecution(): Promise<ModelExecution> {
+    // Freeze the current model selection and hidden Provider for one business operation.
+    // 1. Resolve and validate the current identity, parameters, and capabilities.
+    // 2. Reuse or construct the private concrete Provider client.
+    // 3. Return a sender that injects the frozen model settings into every request.
     const resolved = this.resolveConfiguration();
-    if (
-      input.providerId !== resolved.providerId ||
-      input.model !== resolved.modelId ||
-      input.request.model !== input.model
-    ) {
-      throw new AppError(
-        "VALIDATION_ERROR",
-        `对话要求 ${input.providerId}/${input.model}，当前配置为 ${resolved.providerId}/${resolved.modelId}，不能静默切换。`,
-      );
-    }
     const provider = await this.getProvider(resolved);
-    yield* provider.stream(input.request, signal);
+    return {
+      providerId: resolved.providerId,
+      providerName: resolved.providerName,
+      model: resolved.modelId,
+      modelName: resolved.modelName,
+      parameters: resolved.parameters,
+      capabilities: resolved.capabilities,
+      send: (request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent> =>
+        provider.stream(
+          {
+            ...request,
+            model: resolved.modelId,
+            thinking: { type: resolved.parameters.reasoningEnabled ? "enabled" : "disabled" },
+            ...(!resolved.parameters.reasoningEnabled ||
+            resolved.parameters.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: resolved.parameters.reasoningEffort }),
+          },
+          signal,
+        ),
+    };
   }
 
   invalidate(): void {
@@ -178,25 +242,32 @@ export class ProviderService implements ModelMessageSender {
   }
 
   private resolveConfiguration(): ResolvedProviderConfiguration {
-    // Resolve one immutable effective Provider configuration from software settings and overrides.
-    // 1. Select the current Provider and model, rejecting missing catalog entries.
-    // 2. Apply command-scoped endpoint and timeout overrides without changing persisted state.
-    // 3. Return only the fields required to identify and construct the internal Provider.
+    // Resolve one immutable effective model configuration from software settings and overrides.
+    // 1. Resolve the selected Provider and model and require a catalog capability entry.
+    // 2. Validate model parameters against the selected model's declared capabilities.
+    // 3. Apply command-scoped endpoint and timeout overrides for Provider construction.
     const config = this.configuration.get();
     const overrides = this.options.overrides;
     const providerId = overrides?.providerId ?? config.llm.selectedProvider;
     const modelId = overrides?.modelId ?? config.llm.selectedModel;
     if (providerId === null || modelId === null) {
-      throw new AppError("CONFIG_ERROR", "尚未配置当前 Provider 或模型。");
+      throw new AppError("CONFIG_ERROR", "The current Provider or model is not configured.");
     }
     const provider = config.llm.providers[providerId];
     if (provider === undefined) {
-      throw new AppError("CONFIG_ERROR", `软件配置中没有 Provider：${providerId}`);
+      throw new AppError("CONFIG_ERROR", `Software configuration has no Provider: ${providerId}`);
     }
     const model = provider.models[modelId];
-    if (model === undefined && overrides?.modelId === undefined) {
-      throw new AppError("CONFIG_ERROR", `Provider ${providerId} 中没有模型：${modelId}`);
+    if (model === undefined) {
+      throw new AppError("CONFIG_ERROR", `Provider ${providerId} has no model: ${modelId}`);
     }
+    const capabilities: ModelCapabilities = {
+      contextWindowTokens: overrides?.contextWindowTokens ?? model.contextWindowTokens,
+      maxOutputTokens: overrides?.maxOutputTokens ?? model.maxOutputTokens,
+      reasoningSupported: model.reasoningSupported,
+      reasoningEfforts: model.reasoningEfforts,
+    };
+    validateModelParameters(config.llm.modelParameters, capabilities);
     const environment = this.options.environment ?? process.env;
     const baseUrl =
       overrides?.baseUrl ??
@@ -206,9 +277,11 @@ export class ProviderService implements ModelMessageSender {
       providerId,
       providerName: provider.displayName,
       modelId,
-      modelName: model?.displayName ?? modelId,
+      modelName: model.displayName,
       baseUrl,
       requiresApiKey: providerId === "openai-compatible",
+      parameters: config.llm.modelParameters,
+      capabilities,
       factoryOptions: {
         baseUrl,
         connectionTimeoutMs: overrides?.connectionTimeoutMs ?? config.llm.timeouts.connectionMs,
@@ -250,13 +323,29 @@ export class ProviderService implements ModelMessageSender {
     identity: string,
     resolved: ResolvedProviderConfiguration,
   ): Promise<CachedProvider> {
-    // Read the secret inside the service and construct the hidden concrete Provider.
     const apiKey = await this.options.credentials.readApiKey(resolved.providerId);
     const provider = this.providerFactory(resolved.providerId, {
       ...resolved.factoryOptions,
       environment: apiKey === undefined ? {} : { CLEODOC_API_KEY: apiKey },
     });
     return { identity, provider };
+  }
+}
+
+function validateModelParameters(
+  parameters: ModelParameters,
+  capabilities: ModelCapabilities,
+): void {
+  // Reject enabled reasoning settings that the selected model cannot satisfy.
+  if (parameters.reasoningEnabled && !capabilities.reasoningSupported) {
+    throw new AppError("CONFIG_ERROR", "The current model does not support reasoning.");
+  }
+  if (
+    parameters.reasoningEnabled &&
+    parameters.reasoningEffort !== undefined &&
+    !capabilities.reasoningEfforts.includes(parameters.reasoningEffort)
+  ) {
+    throw new AppError("CONFIG_ERROR", "The current model does not support this reasoning effort.");
   }
 }
 
@@ -272,6 +361,6 @@ export class EnvironmentProviderCredentialStore implements ProviderCredentialSto
   }
 
   async saveApiKey(): Promise<void> {
-    throw new AppError("CONFIG_ERROR", "CLI 不会持久化 API Key，请使用进程环境变量。");
+    throw new AppError("CONFIG_ERROR", "CLI does not persist API keys.");
   }
 }

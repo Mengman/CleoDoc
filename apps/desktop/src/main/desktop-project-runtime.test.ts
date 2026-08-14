@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
+import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import { senderForProvider } from "../../../../test/model-sender.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
 const temporaryDirectories: string[] = [];
@@ -160,9 +162,10 @@ async function createRuntimeFixture(): Promise<{
       appStateService,
       chat: {
         maxToolRounds: TEST_CHAT_OPTIONS.maxToolRounds,
-        defaultContextBudgetPolicy: TEST_CHAT_OPTIONS.defaultContextBudgetPolicy,
+        context: TEST_CHAT_OPTIONS.context,
         compaction: TEST_CHAT_OPTIONS.compaction,
       },
+      provider: senderForProvider(new FakeModelProvider("ok")),
     }),
   };
 }

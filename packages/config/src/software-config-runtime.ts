@@ -42,6 +42,24 @@ export async function saveOpenAiCompatibleSoftwareConfig(
   return { config, warnings: result.warnings };
 }
 
+export async function saveCurrentModelSelection(
+  providerId: string,
+  modelId: string,
+): Promise<SoftwareConfigLoadResult> {
+  const current = getState();
+  await current.service.saveModelSelection(providerId, modelId);
+  return reloadRuntimeConfig(current);
+}
+
+export async function saveCurrentModelParameters(input: {
+  reasoningEnabled: boolean;
+  reasoningEffort?: "low" | "medium" | "high";
+}): Promise<SoftwareConfigLoadResult> {
+  const current = getState();
+  await current.service.saveModelParameters(input);
+  return reloadRuntimeConfig(current);
+}
+
 export function getSoftwareConfig(): SoftwareConfig {
   return getState().config;
 }
@@ -59,6 +77,15 @@ function getState(): SoftwareConfigRuntimeState {
     throw new AppError("CONFIG_ERROR", "软件配置尚未初始化。");
   }
   return state;
+}
+
+async function reloadRuntimeConfig(
+  current: SoftwareConfigRuntimeState,
+): Promise<SoftwareConfigLoadResult> {
+  const result = await current.service.load();
+  const config = deepFreeze(result.config);
+  state = { ...current, config };
+  return { config, warnings: result.warnings };
 }
 
 function deepFreeze<T>(value: T): T {

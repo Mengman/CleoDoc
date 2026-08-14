@@ -29,6 +29,13 @@ describe("ProviderService", () => {
       apiKeyConfigured: true,
       apiKeyLength: 14,
       credentialPersistenceAvailable: true,
+      parameters: { reasoningEnabled: true, reasoningEffort: "medium" },
+      capabilities: {
+        contextWindowTokens: 1_000_000,
+        maxOutputTokens: 384_000,
+        reasoningSupported: true,
+        reasoningEfforts: ["low", "medium", "high"],
+      },
     });
   });
 
@@ -66,21 +73,33 @@ describe("ProviderService", () => {
     expect(fixture.requests.at(-1)?.apiKey).toBe("sk-new-secret");
   });
 
-  it("rejects a request that would silently switch provider or model", async () => {
+  it("freezes the current provider and model for one execution", async () => {
     const fixture = await createFixture();
+    const execution = await fixture.service.createExecution();
+    expect(execution).toMatchObject({
+      providerId: "openai-compatible",
+      model: "deepseek-v4-flash",
+    });
+    await drain(execution.send({ messages: [] }, new AbortController().signal));
+    expect(fixture.requests.at(-1)?.request).toMatchObject({
+      model: "deepseek-v4-flash",
+      thinking: { type: "enabled" },
+      reasoningEffort: "medium",
+    });
 
-    await expect(
-      drain(
-        fixture.service.send(
-          {
-            providerId: "ollama",
-            model: "other-model",
-            request: { model: "other-model", messages: [] },
-          },
-          new AbortController().signal,
-        ),
-      ),
-    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await fixture.service.updateModelParameters({ reasoningEnabled: false });
+    await drain(execution.send({ messages: [] }, new AbortController().signal));
+    expect(fixture.requests.at(-1)?.request).toMatchObject({
+      thinking: { type: "enabled" },
+      reasoningEffort: "medium",
+    });
+
+    const nextExecution = await fixture.service.createExecution();
+    await drain(nextExecution.send({ messages: [] }, new AbortController().signal));
+    expect(fixture.requests.at(-1)?.request).toMatchObject({
+      thinking: { type: "disabled" },
+    });
+    expect(fixture.requests.at(-1)?.request).not.toHaveProperty("reasoningEffort");
   });
 });
 
@@ -157,6 +176,15 @@ async function createFixture(): Promise<{
         },
       };
     },
+    updateSelection: async (providerId, modelId) => {
+      config = {
+        ...config,
+        llm: { ...config.llm, selectedProvider: providerId, selectedModel: modelId },
+      };
+    },
+    updateModelParameters: async (parameters) => {
+      config = { ...config, llm: { ...config.llm, modelParameters: parameters } };
+    },
   };
   const credentials = new MemoryCredentialStore();
   const requests: ProviderRequest[] = [];
@@ -171,16 +199,8 @@ async function createFixture(): Promise<{
 }
 
 async function collect(service: ProviderService): Promise<ModelEvent[]> {
-  return drain(
-    service.send(
-      {
-        providerId: "openai-compatible",
-        model: "deepseek-v4-flash",
-        request: { model: "deepseek-v4-flash", messages: [] },
-      },
-      new AbortController().signal,
-    ),
-  );
+  const execution = await service.createExecution();
+  return drain(execution.send({ messages: [] }, new AbortController().signal));
 }
 
 async function drain(events: AsyncIterable<ModelEvent>): Promise<ModelEvent[]> {

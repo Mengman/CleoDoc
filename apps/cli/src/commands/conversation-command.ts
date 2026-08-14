@@ -20,7 +20,7 @@ export async function runConversationCommand(
       if (conversations.length === 0) context.output.write("尚无聊天记录。\n");
       for (const conversation of conversations) {
         context.output.write(
-          `${conversation.id}\t${conversation.updatedAt}\t${conversation.providerId}/${conversation.model}\t${conversation.messageCount} 条消息\t${conversation.title ?? "未命名"}\n`,
+          `${conversation.id}\t${conversation.updatedAt}\t${conversation.messageCount} 条消息\t${conversation.title ?? "未命名"}\n`,
         );
       }
       return;

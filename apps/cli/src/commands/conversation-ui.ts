@@ -187,5 +187,5 @@ function printConversationChoices(
 function formatConversationChoice(conversation: ConversationSummary, index: number): string {
   const title = sanitizeTerminalText(conversation.title ?? "未命名对话");
   const date = new Date(conversation.updatedAt).toLocaleString("zh-CN");
-  return `[${index + 1}] ${truncateText(title, 42)} | ${conversation.providerId}/${conversation.model} | ${conversation.messageCount} 条 | ${date}`;
+  return `[${index + 1}] ${truncateText(title, 42)} | ${conversation.messageCount} 条 | ${date}`;
 }

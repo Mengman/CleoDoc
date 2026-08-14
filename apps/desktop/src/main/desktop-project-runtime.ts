@@ -6,7 +6,11 @@ import {
   ConversationHistoryService,
   type ChatServiceOptions,
 } from "../../../../packages/agent/src/index.js";
-import { AppError, asAppError } from "../../../../packages/contracts/src/index.js";
+import {
+  AppError,
+  asAppError,
+  type ModelMessageSender,
+} from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import {
   DocumentService,
@@ -49,6 +53,7 @@ export interface DesktopProjectRuntimeOptions {
   readonly busyTimeoutMs: number;
   readonly appStateService?: AppStateService;
   readonly chat: Omit<ChatServiceOptions, "database">;
+  readonly provider: ModelMessageSender;
 }
 
 export class DesktopProjectRuntime {
@@ -199,10 +204,12 @@ export class DesktopProjectRuntime {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");
       }
       const documentCount = (await new DocumentService(project.root).list()).length;
-      const chat = await ChatService.usingDatabase(project.root, database, {
-        database: { busyTimeoutMs: this.options.busyTimeoutMs },
-        ...this.options.chat,
-      });
+      const chat = await ChatService.usingDatabase(
+        project.root,
+        database,
+        { database: { busyTimeoutMs: this.options.busyTimeoutMs }, ...this.options.chat },
+        { provider: this.options.provider },
+      );
       const activeProject: ActiveProject = {
         project,
         database,

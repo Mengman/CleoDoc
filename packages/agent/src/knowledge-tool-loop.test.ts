@@ -46,13 +46,14 @@ describe("ChatService knowledge tool loop", () => {
     await materials.close();
 
     const knowledge = await KnowledgeToolService.open(project.root, materialOptions);
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { knowledge });
     const provider = new KnowledgeLoopProvider();
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+      knowledge,
+      provider: senderForProvider(provider, "knowledge-loop-model"),
+    });
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider: senderForProvider(provider),
-        model: "knowledge-loop-model",
         prompt: "资料中夜间列车用什么照明？",
         signal: new AbortController().signal,
       });
@@ -95,13 +96,17 @@ describe("ChatService knowledge tool loop", () => {
   });
 
   it("lets the model repair invalid knowledge tool input on the next round", async () => {
-    const fixture = await createKnowledgeFixture("钟楼值夜人只在午夜点亮煤油灯。", "值夜记录");
     const provider = new InvalidInputRecoveryProvider();
+    const fixture = await createKnowledgeFixture(
+      "钟楼值夜人只在午夜点亮煤油灯。",
+      "值夜记录",
+      createTestMaterialOptions(),
+      provider,
+      "repair-model",
+    );
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider: senderForProvider(provider),
-        model: "repair-model",
         prompt: "值夜人使用什么照明？",
         signal: new AbortController().signal,
       });
@@ -137,17 +142,17 @@ describe("ChatService knowledge tool loop", () => {
         },
       },
     };
+    const provider = new SearchOnlyProvider("地下通道");
     const fixture = await createKnowledgeFixture(
       "旧地图标出了钟楼下已经封闭的地下通道。",
       "旧地图",
       options,
+      provider,
+      "fallback-model",
     );
-    const provider = new SearchOnlyProvider("地下通道");
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider: senderForProvider(provider),
-        model: "fallback-model",
         prompt: "旧地图记录了什么？",
         signal: new AbortController().signal,
       });
@@ -163,7 +168,9 @@ describe("ChatService knowledge tool loop", () => {
 async function createKnowledgeFixture(
   content: string,
   title: string,
-  materialOptions = createTestMaterialOptions(),
+  materialOptions: ReturnType<typeof createTestMaterialOptions>,
+  provider: ModelProvider,
+  model: string,
 ): Promise<{
   projectId: string;
   chat: ChatService;
@@ -178,7 +185,10 @@ async function createKnowledgeFixture(
   await materials.addText(content, { title });
   await materials.close();
   const knowledge = await KnowledgeToolService.open(project.root, materialOptions);
-  const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { knowledge });
+  const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+    knowledge,
+    provider: senderForProvider(provider, model),
+  });
   return {
     projectId: project.manifest.id,
     chat,

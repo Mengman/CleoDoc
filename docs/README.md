@@ -16,7 +16,7 @@
 | [PRD](./PRD.md) | 产品行为、用户价值、版本范围和验收口径 | 代码结构、表字段和实施日志 |
 | [技术架构](./TECHNICAL_ARCHITECTURE.md) | 模块边界、数据所有权、运行时和 v0.2 演进方向 | 逐项开发状态、完整字段字典 |
 | [开发计划](./DEVELOPMENT_PLAN.md) | v0.1 基线状态、v0.2 顺序、依赖和验收门 | 重复领域设计 |
-| [数据库设计](./DATABASE_DESIGN.md) | 当前 Schema v10、表字段、索引、事务和受支持升级 | RAG 算法与产品流程 |
+| [数据库设计](./DATABASE_DESIGN.md) | 当前 Schema v11、表字段、索引、事务和受支持升级 | RAG 算法与产品流程 |
 | [会话压缩设计](./SESSION_COMPACTION_DESIGN.md) | Session 预算、压缩、切换、恢复和历史回查 | 通用 Tool 规范 |
 | [Tool Call 设计](./TOOL_CALL_DESIGN.md) | Tool 契约、Catalog、Runtime、审批及所有现有 Tool | 文档编辑模型和 RAG 排序算法 |
 | [CDM 设计](./CDM_DOCUMENT_FORMAT_DESIGN.md) | CleoDoc 统一文档协议、标签、Node ID 和开放 Schema 问题 | 导入流水线和数据库存储 |
@@ -30,7 +30,7 @@
 ## 当前基线
 
 - 产品版本：v0.1 CLI MVP。
-- 数据库：完整 Schema v10；支持完整 v8、v9 项目顺序前向升级。
+- 数据库：完整 Schema v11；支持完整 v8、v9、v10 项目顺序前向升级。
 - 文档事实源：当前作品使用 Markdown/JSON，资料保留原 TXT/Markdown 文件；CDM 是已实现最小 Core、尚未完成作品迁移的目标协议。
 - 本地知识：TXT/Markdown 解析、Tokenizer 切片、FTS5、GGUF Embedding、sqlite-vec 精确向量检索和混合 RAG 已完成。
 - Agent：OpenAI-compatible/Ollama、多轮 Tool Loop、Conversation 级 Runtime、Session 压缩、Reasoning 展示、ModelCall 审计和本地 RAG Tool 已完成。

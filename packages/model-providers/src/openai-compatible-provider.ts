@@ -4,7 +4,7 @@ import type {
   ChatMessage,
   ModelEvent,
   ModelProvider,
-  ModelRequest,
+  ProviderModelRequest,
   ModelToolCall,
   ProviderHealth,
 } from "../../contracts/src/index.js";
@@ -125,7 +125,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     }
   }
 
-  async *stream(request: ModelRequest, callerSignal: AbortSignal): AsyncIterable<ModelEvent> {
+  async *stream(
+    request: ProviderModelRequest,
+    callerSignal: AbortSignal,
+  ): AsyncIterable<ModelEvent> {
     const timeouts = new ProviderStreamTimeoutController(callerSignal, this.streamTimeouts);
     const requestSignal = timeouts.signal;
     const toolCalls = new Map<number, ModelToolCall>();
@@ -145,6 +148,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ? {}
           : { response_format: request.responseFormat }),
         ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
+        ...(request.reasoningEffort === undefined
+          ? {}
+          : { reasoning_effort: request.reasoningEffort }),
         ...(request.tools === undefined
           ? {}
           : {

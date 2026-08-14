@@ -22,6 +22,8 @@ const USER_FIELD_SCHEMAS = new Map<string, z.ZodType>([
   ["schemaVersion", z.literal(1)],
   ["llm.selectedProvider", z.string().min(1).nullable()],
   ["llm.selectedModel", z.string().min(1).nullable()],
+  ["llm.modelParameters.reasoningEnabled", z.boolean()],
+  ["llm.modelParameters.reasoningEffort", z.enum(["low", "medium", "high"])],
   ["llm.providers.openai-compatible.baseUrl", z.url()],
   ["llm.timeouts.connectionMs", positiveInteger],
   ["llm.timeouts.streamIdleMs", positiveInteger],
@@ -143,6 +145,31 @@ export class SoftwareConfigService {
           "openai-compatible": { ...openAiCompatible, baseUrl },
         },
       },
+    });
+  }
+
+  async saveModelSelection(providerId: string, modelId: string): Promise<void> {
+    // Preserve other user overrides while saving the current model selection.
+    const userConfig = await this.readUserConfigForUpdate();
+    const llm = isRecord(userConfig.llm) ? userConfig.llm : {};
+    await writeYamlAtomic(this.userConfigPath, {
+      ...userConfig,
+      schemaVersion: 1,
+      llm: { ...llm, selectedProvider: providerId, selectedModel: modelId },
+    });
+  }
+
+  async saveModelParameters(input: {
+    reasoningEnabled: boolean;
+    reasoningEffort?: "low" | "medium" | "high";
+  }): Promise<void> {
+    // Preserve other user overrides while saving global model parameters.
+    const userConfig = await this.readUserConfigForUpdate();
+    const llm = isRecord(userConfig.llm) ? userConfig.llm : {};
+    await writeYamlAtomic(this.userConfigPath, {
+      ...userConfig,
+      schemaVersion: 1,
+      llm: { ...llm, modelParameters: input },
     });
   }
 

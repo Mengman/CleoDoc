@@ -17,7 +17,14 @@ export const TEST_CONTEXT_POLICY = {
 export const TEST_CHAT_OPTIONS = {
   database: TEST_DATABASE_OPTIONS,
   maxToolRounds: 8,
-  defaultContextBudgetPolicy: TEST_CONTEXT_POLICY,
+  context: {
+    nextUserInputReserveTokens: TEST_CONTEXT_POLICY.nextUserInputReserveTokens,
+    nextUserInputReserveRatio:
+      TEST_CONTEXT_POLICY.nextUserInputReserveTokens / TEST_CONTEXT_POLICY.contextWindowTokens,
+    safetyMarginRatio: TEST_CONTEXT_POLICY.safetyMarginRatio,
+    softCompactionRatio: TEST_CONTEXT_POLICY.softCompactionRatio,
+    hardCompactionRatio: TEST_CONTEXT_POLICY.hardCompactionRatio,
+  },
   compaction: {
     summaryTargetRatio: 0.01,
     summaryTargetMinTokens: 512,

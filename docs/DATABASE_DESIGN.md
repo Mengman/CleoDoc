@@ -1,6 +1,6 @@
 # CleoDoc 数据库设计
 
-> 当前基线：完整 Schema v10
+> 当前基线：完整 Schema v11
 >
 > 实现：`packages/database`，每个 Project 使用 `.cleo/project.sqlite`
 > 会话算法见[会话压缩设计](./SESSION_COMPACTION_DESIGN.md)，检索算法见[本地 RAG 设计](./LOCAL_RAG_INGESTION_DESIGN.md)。
@@ -9,7 +9,7 @@
 
 SQLite 保存两类数据：
 
-- **不可丢失的项目运行数据**：Conversation、Session、Message、Summary、项目指令 Revision、Generation 和 ModelCall 审计。
+- **不可丢失的项目运行数据**：Conversation、Session、Message、CompactionJob 摘要、项目指令 Revision、Generation 和 ModelCall 审计。
 - **可重建的知识投影**：Source 状态、Chunk、FTS 和 Embedding。
 
 正文、资料原件和可移植 Source 元数据仍保存在项目文件中。数据库损坏不能导致原始作品或资料丢失；索引可以从事实源重建。
@@ -27,11 +27,12 @@ SQLite 保存两类数据：
 
 ## 3. Schema 版本
 
-- 新项目直接创建完整 v10，并在 `schema_migrations` 记录 v10。
-- 完整 v8 项目按 v8→v9→v10 升级；完整 v9 项目按 v9→v10 升级。
-- v7 及更早、无可信版本但已有业务表、缺少完整基线结构或高于 v10 的数据库均拒绝打开，不自动修复或删除。
+- 新项目直接创建完整 v11，并在 `schema_migrations` 记录 v11。
+- 完整 v8 项目按 v8→v9→v10→v11 升级；完整 v9 项目按 v9→v10→v11 升级；完整 v10 项目按 v10→v11 升级。
+- v7 及更早、无可信版本但已有业务表、缺少完整基线结构或高于 v11 的数据库均拒绝打开，不自动修复或删除。
 - v8→v9 增加资料索引、语言、Chunk、FTS 和 Embedding 结构，并删除当时已废弃的 Source 字段；v9→v10 增加资料 title 唯一索引。
 - v9→v10 发现已有同名 title 时明确失败，不自动改名、合并或覆盖。
+- v10→v11 移除 Conversation、Generation 和 CompactionJob 中重复的 Provider/模型身份，并将 `session_summaries` 合并进 `compaction_jobs.summary`；迁移保留消息、Session、摘要和 ModelCall 映射。
 
 这些升级是当前发行物必须支持的兼容路径，不再保留更早开发期迁移。
 
@@ -43,9 +44,8 @@ erDiagram
     conversations ||--o{ messages : contains
     conversations ||--o{ generations : contains
     conversation_sessions ||--o{ messages : contains
-    conversation_sessions ||--o{ session_summaries : summarized_by
     conversation_sessions ||--o{ compaction_jobs : compacts
-    compaction_jobs o|--o| session_summaries : produces
+    compaction_jobs o|--o{ conversation_sessions : inherited_by
     generations ||--o{ generation_model_call_mapping : maps
     model_calls ||--o| generation_model_call_mapping : called_by
     compaction_jobs ||--o{ compaction_job_model_call_mapping : maps
@@ -73,13 +73,13 @@ erDiagram
 | --- | --- | --- | --- |
 | `id` | TEXT | 主键 | Conversation UUID |
 | `project_id` | TEXT | 非空 | 所属 Project；数据库仍显式保存以进行边界校验 |
-| `provider_id` | TEXT | 非空 | 创建时选择的 Provider |
-| `model` | TEXT | 非空 | 创建时选择的模型 |
 | `title` | TEXT | 可空 | 用户可见标题 |
 | `created_at` | TEXT | 非空 | 创建时间 |
 | `updated_at` | TEXT | 非空 | 最近活动时间 |
 
 索引逻辑由 Repository 按更新时间列出最近对话。
+
+Conversation 只表示连续的用户对话，不绑定 Provider 或模型。用户切换当前 Provider、模型或参数后，可直接在任意已有 Conversation 中继续发送。
 
 ### 5.3 `conversation_sessions`
 
@@ -93,14 +93,14 @@ Conversation 内一次有限上下文。一个 Conversation 最多有一个 `act
 | `status` | TEXT | 枚举 | `active`、`compacting`、`closed` |
 | `trigger` | TEXT | 枚举 | `conversation_started`、`automatic`、`manual`；表示该 Session 如何创建 |
 | `system_prompt_snapshot` | TEXT | 非空 | Session 创建时的 System Prompt 快照 |
-| `inherited_summary_id` | TEXT | 可空 | 新 Session 继承的累计 Summary ID；应用级逻辑引用 |
+| `inherited_compaction_job_id` | TEXT | 可空外键、删除置空 | 新 Session 继承的已完成 CompactionJob；其 `summary` 是累计摘要 |
 | `estimated_input_tokens` | INTEGER | 非空、默认 0 | 最近一次本地估算 |
 | `actual_input_tokens` | INTEGER | 可空 | Provider 最近报告的真实输入 Token |
 | `compaction_required` | INTEGER | 0/1 | 是否要求压缩 |
 | `started_at` | TEXT | 非空 | 开始时间 |
 | `closed_at` | TEXT | 可空 | 关闭时间 |
 
-部分引用没有数据库外键，以避免 Session/Summary 创建顺序形成环；Repository 负责一致性。
+Repository 在同一事务中完成 Job、来源 Session 与新 Session 的状态切换，并校验继承关系属于同一 Conversation。
 
 ### 5.4 `messages`
 
@@ -134,8 +134,6 @@ Desktop 当前对话视图首次打开时按 `sequence DESC` 在数据库层直�
 | --- | --- | --- | --- |
 | `id` | TEXT | 主键 | Generation UUID |
 | `conversation_id` | TEXT | 外键、非空 | 所属 Conversation |
-| `provider_id` | TEXT | 非空 | Provider |
-| `model` | TEXT | 非空 | 模型 |
 | `status` | TEXT | 枚举 | `running`、`completed`、`cancelled`、`failed` |
 | `content` | TEXT | 非空、默认空 | 面向用户的最终生成正文；当前与最终 Assistant Message 可能重复 |
 | `usage_json` | TEXT | 可空 | Generation 聚合用量 |
@@ -175,54 +173,28 @@ Reasoning 不写入 Generation，统一由产生它的 Message 保存。Generati
 | `model_call_id` | TEXT | 唯一外键、联合主键 | ModelCall，级联删除 |
 | `ordinal` | INTEGER | 正数、与 Generation 联合唯一 | Tool Loop 中调用顺序 |
 
-### 5.8 `session_summaries`
-
-通过校验的累计 Markdown 会话摘要。
-
-| 字段 | 类型 | 约束 | 说明 |
-| --- | --- | --- | --- |
-| `id` | TEXT | 主键 | Summary UUID |
-| `conversation_id` | TEXT | 外键、非空 | 所属 Conversation |
-| `source_session_id` | TEXT | 外键、非空 | 被压缩的 Session |
-| `summary` | TEXT | 非空 | 单一 Markdown 摘要正文 |
-| `first_message_id` | TEXT | 非空 | 摘要覆盖的首条 Message；应用级逻辑引用 |
-| `last_message_id` | TEXT | 非空 | 摘要覆盖的末条 Message |
-| `message_count` | INTEGER | 非空、非负 | 覆盖数量 |
-| `prompt_version` | TEXT | 非空 | 摘要 Prompt 版本 |
-| `provider_id` | TEXT | 非空 | 压缩 Provider |
-| `model` | TEXT | 非空 | 压缩模型 |
-| `usage_json` | TEXT | 可空 | 聚合用量 |
-| `created_at` | TEXT | 非空 | 创建时间 |
-
-Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关联。校验失败的原始响应不进入本表，显式 Debug 模式会把完整流式拼接结果写入本地日志。
-
-### 5.9 `compaction_jobs`
+### 5.8 `compaction_jobs`
 
 一次可恢复的上下文压缩编排任务。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | TEXT | 主键 | Job UUID |
-| `conversation_id` | TEXT | 外键、非空 | 所属 Conversation |
 | `source_session_id` | TEXT | 外键、非空 | 来源 Session |
-| `previous_summary_id` | TEXT | 可空 | 本次累计压缩继承的 Summary |
 | `status` | TEXT | 枚举 | `pending`、`running`、`validating`、`completed`、`failed`、`cancelled` |
 | `trigger` | TEXT | 非空 | 自动或手动等业务触发来源 |
-| `provider_id` | TEXT | 非空 | 冻结 Provider |
-| `model` | TEXT | 非空 | 冻结模型 |
 | `prompt_version` | TEXT | 非空 | 冻结 Prompt 版本 |
 | `first_message_id` | TEXT | 非空 | 冻结消息边界起点 |
 | `last_message_id` | TEXT | 非空 | 冻结消息边界终点 |
-| `message_count` | INTEGER | 非空 | 冻结消息数 |
-| `attempt_count` | INTEGER | 非空、默认 0 | 尝试次数 |
 | `orchestration_config_json` | TEXT | 非空 | 分段比例、预算和编排配置；不复制 ModelCall 请求选项 |
-| `usage_json` | TEXT | 可空 | Job 聚合用量 |
-| `summary_id` | TEXT | 可空 | 成功产出的最终 Summary；应用级逻辑引用 |
+| `summary` | TEXT | 可空 | 成功采用的累计 Markdown 摘要；仅 `completed` 状态非空 |
 | `error_code` | TEXT | 可空 | 最终错误码 |
 | `created_at` | TEXT | 非空 | 创建时间 |
 | `completed_at` | TEXT | 可空 | 结束时间 |
 
-### 5.10 `compaction_job_model_call_mapping`
+CompactionJob 不保存 Provider、模型或聚合用量；实际调用身份和参数保存在关联的 `model_calls` 中。失败 Job 不保存摘要，完成 Job 本身就是摘要身份。
+
+### 5.9 `compaction_job_model_call_mapping`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -232,7 +204,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 | `phase` | TEXT | 枚举 | `primary`、`segment`、`reduce` |
 | `segment_index` | INTEGER | 可空、非负 | Segment 阶段序号 |
 
-### 5.11 `project_instruction_revisions`
+### 5.10 `project_instruction_revisions`
 
 项目指令的追加式事实源；当前内容为最大 Revision 行。
 
@@ -245,7 +217,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 
 追加、整体替换或恢复旧内容都会插入新 Revision；不会修改旧行。作品项目中的 `AGENTS.md`/`agents.md` 不被读取、导入或合并。
 
-### 5.12 `sources`
+### 5.11 `sources`
 
 导入资料的当前数据库投影。一项目一数据库，因此 title 唯一索引等价于项目内唯一。
 
@@ -273,7 +245,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 
 资料重命名只修改 title 及事实元数据，不修改 `relative_path` 或原文件名。相同 Content Hash 拒绝重复导入。
 
-### 5.13 `knowledge_chunks`
+### 5.12 `knowledge_chunks`
 
 资料的纯文本 Chunk；不保存 CDM 标签或标题路径。
 
@@ -292,7 +264,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 
 `chunk_id` 当前视为稳定引用。资料更新并重新切片时如何继承旧 ID 仍待确定，不能静默让旧 ID 指向另一段内容。
 
-### 5.14 `embedding_models`
+### 5.13 `embedding_models`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -303,7 +275,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 
 推理后端、GPU、维度和距离度量不属于模型身份，不写入本表。
 
-### 5.15 `chunk_embeddings`
+### 5.14 `chunk_embeddings`
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -362,7 +334,7 @@ Summary 不直接关联 ModelCall；通过产生它的 CompactionJob 间接关�
 
 1. `generations.content` 与最终 Assistant `messages.content` 是否长期共存；调整时如何保留任务状态、保存信息和审计语义。
 2. v0.2 是否在项目打开时自动执行 `quickCheck()`，以及损坏后的备份、只读打开和重建 UX。
-3. `inherited_summary_id`、消息边界和 `summary_id` 是否在正式发布后增加数据库外键；当前业务流程保证其完整性。
+3. 摘要消息边界是否在正式发布后增加数据库外键；当前业务流程保证其完整性。
 4. 资料更新重新切片时 Chunk ID 的继承与正式文档引用迁移。
 5. v0.3 知识图、AgentJob、ChangeSet、Checkpoint、Git Revision 和 Diff 缓存的最终表结构。
 6. 查询辅助索引是否需要调整，必须以真实项目 P50/P95 数据为依据。

@@ -40,7 +40,8 @@ export async function runProviderCommand(
   const removeHandler = installInterruptHandler(context, controller);
   try {
     const health = await provider.validateCurrentConfiguration(controller.signal);
-    context.output.write(`${provider.displayName}：${health.message}\n`);
+    const info = await provider.getCurrentInfo();
+    context.output.write(`${info.providerName}：${health.message}\n`);
     for (const model of health.models ?? []) context.output.write(`  ${model}\n`);
   } finally {
     removeHandler();

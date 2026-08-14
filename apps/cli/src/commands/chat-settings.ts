@@ -1,6 +1,5 @@
-import { createContextBudgetPolicy } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
-import { AppError, type ContextBudgetPolicy } from "../../../../packages/contracts/src/index.js";
+import { AppError } from "../../../../packages/contracts/src/index.js";
 import {
   EnvironmentProviderCredentialStore,
   ProviderService,
@@ -23,6 +22,21 @@ export function providerServiceFromArguments(
     throw new AppError("VALIDATION_ERROR", `软件配置中没有 Provider：${providerId}`);
   }
   const environment = process.env;
+  const configuredModel = configuredProvider.models[modelId];
+  if (configuredModel === undefined) {
+    throw new AppError("VALIDATION_ERROR", `Provider ${providerId} has no model: ${modelId}`);
+  }
+  const contextWindowTokens =
+    optionPositiveInteger(parsed, "context-window-tokens") ??
+    parsePositiveEnvironmentInteger("CLEODOC_MODEL_CONTEXT_TOKENS") ??
+    configuredModel.contextWindowTokens;
+  const maxOutputTokens =
+    optionPositiveInteger(parsed, "max-output-tokens") ??
+    parsePositiveEnvironmentInteger("CLEODOC_MODEL_MAX_OUTPUT_TOKENS") ??
+    configuredModel.maxOutputTokens;
+  if (contextWindowTokens < 2_048 || maxOutputTokens > contextWindowTokens) {
+    throw new AppError("VALIDATION_ERROR", "Invalid model context capability override.");
+  }
   return new ProviderService({
     credentials: new EnvironmentProviderCredentialStore(environment),
     environment,
@@ -45,56 +59,18 @@ export function providerServiceFromArguments(
         optionPositiveInteger(parsed, "generation-timeout-ms") ??
         parsePositiveEnvironmentInteger("CLEODOC_LLM_OVERALL_TIMEOUT_MS") ??
         config.llm.timeouts.overallMs,
+      contextWindowTokens,
+      maxOutputTokens,
     },
   });
 }
 
-export function resolveContextBudgetPolicy(
-  providerId: string,
-  model: string,
-  parsed: ParsedArguments,
-): ContextBudgetPolicy {
-  const config = getSoftwareConfig();
-  const configured = config.llm.providers[providerId]?.models[model];
-  const contextWindowTokens =
-    optionPositiveInteger(parsed, "context-window-tokens") ??
-    parsePositiveEnvironmentInteger("CLEODOC_MODEL_CONTEXT_TOKENS") ??
-    configured?.contextWindowTokens;
-  const maxOutputTokens =
-    optionPositiveInteger(parsed, "max-output-tokens") ??
-    parsePositiveEnvironmentInteger("CLEODOC_MODEL_MAX_OUTPUT_TOKENS") ??
-    configured?.maxOutputTokens;
-  if (contextWindowTokens === undefined || maxOutputTokens === undefined) {
-    throw new AppError(
-      "VALIDATION_ERROR",
-      `模型 ${providerId}/${model} 尚无能力配置。请补充软件默认配置，或临时使用 --context-window-tokens 和 --max-output-tokens。`,
-    );
-  }
-  if (contextWindowTokens < 2_048) {
-    throw new AppError("VALIDATION_ERROR", "模型上下文窗口不能小于 2048 Token。");
-  }
-  if (maxOutputTokens > contextWindowTokens) {
-    throw new AppError("VALIDATION_ERROR", "模型最大输出长度不能超过上下文窗口长度。");
-  }
-  return createContextBudgetPolicy({ contextWindowTokens, maxOutputTokens }, config.context);
-}
-
 export function chatServiceOptions() {
   const config = getSoftwareConfig();
-  const selectedProvider = config.llm.selectedProvider ?? "openai-compatible";
-  const selectedModel = config.llm.selectedModel;
-  const configuredModel =
-    selectedModel === null
-      ? undefined
-      : config.llm.providers[selectedProvider]?.models[selectedModel];
   return {
     database: { busyTimeoutMs: config.database.busyTimeoutMs },
     maxToolRounds: config.agent.maxToolRounds,
-    ...(configuredModel === undefined
-      ? {}
-      : {
-          defaultContextBudgetPolicy: createContextBudgetPolicy(configuredModel, config.context),
-        }),
+    context: config.context,
     compaction: config.agent.compaction,
   };
 }

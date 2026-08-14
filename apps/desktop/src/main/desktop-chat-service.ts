@@ -1,11 +1,5 @@
-import { createContextBudgetPolicy } from "../../../../packages/agent/src/index.js";
 import { getSoftwareConfig } from "../../../../packages/config/src/index.js";
-import {
-  AppError,
-  type ModelEvent,
-  type ModelMessageSender,
-  type StoredMessage,
-} from "../../../../packages/contracts/src/index.js";
+import { type ModelEvent, type StoredMessage } from "../../../../packages/contracts/src/index.js";
 import {
   desktopChatMessageEventSchema,
   type DesktopChatMessageEvent,
@@ -30,47 +24,31 @@ interface DesktopTurnMessage<Role extends "user" | "assistant"> {
 export function createDesktopChatServiceOptions() {
   // Build the project chat runtime from the validated software configuration.
   const config = getSoftwareConfig();
-  const providerId = config.llm.selectedProvider ?? "openai-compatible";
-  const modelName = config.llm.selectedModel;
-  const model =
-    modelName === null ? undefined : config.llm.providers[providerId]?.models[modelName];
   return {
     maxToolRounds: config.agent.maxToolRounds,
-    ...(model === undefined
-      ? {}
-      : { defaultContextBudgetPolicy: createContextBudgetPolicy(model, config.context) }),
+    context: config.context,
     compaction: config.agent.compaction,
   };
 }
 
 export class DesktopChatService {
-  constructor(
-    private readonly projects: DesktopProjectRuntime,
-    private readonly providerService: ModelMessageSender,
-  ) {}
+  constructor(private readonly projects: DesktopProjectRuntime) {}
 
   send(
     input: SendDesktopChatMessageInput,
     emitEvent: (event: DesktopChatMessageEvent) => void,
   ): Promise<DesktopChatResult> {
     // Continue one existing conversation through the active project and desktop stream contract.
-    // 1. Resolve the immutable Provider and model identity from the project-owned conversation.
+    // 1. Resolve the conversation within the active project.
     // 2. Send through ChatService and translate model deltas into renderer-safe desktop events.
     // 3. Return only the two visible messages persisted by the completed turn.
     return this.projects.runChatTask(async ({ projectId, signal, chat, conversations }) => {
       const conversation = conversations.getConversation(input.conversationId);
-      const contextBudgetPolicy = resolveConversationContextBudget(
-        conversation.providerId,
-        conversation.model,
-      );
       const stream = new DesktopChatEventStream(input, emitEvent);
       const result = await chat.send({
         conversationId: conversation.id,
         projectId,
         prompt: input.prompt,
-        provider: this.providerService,
-        model: conversation.model,
-        contextBudgetPolicy,
         signal,
         onEvent: (event) => stream.accept(event),
       });
@@ -149,14 +127,4 @@ class DesktopChatEventStream {
       }),
     );
   }
-}
-
-function resolveConversationContextBudget(providerId: string, model: string) {
-  // Resolve the catalog-backed context budget for an existing conversation identity.
-  const config = getSoftwareConfig();
-  const configuredModel = config.llm.providers[providerId]?.models[model];
-  if (configuredModel === undefined) {
-    throw new AppError("CONFIG_ERROR", `模型 ${providerId}/${model} 缺少能力配置。`);
-  }
-  return createContextBudgetPolicy(configuredModel, config.context);
 }

@@ -10,11 +10,7 @@ import {
   type ParsedArguments,
 } from "../arguments.js";
 import { LlmDebugFileLogger } from "../debug-log.js";
-import {
-  chatServiceOptions,
-  providerServiceFromArguments,
-  resolveContextBudgetPolicy,
-} from "./chat-settings.js";
+import { chatServiceOptions, providerServiceFromArguments } from "./chat-settings.js";
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
 import { printSaved } from "./command-utils.js";
 import { runInteractiveChat } from "./interactive-chat.js";
@@ -60,14 +56,14 @@ export async function runChatCommand(
   }
   const provider = providerServiceFromArguments(providerId, model, parsed);
   const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
-  const contextBudgetPolicy = resolveContextBudgetPolicy(providerId, model, parsed);
   const knowledge = await KnowledgeToolService.open(project.root, createMaterialServiceOptions());
-  const chat = await ChatService.open(project.root, chatServiceOptions(), { knowledge }).catch(
-    async (error: unknown) => {
-      await knowledge.close();
-      throw error;
-    },
-  );
+  const chat = await ChatService.open(project.root, chatServiceOptions(), {
+    knowledge,
+    provider,
+  }).catch(async (error: unknown) => {
+    await knowledge.close();
+    throw error;
+  });
   const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
   const onDebugEvent = debugLogger?.onEvent;
   if (debugLogger !== undefined) {
@@ -85,11 +81,8 @@ export async function runChatCommand(
     if (prompt !== undefined) {
       await runSinglePrompt(context, chat, {
         projectId: project.manifest.id,
-        provider,
-        model,
         prompt,
         conversationId: initialConversationId,
-        contextBudgetPolicy,
         parsed,
         ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
       });
@@ -101,14 +94,8 @@ export async function runChatCommand(
     await runInteractiveChat(context, chat, {
       projectId: project.manifest.id,
       provider,
-      model,
       initialConversationId,
-      createProviderService: (selectedProviderId, selectedModel) =>
-        providerServiceFromArguments(selectedProviderId, selectedModel, parsed),
       documents: new DocumentService(project.root),
-      contextBudgetPolicy,
-      createContextBudgetPolicy: (selectedProviderId, selectedModel) =>
-        resolveContextBudgetPolicy(selectedProviderId, selectedModel, parsed),
       ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
     });
   } finally {
@@ -133,14 +120,11 @@ async function runSinglePrompt(
 ): Promise<void> {
   const { parsed, ...generationInput } = options;
   const result = await generateOnce(context, chat, generationInput);
-  const budget = chat.getContextStatus(result.conversationId, options.contextBudgetPolicy);
+  const budget = await chat.getContextStatus(result.conversationId);
   if (budget.softLimitReached) {
     context.output.write("正在进行上下文压缩……\n");
     await chat.compactConversation({
       conversationId: result.conversationId,
-      provider: options.provider,
-      model: options.model,
-      contextBudgetPolicy: options.contextBudgetPolicy,
       trigger: "automatic",
       signal: new AbortController().signal,
       ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),

@@ -78,10 +78,6 @@ async function startDesktop(): Promise<void> {
       isPackaged: app.isPackaged,
     }),
   });
-  const projectRuntime = new DesktopProjectRuntime({
-    busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
-    chat: createDesktopChatServiceOptions(),
-  });
   const credentialStore = new DesktopCredentialStore(
     path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
     {
@@ -98,8 +94,13 @@ async function startDesktop(): Promise<void> {
     },
   );
   const providerService = new ProviderService({ credentials: credentialStore });
+  const projectRuntime = new DesktopProjectRuntime({
+    busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
+    chat: createDesktopChatServiceOptions(),
+    provider: providerService,
+  });
   const llmSettings = new DesktopLlmSettingsService(providerService);
-  const desktopChat = new DesktopChatService(projectRuntime, providerService);
+  const desktopChat = new DesktopChatService(projectRuntime);
   let restoreError: { code: string; message: string } | undefined;
   try {
     await projectRuntime.restorePreviousProject();

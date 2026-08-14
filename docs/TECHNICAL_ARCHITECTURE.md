@@ -60,7 +60,7 @@ flowchart TB
 | `packages/contracts` | 跨模块公共类型、Schema 和稳定错误码 |
 | `packages/config` | 默认 YAML、用户覆盖、应用状态和进程内配置快照 |
 | `packages/project` | 项目创建、路径边界、正文 CRUD 和原子文件写入 |
-| `packages/database` | Schema v10、连接、事务、Repository、FTS 和 Vector Adapter |
+| `packages/database` | Schema v11、连接、事务、Repository、FTS 和 Vector Adapter |
 | `packages/cdm` | 严格 XML、draft Schema、Node/Mark、Node ID、序列化和遍历 |
 | `packages/document-ingestion` | TXT/Markdown 到临时 CDM、来源范围、语言检测和 ChunkDraft |
 | `packages/knowledge` | 资料 CRUD、恢复、索引编排以及面向 Tool 的知识服务 |
@@ -176,7 +176,7 @@ v0.1 在 Project、`material`、可选唯一 title 和当前 Source Revision 范
 
 - 每个 Project 一个数据库，不建立跨项目共享连接或默认检索。
 - 使用 Node.js `node:sqlite`、WAL、外键、`busy_timeout` 和单写入队列。
-- Schema v10 是新项目基线；支持完整 v8→v9→v10 与 v9→v10 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v10 的数据库。
+- Schema v11 是新项目基线；支持完整 v8→v9→v10→v11、v9→v10→v11 与 v10→v11 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v11 的数据库。
 - Conversation Message 与资料 Chunk 分别使用 External Content FTS；Content 只保存在对应普通表中。
 - Message 不可修改；`message_rowid` 只供 SQLite/FTS 关联。
 - Embedding 模型以 `(model_name, revision)` 唯一；Chunk 向量以模型行和 Chunk 行联合主键保存。
@@ -223,12 +223,12 @@ flowchart TB
 - LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
 - Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
 - Renderer 中的桌面聊天客户端把一次发送与其流式事件订阅绑定；`ChatPanel` 只管理当前 Conversation、草稿和界面状态，`ChatComposer` 只负责输入与提交交互。
-- Main 中的 `DesktopChatService` 是桌面聊天用例入口：它从项目所属 Conversation 读取固定的 Provider/模型身份，调用 `ChatService`，并将模型事件投影为 Renderer 可见的 Reasoning/Content 流。IPC Handler 只负责请求校验、窗口绑定和响应契约。
+- Main 中的 `DesktopChatService` 是桌面聊天用例入口：它校验 Conversation 属于当前项目后调用 `ChatService`，并将模型事件投影为 Renderer 可见的 Reasoning/Content 流。IPC Handler 只负责请求校验、窗口绑定和响应契约。
 - Conversation 首次打开时读取最近 20 条可见消息；发送时 `ChatService` 直接返回本轮落库的 User/Assistant 消息，Desktop 不再重新查询历史。Renderer 按 Conversation 保存已加载列表，用本轮真实消息替换临时消息，因此连续发送后列表可以超过 20 条，切换 Conversation 也不会丢失本次运行中已加载的消息。
 - `DesktopProjectRuntime` 负责构造并校验 Renderer-safe 的 `DesktopProjectState`；Main IPC 直接传递该可信投影，不重复解析。Preload 仍对跨进程收到的状态执行 Schema 校验，Renderer 输入和 Main 新构造的其他公共响应也继续在各自边界校验。
 - Desktop 组合层只维护一个当前主窗口引用，IPC 仅接受该窗口主 Frame 的请求。项目打开、切换或关闭后的状态只定向发送给这个窗口，窗口销毁后停止发送；不遍历全部窗口，也不维护多窗口路由或 Project/Window 映射。
 - Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接，只向桌面聊天用例提供当前项目的 ID、取消信号、`ChatService` 和 Conversation 查询边界；Provider、模型和上下文预算不再作为 Runtime 调用参数。
-- Renderer 只提交 Conversation ID 和文本，`ChatService` 通过共享 `ProviderService` 发送，由它读取安全凭据并复用当前 Provider 实例。
+- Renderer 只提交 Conversation ID 和文本，`ChatService` 从共享 `ProviderService` 获取本次操作的当前 Provider、模型、模型参数和能力快照。`ProviderService` 读取安全凭据并复用内部 Provider 实例；Conversation 不保存或恢复 Provider/模型选择。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 

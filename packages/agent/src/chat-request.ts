@@ -1,10 +1,4 @@
-import type {
-  ContextBudgetPolicy,
-  ModelEvent,
-  ModelRequest,
-  ModelUsage,
-} from "../../contracts/src/index.js";
-import type { ModelMessageSender } from "../../contracts/src/index.js";
+import type { ModelEvent, ModelRequest, ModelUsage } from "../../contracts/src/index.js";
 import type { LlmDebugHandler } from "./debug-events.js";
 import type { ToolApprovalHandler } from "./tool/index.js";
 
@@ -21,20 +15,15 @@ export const DEFAULT_SYSTEM_PROMPT = `你是 CleoDoc 的中文小说主笔。你
 export interface SendMessageInput {
   conversationId?: string;
   projectId: string;
-  provider: ModelMessageSender;
-  model: string;
   prompt: string;
   signal: AbortSignal;
   onEvent?: (event: ModelEvent) => void;
   approveToolCall?: ToolApprovalHandler;
-  contextBudgetPolicy?: ContextBudgetPolicy;
   onDebugEvent?: LlmDebugHandler;
 }
 
 export function describeModelRequest(request: ModelRequest): Readonly<Record<string, unknown>> {
   return {
-    thinking: request.thinking?.type ?? "provider_default",
-    reasoningEffort: "provider_default",
     temperature: request.temperature ?? null,
     maxTokens: request.maxTokens ?? null,
     responseFormat: request.responseFormat ?? null,
@@ -47,7 +36,6 @@ export function describeModelRequest(request: ModelRequest): Readonly<Record<str
 
 export function modelRequestForBudget(request: ModelRequest): Record<string, unknown> {
   return {
-    model: request.model,
     messages: request.messages.map((message) => {
       const { reasoningContent, ...base } = message;
       return message.role === "assistant" && message.toolCalls !== undefined
@@ -58,7 +46,6 @@ export function modelRequestForBudget(request: ModelRequest): Record<string, unk
     temperature: request.temperature,
     maxTokens: request.maxTokens,
     responseFormat: request.responseFormat,
-    thinking: request.thinking,
   };
 }
 

@@ -8,11 +8,17 @@ export const modelCapabilitiesSchema = z
     displayName: z.string().trim().min(1),
     contextWindowTokens: z.number().int().min(2_048),
     maxOutputTokens: positiveInteger,
+    reasoningSupported: z.boolean(),
+    reasoningEfforts: z.array(z.enum(["low", "medium", "high"])),
   })
   .strict()
   .refine((value) => value.maxOutputTokens <= value.contextWindowTokens, {
     message: "maxOutputTokens 不能超过 contextWindowTokens。",
     path: ["maxOutputTokens"],
+  })
+  .refine((value) => value.reasoningSupported || value.reasoningEfforts.length === 0, {
+    message: "Reasoning is unsupported, so no reasoning efforts may be declared.",
+    path: ["reasoningEfforts"],
   });
 
 const providerSchema = z
@@ -42,6 +48,12 @@ export const softwareConfigSchema = z
       .object({
         selectedProvider: z.string().min(1).nullable(),
         selectedModel: z.string().min(1).nullable(),
+        modelParameters: z
+          .object({
+            reasoningEnabled: z.boolean(),
+            reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+          })
+          .strict(),
         providers: z.record(z.string().min(1), providerSchema),
         timeouts: z
           .object({

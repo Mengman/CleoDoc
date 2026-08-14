@@ -39,7 +39,7 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 
 应用启动层只加载一次 YAML，并通过 `initializeSoftwareConfig()` 发布进程级配置快照。CLI 命令和 CleoDoc 组合模块在需要配置时直接调用 `getSoftwareConfig()`，不再把完整 `SoftwareConfig` 作为参数逐层传递。配置不会自动热更新；只有再次显式初始化才会替换当前快照。
 
-这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和具体 Provider 适配器不自行读取 YAML。`packages/model-providers` 中的 `ProviderService` 作为 Provider 配置和运行时的统一应用服务，可以消费进程级配置快照；它只向 CLI、Desktop 和 `ChatService` 暴露当前 Provider 信息、配置修改与 `send` 边界，不暴露具体 Provider 实例和密钥。
+这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和具体 Provider 适配器不自行读取 YAML。`packages/model-providers` 中的 `ProviderService` 作为 Provider 配置和运行时的统一应用服务，可以消费进程级配置快照；它向 CLI、Desktop 暴露当前 Provider/模型信息和配置修改，向 `ChatService` 暴露当前执行快照及其 `send` 边界，不暴露具体 Provider 实例和密钥。
 
 ## 3. 当前默认配置
 
@@ -50,6 +50,9 @@ gpuAcceleration: true
 llm:
   selectedProvider: openai-compatible
   selectedModel: deepseek-v4-flash
+  modelParameters:
+    reasoningEnabled: true
+    reasoningEffort: medium
   providers:
     openai-compatible:
       displayName: OpenAI-compatible
@@ -59,6 +62,8 @@ llm:
           displayName: DeepSeek V4 Flash
           contextWindowTokens: 1000000
           maxOutputTokens: 384000
+          reasoningSupported: true
+          reasoningEfforts: [low, medium, high]
     ollama:
       displayName: Ollama
       baseUrl: http://127.0.0.1:11434
@@ -134,7 +139,7 @@ debug:
 
 ## 4. Provider、模型与密钥
 
-- `ProviderService` 是 CLI 和 Desktop 的统一 Provider 入口：读取当前 Provider/模型信息、修改已支持的配置，并通过 `send` 向 `ChatService` 提供流式模型调用。
+- `ProviderService` 是 CLI 和 Desktop 的统一 Provider 入口：读取和修改当前 Provider、模型及模型参数，并通过一次操作内不可变的执行快照向 `ChatService` 提供流式模型调用。Conversation 和压缩任务不保存当前选择。
 - 具体 Provider 和 API Key 仅在 `ProviderService` 内部组合；同一有效配置复用同一 Provider 实例，配置或密钥修改后使缓存失效。
 - `contextWindowTokens` 和 `maxOutputTokens` 属于准确的 Provider + Model 能力条目，不是公共模型参数。
 - CLI 的 `--context-window-tokens`、`--max-output-tokens` 及对应环境变量只用于未知模型调试和临时覆盖，不是普通用户的常规配置方式。
@@ -142,7 +147,7 @@ debug:
 - 加密结果保存在 CleoDoc 用户配置目录的独立凭据文件中，不进入软件 YAML、项目、数据库、日志或 Git。Renderer 只能读取“已配置”状态和密钥字符长度，用等长掩码表达保存状态，不能读取密钥内容。
 - Linux 选中 `basic_text` 或系统安全凭据能力不可用时，Desktop 必须拒绝持久化 API Key，不得自动退化为明文保护。
 - 当前 Desktop 调试入口固定为 `openai-compatible` 和 `deepseek-v4-flash`；Base URL 由用户填写并写入用户 YAML。CLI 的 Base URL 仍可由参数或现有环境变量临时覆盖。
-- Thinking、Reasoning Effort、Temperature、单次生成 `maxTokens` 等参数暂不进入软件 YAML，因为不同 Provider 的接口语义尚未统一。
+- 当前统一模型参数包括 `reasoningEnabled` 和 `reasoningEffort`；`ProviderService` 在切换模型或修改参数时依据模型能力表校验。Temperature、单次生成 `maxTokens` 等业务请求参数暂不进入用户模型配置。
 - Provider 适配层不得根据模型名称猜测上下文窗口，也不得静默切换 Provider 或模型。
 
 ## 5. 暂不配置的内容

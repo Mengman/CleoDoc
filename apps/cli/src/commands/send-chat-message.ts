@@ -3,11 +3,7 @@ import type {
   LlmDebugHandler,
   ToolApprovalHandler,
 } from "../../../../packages/agent/src/index.js";
-import type {
-  ChatGenerationResult,
-  ContextBudgetPolicy,
-  ModelMessageSender,
-} from "../../../../packages/contracts/src/index.js";
+import type { ChatGenerationResult } from "../../../../packages/contracts/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
 import { installInterruptHandler } from "./command-utils.js";
 
@@ -16,12 +12,9 @@ export async function generateOnce(
   chat: ChatService,
   inputValue: {
     projectId: string;
-    provider: ModelMessageSender;
-    model: string;
     prompt: string;
     conversationId?: string;
     approveToolCall?: ToolApprovalHandler;
-    contextBudgetPolicy: ContextBudgetPolicy;
     onDebugEvent?: LlmDebugHandler;
   },
 ): Promise<ChatGenerationResult> {

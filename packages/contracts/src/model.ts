@@ -43,14 +43,32 @@ export interface ModelThinkingMode {
 }
 
 export interface ModelRequest {
-  model: string;
   messages: readonly ChatMessage[];
   tools?: readonly ModelToolDefinition[];
   temperature?: number;
   maxTokens?: number;
   responseFormat?: ModelResponseFormat;
-  thinking?: ModelThinkingMode;
   onProtocolEvent?: ModelProtocolDebugHandler;
+}
+
+export type ModelReasoningEffort = "low" | "medium" | "high";
+
+export interface ModelParameters {
+  readonly reasoningEnabled: boolean;
+  readonly reasoningEffort?: ModelReasoningEffort;
+}
+
+export interface ModelCapabilities {
+  readonly contextWindowTokens: number;
+  readonly maxOutputTokens: number;
+  readonly reasoningSupported: boolean;
+  readonly reasoningEfforts: readonly ModelReasoningEffort[];
+}
+
+export interface ProviderModelRequest extends ModelRequest {
+  readonly model: string;
+  readonly thinking?: ModelThinkingMode;
+  readonly reasoningEffort?: ModelReasoningEffort;
 }
 
 export interface ModelUsage {
@@ -83,17 +101,19 @@ export interface ModelProvider {
   readonly id: string;
   readonly displayName: string;
   validateConfiguration(signal?: AbortSignal): Promise<ProviderHealth>;
-  stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent>;
+  stream(request: ProviderModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent>;
 }
 
-export interface ModelSendInput {
+export interface ModelExecution {
   readonly providerId: string;
+  readonly providerName: string;
   readonly model: string;
-  readonly request: ModelRequest;
+  readonly modelName: string;
+  readonly parameters: ModelParameters;
+  readonly capabilities: ModelCapabilities;
+  send(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent>;
 }
 
 export interface ModelMessageSender {
-  readonly id: string;
-  readonly displayName: string;
-  send(input: ModelSendInput, signal: AbortSignal): AsyncIterable<ModelEvent>;
+  createExecution(): Promise<ModelExecution>;
 }
