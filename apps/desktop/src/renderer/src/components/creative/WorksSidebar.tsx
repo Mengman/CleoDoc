@@ -23,18 +23,33 @@ export function WorksSidebar({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Load the initial list and subscribe to native manuscript directory updates.
+    // 1. Reset state when the active project changes or closes.
+    // 2. Subscribe before loading so a newer file event cannot be overwritten by a stale request.
+    // 3. Dispose the project-scoped listener when this sidebar unmounts or switches projects.
     let active = true;
+    let receivedChange = false;
     setDocuments([]);
     setError(null);
     if (projectId === null) {
       setLoading(false);
       return () => undefined;
     }
+    const unsubscribe = window.cleodoc.onManuscriptDocumentsChanged((result) => {
+      if (!active) return;
+      receivedChange = true;
+      setLoading(false);
+      if (result.outcome === "error") setError(result.error.message);
+      else {
+        setError(null);
+        setDocuments(result.documents);
+      }
+    });
     setLoading(true);
     void window.cleodoc
       .listManuscriptDocuments()
       .then((result) => {
-        if (!active) return;
+        if (!active || receivedChange) return;
         if (result.outcome === "error") setError(result.error.message);
         else setDocuments(result.documents);
       })
@@ -46,6 +61,7 @@ export function WorksSidebar({
       });
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [projectId]);
 

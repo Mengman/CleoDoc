@@ -9,6 +9,7 @@ import {
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
+  manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
@@ -54,6 +55,15 @@ const desktopApi: CleoDocDesktopApi = {
     manuscriptListResultSchema.parse(
       await ipcRenderer.invoke(desktopChannels.listManuscriptDocuments),
     ),
+  onManuscriptDocumentsChanged: (listener) => {
+    // Validate manuscript events and return a disposer for the wrapped IPC listener.
+    const handleEvent = (_event: Electron.IpcRendererEvent, rawEvent: unknown): void => {
+      listener(manuscriptDocumentsChangedEventSchema.parse(rawEvent));
+    };
+    ipcRenderer.on(desktopChannels.manuscriptDocumentsChanged, handleEvent);
+    return () =>
+      ipcRenderer.removeListener(desktopChannels.manuscriptDocumentsChanged, handleEvent);
+  },
   readManuscriptDocument: async (relativePath) =>
     manuscriptReadResultSchema.parse(
       await ipcRenderer.invoke(

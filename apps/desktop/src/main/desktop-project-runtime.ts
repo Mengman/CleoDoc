@@ -18,7 +18,11 @@ import {
   type OpenProject,
   ProjectService,
 } from "../../../../packages/project/src/index.js";
-import { desktopProjectStateSchema, type DesktopProjectState } from "../shared/desktop-api.js";
+import {
+  desktopProjectStateSchema,
+  type DesktopProjectState,
+  type ManuscriptDocumentsChangedEvent,
+} from "../shared/desktop-api.js";
 
 export interface DesktopProjectTaskContext {
   readonly projectId: string;
@@ -49,6 +53,7 @@ interface ActiveProject {
   readonly tasks: Map<string, Promise<unknown>>;
   readonly conversations: ConversationHistoryService;
   readonly chat: ChatService;
+  readonly stopManuscriptWatcher: () => void;
 }
 
 export interface DesktopProjectRuntimeOptions {
@@ -64,6 +69,8 @@ export class DesktopProjectRuntime {
   private readonly projectService: ProjectService;
   private activeProject: ActiveProject | undefined;
   private operationTail: Promise<void> = Promise.resolve();
+  private manuscriptDocumentsChangedListener:
+    ((event: ManuscriptDocumentsChangedEvent) => void) | undefined;
 
   constructor(private readonly options: DesktopProjectRuntimeOptions) {
     this.appStateService = options.appStateService ?? new AppStateService();
@@ -178,7 +185,19 @@ export class DesktopProjectRuntime {
   }
 
   listManuscriptDocuments() {
-    return this.requireActiveProject().documents.listReadableDocuments();
+    return this.requireActiveProject().documents.listReadableDocumentPaths();
+  }
+
+  onManuscriptDocumentsChanged(
+    listener: (event: ManuscriptDocumentsChangedEvent) => void,
+  ): () => void {
+    // Register the single-window manuscript listener and return its disposer.
+    this.manuscriptDocumentsChangedListener = listener;
+    return () => {
+      if (this.manuscriptDocumentsChangedListener === listener) {
+        this.manuscriptDocumentsChangedListener = undefined;
+      }
+    };
   }
 
   listMaterials() {
@@ -212,38 +231,76 @@ export class DesktopProjectRuntime {
   private async openActiveProject(directory: string): Promise<void> {
     // Open and validate all resources required by a new active project session.
     // 1. Resolve the project manifest and open its SQLite database.
-    // 2. Verify database integrity and calculate the initial document count.
-    // 3. Persist the selected project before publishing the new in-memory session.
-    // 4. Close the database when any initialization step fails.
+    // 2. Verify database integrity and load the initial manuscript path snapshot.
+    // 3. Open chat resources and start the project-scoped manuscript watcher.
+    // 4. Persist the selected project before publishing the new in-memory session.
+    // 5. Stop partial resources when any initialization step fails.
     const project = await this.projectService.open(directory);
     const database = await ProjectDatabase.open(project.root, {
       busyTimeoutMs: this.options.busyTimeoutMs,
     });
+    const controller = new AbortController();
+    let stopManuscriptWatcher = (): void => undefined;
     try {
       if (!database.quickCheck()) {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");
       }
       const documents = new DocumentService(project.root);
-      const documentCount = (await documents.list()).length;
+      const [projectDocuments, readableDocumentPaths] = await Promise.all([
+        documents.list(),
+        documents.listReadableDocumentPaths(),
+      ]);
+      const documentCount = projectDocuments.length;
       const chat = await ChatService.usingDatabase(
         project.root,
         database,
         { database: { busyTimeoutMs: this.options.busyTimeoutMs }, ...this.options.chat },
         { provider: this.options.provider },
       );
+      let watcherError: unknown;
+      try {
+        stopManuscriptWatcher = await documents.watchReadableDocumentPaths(
+          readableDocumentPaths,
+          (paths) => {
+            if (controller.signal.aborted) return;
+            this.manuscriptDocumentsChangedListener?.({
+              outcome: "success",
+              documents: [...paths],
+            });
+          },
+          (error) => {
+            if (controller.signal.aborted) return;
+            this.manuscriptDocumentsChangedListener?.({
+              outcome: "error",
+              error: toDesktopOperationError(error),
+            });
+          },
+        );
+      } catch (error) {
+        watcherError = error;
+      }
       const activeProject: ActiveProject = {
         project,
         database,
         documents,
         documentCount,
-        controller: new AbortController(),
+        controller,
         tasks: new Map(),
         conversations: new ConversationHistoryService(database, project.manifest.id),
         chat,
+        stopManuscriptWatcher,
       };
       await this.appStateService.setCurrentProject(project.root);
       this.activeProject = activeProject;
+      if (watcherError !== undefined) {
+        this.manuscriptDocumentsChangedListener?.({
+          outcome: "error",
+          error: toDesktopOperationError(watcherError),
+        });
+      }
     } catch (error) {
+      controller.abort();
+      stopManuscriptWatcher();
       await database.close();
       throw error;
     }
@@ -256,6 +313,7 @@ export class DesktopProjectRuntime {
 
     if (active !== undefined) {
       active.controller.abort(new AppError("GENERATION_CANCELLED", "项目已关闭。"));
+      active.stopManuscriptWatcher();
       await Promise.allSettled(active.tasks.values());
       await active.chat.close();
       await active.database.close();

@@ -14,6 +14,7 @@ import {
   TEST_MATERIAL_OPTIONS,
 } from "../../../../test/runtime-options.js";
 import { senderForProvider } from "../../../../test/model-sender.js";
+import type { ManuscriptDocumentsChangedEvent } from "../shared/desktop-api.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
 const temporaryDirectories: string[] = [];
@@ -70,10 +71,7 @@ describe("DesktopProjectRuntime", () => {
     await fixture.runtime.open(first.root);
 
     const documents = await fixture.runtime.listManuscriptDocuments();
-    expect(documents.map((document) => document.relativePath)).toEqual([
-      "manuscript/chapter-001.md",
-      "manuscript/chapter-002.txt",
-    ]);
+    expect(documents).toEqual(["manuscript/chapter-001.md", "manuscript/chapter-002.txt"]);
     expect(
       (await fixture.runtime.readManuscriptDocument("manuscript/chapter-002.txt")).content,
     ).toBe("第二章\n");
@@ -83,6 +81,55 @@ describe("DesktopProjectRuntime", () => {
     await expect(
       fixture.runtime.readManuscriptDocument("manuscript/chapter-002.txt"),
     ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+    await fixture.runtime.dispose();
+  });
+
+  it("publishes manuscript list changes from the active project watcher", async () => {
+    // Verify native manuscript events update only the currently open project's path list.
+    // 1. Add a readable file and wait for the active project's incremental list event.
+    // 2. Switch projects so the first watcher is stopped.
+    // 3. Change both projects and confirm only the new active project publishes an event.
+    const fixture = await createRuntimeFixture();
+    const first = await fixture.projectService.create(
+      path.join(fixture.root, "watched-first.cleo"),
+    );
+    await fixture.runtime.open(first.root);
+
+    const firstEvent = await waitForManuscriptChange(
+      fixture.runtime,
+      () => writeFile(path.join(first.root, "manuscript", "chapter-001.md"), "第一章\n"),
+      (event) =>
+        event.outcome === "success" && event.documents.includes("manuscript/chapter-001.md"),
+    );
+    expect(firstEvent).toEqual({
+      outcome: "success",
+      documents: ["manuscript/chapter-001.md"],
+    });
+
+    const second = await fixture.projectService.create(
+      path.join(fixture.root, "watched-second.cleo"),
+    );
+    await fixture.runtime.open(second.root);
+    const observedAfterSwitch: ManuscriptDocumentsChangedEvent[] = [];
+    const secondEvent = await waitForManuscriptChange(
+      fixture.runtime,
+      () =>
+        Promise.all([
+          writeFile(path.join(first.root, "manuscript", "stale.md"), "旧项目\n"),
+          writeFile(path.join(second.root, "manuscript", "current.txt"), "新项目\n"),
+        ]).then(() => undefined),
+      (event) => event.outcome === "success" && event.documents.includes("manuscript/current.txt"),
+      observedAfterSwitch,
+    );
+    expect(secondEvent).toEqual({
+      outcome: "success",
+      documents: ["manuscript/current.txt"],
+    });
+    expect(
+      observedAfterSwitch.every(
+        (event) => event.outcome === "error" || !event.documents.includes("manuscript/stale.md"),
+      ),
+    ).toBe(true);
     await fixture.runtime.dispose();
   });
 
@@ -232,4 +279,34 @@ async function createRuntimeFixture(): Promise<{
       provider: senderForProvider(new FakeModelProvider("ok")),
     }),
   };
+}
+
+async function waitForManuscriptChange(
+  runtime: DesktopProjectRuntime,
+  action: () => Promise<void>,
+  predicate: (event: ManuscriptDocumentsChangedEvent) => boolean,
+  observed: ManuscriptDocumentsChangedEvent[] = [],
+): Promise<ManuscriptDocumentsChangedEvent> {
+  // Wait for one functional watcher result while bounding failures and cleanup.
+  // 1. Subscribe before changing the file system so the event cannot be missed.
+  // 2. Resolve only when the expected manuscript list snapshot arrives.
+  // 3. Remove the listener and timeout after success or action failure.
+  return await new Promise<ManuscriptDocumentsChangedEvent>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      dispose();
+      reject(new Error("Timed out waiting for a manuscript watcher event."));
+    }, 5_000);
+    const dispose = runtime.onManuscriptDocumentsChanged((event) => {
+      observed.push(event);
+      if (!predicate(event)) return;
+      clearTimeout(timeout);
+      dispose();
+      resolve(event);
+    });
+    void action().catch((error: unknown) => {
+      clearTimeout(timeout);
+      dispose();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
 }

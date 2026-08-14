@@ -8,6 +8,7 @@ import {
   desktopConversationHistoryResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
+  manuscriptDocumentsChangedEventSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   materialListResultSchema,
@@ -115,6 +116,12 @@ describe("desktop manuscript document schemas", () => {
         content: "# 第一章\n",
       }),
     ).toMatchObject({ outcome: "success", content: "# 第一章\n" });
+    expect(
+      manuscriptDocumentsChangedEventSchema.parse({
+        outcome: "success",
+        documents: [relativePath],
+      }),
+    ).toEqual({ outcome: "success", documents: [relativePath] });
 
     expect(() =>
       manuscriptListResultSchema.parse({

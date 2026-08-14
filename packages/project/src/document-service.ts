@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { watch } from "node:fs";
 import { lstat, readFile, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ import { resolveInsideProject, toPortablePath } from "./safe-path.js";
 
 const MARKDOWN_DOCUMENT_EXTENSIONS = new Set([".md"]);
 const READABLE_DOCUMENT_EXTENSIONS = new Set([".md", ".txt"]);
+const MANUSCRIPT_WATCH_DEBOUNCE_MS = 180;
 
 export class DocumentService {
   constructor(private readonly projectRoot: string) {}
@@ -19,6 +21,31 @@ export class DocumentService {
 
   async listReadableDocuments(): Promise<DocumentSummary[]> {
     return this.listDocuments(READABLE_DOCUMENT_EXTENSIONS);
+  }
+
+  async listReadableDocumentPaths(): Promise<string[]> {
+    // List readable manuscript paths without loading their file contents.
+    const manuscript = await resolveInsideProject(this.projectRoot, "manuscript");
+    return await collectPortableDocumentPaths(
+      manuscript.absolutePath,
+      manuscript.absolutePath,
+      READABLE_DOCUMENT_EXTENSIONS,
+    );
+  }
+
+  async watchReadableDocumentPaths(
+    initialPaths: readonly string[],
+    onChange: (paths: readonly string[]) => void,
+    onError: (error: unknown) => void,
+  ): Promise<() => void> {
+    // Start a native watcher from an already loaded manuscript path snapshot.
+    const manuscript = await resolveInsideProject(this.projectRoot, "manuscript");
+    return createReadableDocumentWatcher({
+      manuscriptRoot: manuscript.absolutePath,
+      initialPaths,
+      onChange,
+      onError,
+    });
   }
 
   async read(relativePath: string): Promise<{ summary: DocumentSummary; content: string }> {
@@ -169,4 +196,161 @@ async function collectDocumentFiles(
     }
   }
   return files;
+}
+
+async function collectPortableDocumentPaths(
+  manuscriptRoot: string,
+  directory: string,
+  supportedExtensions: ReadonlySet<string>,
+): Promise<string[]> {
+  // Collect supported paths under one manuscript directory without reading file contents.
+  const files = await collectDocumentFiles(manuscriptRoot, directory, supportedExtensions);
+  return files
+    .map((filePath) => `manuscript/${toPortablePath(path.relative(manuscriptRoot, filePath))}`)
+    .sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
+function createReadableDocumentWatcher(options: {
+  readonly manuscriptRoot: string;
+  readonly initialPaths: readonly string[];
+  readonly onChange: (paths: readonly string[]) => void;
+  readonly onError: (error: unknown) => void;
+}): () => void {
+  // Maintain the readable manuscript list from native file-system notifications.
+  // 1. Batch duplicate native events and retain their affected relative paths.
+  // 2. Update individual files or directories without scanning the manuscript root.
+  // 3. Scan the full root only when the operating system omits a usable filename.
+  const documents = new Set(options.initialPaths);
+  const pendingPaths = new Set<string>();
+  let fullScanRequired = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let closed = false;
+  let operationTail = Promise.resolve();
+
+  const flush = async (): Promise<void> => {
+    // Apply one event batch and publish only a changed, sorted path snapshot.
+    // 1. Capture and clear pending state so later events form a new batch.
+    // 2. Refresh either the full root or only the paths named by the operating system.
+    // 3. Ignore settled work after close and suppress unchanged snapshots.
+    const scanAll = fullScanRequired;
+    const changedPaths = [...pendingPaths];
+    fullScanRequired = false;
+    pendingPaths.clear();
+    const next = scanAll
+      ? new Set(
+          await collectPortableDocumentPaths(
+            options.manuscriptRoot,
+            options.manuscriptRoot,
+            READABLE_DOCUMENT_EXTENSIONS,
+          ),
+        )
+      : new Set(documents);
+    if (!scanAll) {
+      for (const relativePath of changedPaths) {
+        await applyReadableDocumentChange(options, next, relativePath);
+      }
+    }
+    if (closed) return;
+    const currentPaths = [...documents].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    const nextPaths = [...next].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    if (samePaths(currentPaths, nextPaths)) return;
+    documents.clear();
+    for (const relativePath of nextPaths) documents.add(relativePath);
+    options.onChange(nextPaths);
+  };
+
+  const schedule = (filename: string | null): void => {
+    // Queue one native event and restart the short batching window.
+    const relativePath = filename === null ? null : normalizeWatchedManuscriptPath(filename);
+    if (relativePath === null) fullScanRequired = true;
+    else pendingPaths.add(relativePath);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      operationTail = operationTail.then(flush, flush).catch(options.onError);
+    }, MANUSCRIPT_WATCH_DEBOUNCE_MS);
+  };
+
+  const watcher = watch(
+    options.manuscriptRoot,
+    { encoding: "utf8", persistent: false, recursive: true },
+    (_eventType, filename) => schedule(filename),
+  );
+  watcher.on("error", (error) => {
+    if (!closed) options.onError(error);
+  });
+  return () => {
+    closed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    watcher.close();
+  };
+}
+
+async function applyReadableDocumentChange(
+  options: { readonly manuscriptRoot: string },
+  documents: Set<string>,
+  relativePath: string,
+): Promise<void> {
+  // Reconcile one changed file or directory against the current path snapshot.
+  // 1. Remove the previous file or directory subtree from the snapshot.
+  // 2. Inspect only the changed path and add a supported file when it exists.
+  // 3. Scan only that directory when a directory itself was added or renamed.
+  removePathAndChildren(documents, relativePath);
+  let resolved: Awaited<ReturnType<typeof resolveInsideProject>>;
+  try {
+    resolved = await resolveInsideProject(
+      options.manuscriptRoot,
+      relativePath.slice("manuscript/".length),
+    );
+  } catch (error) {
+    if (error instanceof AppError && error.code === "PATH_OUTSIDE_PROJECT") return;
+    throw error;
+  }
+  const metadata = await lstat(resolved.absolutePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (metadata === null || metadata.isSymbolicLink()) return;
+  if (metadata.isFile()) {
+    if (READABLE_DOCUMENT_EXTENSIONS.has(path.extname(relativePath).toLowerCase())) {
+      documents.add(relativePath);
+    }
+    return;
+  }
+  if (!metadata.isDirectory()) return;
+  const nestedPaths = await collectPortableDocumentPaths(
+    options.manuscriptRoot,
+    resolved.absolutePath,
+    READABLE_DOCUMENT_EXTENSIONS,
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  for (const nestedPath of nestedPaths) documents.add(nestedPath);
+}
+
+function normalizeWatchedManuscriptPath(filename: string): string | null {
+  // Convert a native watcher filename into a safe project-relative manuscript path.
+  const portable = toPortablePath(filename.trim());
+  if (
+    portable.length === 0 ||
+    portable.includes("\0") ||
+    path.posix.isAbsolute(portable) ||
+    path.win32.isAbsolute(portable) ||
+    portable.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+  ) {
+    return null;
+  }
+  return `manuscript/${portable}`;
+}
+
+function removePathAndChildren(documents: Set<string>, relativePath: string): void {
+  const childPrefix = `${relativePath}/`;
+  for (const existing of documents) {
+    if (existing === relativePath || existing.startsWith(childPrefix)) documents.delete(existing);
+  }
+}
+
+function samePaths(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

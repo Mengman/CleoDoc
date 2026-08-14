@@ -5,6 +5,7 @@ import {
   desktopConversationHistoryResultSchema,
   desktopConversationListResultSchema,
   manuscriptListResultSchema,
+  manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
@@ -101,9 +102,18 @@ export function registerDesktopIpc(
   resolveMainWindow: MainWindowResolver,
 ): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
-  // 1. Register read-only runtime and project-state queries.
+  // 1. Register targeted project and manuscript events plus read-only state queries.
   // 2. Register project lifecycle and LLM settings operations with validated safe results.
   // 3. Register native menu handling and connect its existing project action.
+  runtime.onManuscriptDocumentsChanged((event) => {
+    const window = resolveMainWindow();
+    if (window === null || window.isDestroyed()) return;
+    window.webContents.send(
+      desktopChannels.manuscriptDocumentsChanged,
+      manuscriptDocumentsChangedEventSchema.parse(event),
+    );
+  });
+
   ipcMain.handle(desktopChannels.getRuntimeInfo, (event) => {
     // Validate the caller and return a schema-checked runtime projection.
     requireMainWindow(event, resolveMainWindow);
@@ -148,7 +158,7 @@ export function registerDesktopIpc(
       const documents = await runtime.listManuscriptDocuments();
       return manuscriptListResultSchema.parse({
         outcome: "success",
-        documents: documents.map(({ relativePath }) => relativePath),
+        documents,
       });
     } catch (error) {
       return manuscriptListResultSchema.parse({
