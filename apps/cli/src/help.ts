@@ -21,13 +21,10 @@ export const helpText = `CleoDoc v0.1 CLI
     --conversation <id>   继续指定对话
     --new                 不恢复最近对话，开始新对话
     --prompt <text>       单轮非交互调用
-    --save <path>         单轮调用成功后保存结果
-    --overwrite           明确允许覆盖 --save 指定的文档
 
   cleo document list [--project <directory>]
   cleo document show <document-id|path> [--project <directory>]
   cleo document create <path> [--content <text>] [--project <directory>]
-  cleo document save-last <path> [--overwrite] [--project <directory>]
   cleo document delete <document-id|path> [--project <directory>]
 
   cleo material add <file> [--title <标题>]
@@ -53,7 +50,6 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo conversation show <conversation-id> [--project <directory>]
 
 交互式 chat 命令：
-  /save manuscript/chapter-001.md
   /read manuscript/chapter-001.md
   /documents
   /history

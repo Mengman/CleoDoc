@@ -128,3 +128,8 @@ export const SCHEMA_V10_TO_V11_SQL = `
     ON compaction_jobs(source_session_id)
     WHERE status = 'completed';
 `;
+
+export const SCHEMA_V11_TO_V12_SQL = `
+  DROP TABLE generation_model_call_mapping;
+  DROP TABLE generations;
+`;

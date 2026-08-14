@@ -29,7 +29,6 @@ export const appErrorCodes = [
   "COMPACTION_SUMMARY_TOO_LARGE",
   "COMPACTION_TOOL_CALL_NOT_ALLOWED",
   "GENERATION_CANCELLED",
-  "GENERATION_NOT_FOUND",
   "TOOL_EXECUTION_FAILED",
   "IO_ERROR",
   "INTERNAL_ERROR",
@@ -71,7 +70,6 @@ export function getExitCode(code: AppErrorCode): number {
     case "DOCUMENT_NOT_FOUND":
     case "MATERIAL_NOT_FOUND":
     case "EMBEDDING_MODEL_NOT_FOUND":
-    case "GENERATION_NOT_FOUND":
       return 3;
     case "PROJECT_ALREADY_EXISTS":
     case "DOCUMENT_ALREADY_EXISTS":

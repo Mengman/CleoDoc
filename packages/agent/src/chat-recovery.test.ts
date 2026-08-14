@@ -11,9 +11,9 @@ import type {
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
-import { DocumentService, ProjectService } from "../../project/src/index.js";
+import { ProjectService } from "../../project/src/index.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
-import { MutableModelMessageSender, senderForProvider } from "../../../test/model-sender.js";
+import { MutableModelMessageSender } from "../../../test/model-sender.js";
 import { ChatService } from "./chat-service.js";
 
 const temporaryDirectories: string[] = [];
@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 describe("ChatService failure recovery", () => {
-  it("keeps a cancelled turn unsavable and resumes the same conversation after reopening", async () => {
+  it("keeps partial cancelled output out of history and resumes after reopening", async () => {
     const project = await createProject();
     const provider = new MutableModelMessageSender(
       new CancelAfterFirstChunkProvider(),
@@ -36,7 +36,6 @@ describe("ChatService failure recovery", () => {
     let chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
     const controller = new AbortController();
     let conversationId: string;
-    let cancelledGenerationId: string;
     try {
       const cancelledError = await chat
         .send({
@@ -54,13 +53,7 @@ describe("ChatService failure recovery", () => {
       expect(cancelledError).toMatchObject({ code: "GENERATION_CANCELLED" });
       if (!(cancelledError instanceof AppError)) throw new Error("Expected AppError.");
       conversationId = String(cancelledError.details?.conversationId ?? "");
-      cancelledGenerationId = String(cancelledError.details?.generationId ?? "");
       expect(conversationId).not.toBe("");
-      expect(cancelledGenerationId).not.toBe("");
-      await expect(
-        chat.saveGeneration("manuscript/cancelled.md", { generationId: cancelledGenerationId }),
-      ).rejects.toMatchObject({ code: "GENERATION_NOT_FOUND" });
-      expect(await new DocumentService(project.root).list()).toEqual([]);
       expect(chat.getConversationHistory(conversationId)).toEqual([
         expect.objectContaining({ role: "user", content: "生成一段随后取消的正文" }),
       ]);
@@ -79,42 +72,6 @@ describe("ChatService failure recovery", () => {
       expect(chat.getConversationHistory(conversationId).map((message) => message.content)).toEqual(
         ["生成一段随后取消的正文", "取消后继续正常交流", "已经从取消状态恢复。"],
       );
-    } finally {
-      await chat.close();
-    }
-  });
-
-  it("does not overwrite a saved chapter without an explicit overwrite decision", async () => {
-    const project = await createProject();
-    const provider = new SequentialTextProvider(["# 第二章\n\n初稿。\n", "# 第二章\n\n修订稿。\n"]);
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
-      provider: senderForProvider(provider, "sequential-model"),
-    });
-    try {
-      const first = await chat.send({
-        projectId: project.manifest.id,
-        prompt: "生成初稿",
-        signal: new AbortController().signal,
-      });
-      await chat.saveGeneration("manuscript/chapter-002.md", { generationId: first.generationId });
-
-      const second = await chat.send({
-        conversationId: first.conversationId,
-        projectId: project.manifest.id,
-        prompt: "生成修订稿",
-        signal: new AbortController().signal,
-      });
-      await expect(
-        chat.saveGeneration("manuscript/chapter-002.md", { generationId: second.generationId }),
-      ).rejects.toMatchObject({ code: "DOCUMENT_ALREADY_EXISTS" });
-      const documents = new DocumentService(project.root);
-      expect((await documents.read("manuscript/chapter-002.md")).content).toBe(first.content);
-
-      await chat.saveGeneration("manuscript/chapter-002.md", {
-        generationId: second.generationId,
-        overwrite: true,
-      });
-      expect((await documents.read("manuscript/chapter-002.md")).content).toBe(second.content);
     } finally {
       await chat.close();
     }
@@ -191,24 +148,6 @@ class RecoveryProvider implements ModelProvider {
 
   async *stream(): AsyncIterable<ModelEvent> {
     yield { type: "text-delta", text: "已经从取消状态恢复。" };
-    yield { type: "done", finishReason: "stop" };
-  }
-}
-
-class SequentialTextProvider implements ModelProvider {
-  readonly id = "sequential-provider";
-  readonly displayName = "Sequential Provider";
-  private callCount = 0;
-
-  constructor(private readonly responses: readonly string[]) {}
-
-  async validateConfiguration(): Promise<ProviderHealth> {
-    return { ok: true, message: "ready" };
-  }
-
-  async *stream(): AsyncIterable<ModelEvent> {
-    const response = this.responses[this.callCount++] ?? "";
-    yield { type: "text-delta", text: response };
     yield { type: "done", finishReason: "stop" };
   }
 }

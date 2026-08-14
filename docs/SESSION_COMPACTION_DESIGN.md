@@ -615,7 +615,7 @@ interface SessionSummary {
 - 发送给模型的累计摘要只包含摘要正文和权威说明，不包含 Summary ID 或来源 Session ID。
 - 项目指令不写入会话摘要，避免在连续累计压缩中形成陈旧副本。
 - 第一个 Session 也加载当前项目指令，但没有累计摘要。
-- 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#511-project_instruction_revisions)。
+- 当前 Session Schema 不包含项目指令文件路径或文件快照字段；作品项目中的 `AGENTS.md` 不会被读取或注入，详见[数据库设计](./DATABASE_DESIGN.md#58-project_instruction_revisions)。
 
 ## 9. 会话历史查询 Tool
 
@@ -696,7 +696,7 @@ interface SessionSummaryRecord {
 }
 ```
 
-不再存在 `session_summaries` 表。`compaction_jobs.summary` 仅在 Job 为 `completed` 时非空；新 Session 通过 `inherited_compaction_job_id` 指向该 Job。当前字段见[数据库设计](./DATABASE_DESIGN.md#58-compaction_jobs)。
+不再存在 `session_summaries` 表。`compaction_jobs.summary` 仅在 Job 为 `completed` 时非空；新 Session 通过 `inherited_compaction_job_id` 指向该 Job。当前字段见[数据库设计](./DATABASE_DESIGN.md#56-compaction_jobs)。
 
 ### 10.3 `compaction_jobs`
 

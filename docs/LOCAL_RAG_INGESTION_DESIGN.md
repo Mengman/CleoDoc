@@ -192,7 +192,7 @@ CREATE TABLE knowledge_chunks (
 );
 ```
 
-该表属于当前 Schema v11。Repository 写入前校验 Source Hash、资料字节长度、Chunk 顺序和原文范围，并在一个短事务中替换同一 Source 的完整 Chunk 集合。
+该表属于当前 Schema v12。Repository 写入前校验 Source Hash、资料字节长度、Chunk 顺序和原文范围，并在一个短事务中替换同一 Source 的完整 Chunk 集合。
 
 ### 6.2 External Content FTS
 

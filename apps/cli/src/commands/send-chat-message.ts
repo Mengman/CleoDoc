@@ -3,7 +3,7 @@ import type {
   LlmDebugHandler,
   ToolApprovalHandler,
 } from "../../../../packages/agent/src/index.js";
-import type { ChatGenerationResult } from "../../../../packages/contracts/src/index.js";
+import type { ChatTurnResult } from "../../../../packages/contracts/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
 import { installInterruptHandler } from "./command-utils.js";
 
@@ -17,7 +17,11 @@ export async function generateOnce(
     approveToolCall?: ToolApprovalHandler;
     onDebugEvent?: LlmDebugHandler;
   },
-): Promise<ChatGenerationResult> {
+): Promise<ChatTurnResult> {
+  // Send one cancellable chat turn and stream its reasoning and answer to the terminal.
+  // 1. Install an interrupt handler for the request AbortController.
+  // 2. Render reasoning and answer deltas with explicit phase transitions.
+  // 3. Print the persisted conversation identity and always remove the handler.
   const controller = new AbortController();
   const removeHandler = installInterruptHandler(context, controller);
   let displayPhase: "idle" | "reasoning" | "answer" = "idle";
@@ -42,7 +46,7 @@ export async function generateOnce(
       },
     });
     context.output.write("\n");
-    context.output.write(`对话 ID：${result.conversationId}\n生成 ID：${result.generationId}\n`);
+    context.output.write(`对话 ID：${result.conversationId}\n`);
     return result;
   } finally {
     removeHandler();

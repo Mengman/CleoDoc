@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 11 as const;
+export const CURRENT_SCHEMA_VERSION = 12 as const;
 
 export const KNOWLEDGE_INDEX_SCHEMA_SQL = `
   CREATE TABLE knowledge_chunks (
@@ -83,24 +83,6 @@ export const CURRENT_SCHEMA_SQL = `
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
-
-  CREATE TABLE generations (
-    id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
-    content TEXT NOT NULL DEFAULT '',
-    usage_json TEXT,
-    error_code TEXT,
-    saved_document_path TEXT,
-    saved_content_hash TEXT,
-    created_at TEXT NOT NULL,
-    completed_at TEXT
-  );
-
-  CREATE INDEX generations_conversation_created
-    ON generations(conversation_id, created_at DESC);
-  CREATE INDEX generations_status_created
-    ON generations(status, created_at DESC);
 
   CREATE TABLE sources (
     id TEXT PRIMARY KEY,
@@ -194,14 +176,6 @@ export const CURRENT_SCHEMA_SQL = `
     total_tokens INTEGER CHECK (total_tokens IS NULL OR total_tokens >= 0),
     created_at TEXT NOT NULL,
     completed_at TEXT
-  );
-
-  CREATE TABLE generation_model_call_mapping (
-    generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
-    model_call_id TEXT NOT NULL UNIQUE REFERENCES model_calls(id) ON DELETE CASCADE,
-    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
-    PRIMARY KEY (generation_id, model_call_id),
-    UNIQUE (generation_id, ordinal)
   );
 
   CREATE TABLE compaction_job_model_call_mapping (

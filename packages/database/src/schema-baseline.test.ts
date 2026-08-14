@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ConversationRepository } from "./conversation-repository.js";
-import { CURRENT_SCHEMA_VERSION } from "./current-schema.js";
+import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
 import { ProjectDatabase } from "./project-database.js";
 import { TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
 import { SessionRepository } from "./session-repository.js";
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v11 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v12 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
@@ -53,8 +53,6 @@ describe("current database schema baseline", () => {
           "conversation_message_fts",
           "conversation_sessions",
           "conversations",
-          "generation_model_call_mapping",
-          "generations",
           "embedding_models",
           "knowledge_chunk_fts",
           "knowledge_chunks",
@@ -66,10 +64,9 @@ describe("current database schema baseline", () => {
         ]),
       );
       expect(tableNames).not.toContain("session_summaries");
+      expect(tableNames).not.toContain("generations");
+      expect(tableNames).not.toContain("generation_model_call_mapping");
       expect(getColumnNames(database, "conversations")).not.toEqual(
-        expect.arrayContaining(["provider_id", "model"]),
-      );
-      expect(getColumnNames(database, "generations")).not.toEqual(
         expect.arrayContaining(["provider_id", "model"]),
       );
       expect(getColumnNames(database, "compaction_jobs")).not.toEqual(
@@ -225,7 +222,7 @@ describe("current database schema baseline", () => {
     }
   });
 
-  it("migrates v10 conversations and completed compaction summaries without losing audit links", async () => {
+  it("migrates v10 data through v12 without losing messages, calls, or compaction links", async () => {
     const root = await createTemporaryProject("cleodoc-v10-migration-test-");
     const state = path.join(root, ".cleo");
     await mkdir(state, { recursive: true });
@@ -239,20 +236,24 @@ describe("current database schema baseline", () => {
         [],
       );
       expect(getColumnNames(database, "conversations")).not.toContain("provider_id");
-      expect(getColumnNames(database, "generations")).not.toContain("model");
+      expect(
+        database.read((sqlite) =>
+          sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'generations'").get(),
+        ),
+      ).toBeUndefined();
+      expect(
+        database.read((sqlite) =>
+          sqlite
+            .prepare("SELECT name FROM sqlite_master WHERE name = 'generation_model_call_mapping'")
+            .get(),
+        ),
+      ).toBeUndefined();
       expect(getColumnNames(database, "compaction_jobs")).toContain("summary");
       expect(
         database.read((sqlite) =>
           sqlite.prepare("SELECT id, project_id, title FROM conversations").get(),
         ),
       ).toEqual({ id: "conversation-1", project_id: "project-1", title: "测试对话" });
-      expect(
-        database.read((sqlite) =>
-          sqlite
-            .prepare("SELECT id, status, content FROM generations WHERE id = 'generation-1'")
-            .get(),
-        ),
-      ).toEqual({ id: "generation-1", status: "completed", content: "模型回复" });
       expect(
         database.read((sqlite) =>
           sqlite
@@ -289,7 +290,84 @@ describe("current database schema baseline", () => {
       await database.close();
     }
   });
+
+  it("migrates a complete v11 database by removing only generation storage", async () => {
+    const root = await createTemporaryProject("cleodoc-v11-migration-test-");
+    const state = path.join(root, ".cleo");
+    await mkdir(state, { recursive: true });
+    const raw = new DatabaseSync(path.join(state, "project.sqlite"));
+    createV11GenerationFixture(raw);
+    raw.close();
+
+    const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
+    try {
+      expect(
+        database.read((sqlite) =>
+          sqlite.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
+        ),
+      ).toEqual([{ version: 11 }, { version: 12 }]);
+      expect(
+        database.read((sqlite) =>
+          sqlite.prepare("SELECT name FROM sqlite_master WHERE name = 'generations'").get(),
+        ),
+      ).toBeUndefined();
+      expect(
+        database.read((sqlite) => sqlite.prepare("SELECT id, content FROM messages").get()),
+      ).toEqual({ id: "message-v11", content: "保留的回复" });
+      expect(
+        database.read((sqlite) => sqlite.prepare("SELECT id, status FROM model_calls").get()),
+      ).toEqual({ id: "call-v11", status: "completed" });
+      expect(database.read((sqlite) => sqlite.prepare("PRAGMA foreign_key_check").all())).toEqual(
+        [],
+      );
+    } finally {
+      await database.close();
+    }
+  });
 });
+
+function createV11GenerationFixture(database: DatabaseSync): void {
+  // Create a complete v11 database containing one duplicated Generation and Assistant message.
+  // 1. Install the current shared tables and mark the database as schema v11.
+  // 2. Add the two Generation tables removed by the v12 migration.
+  // 3. Insert one conversation, Session, ModelCall, Message, and mapped Generation.
+  database.exec(CURRENT_SCHEMA_SQL);
+  database.exec(`
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+    INSERT INTO schema_migrations VALUES (11, '2026-01-01T00:00:00.000Z');
+    CREATE TABLE generations (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'cancelled', 'failed')),
+      content TEXT NOT NULL DEFAULT '', usage_json TEXT, error_code TEXT,
+      saved_document_path TEXT, saved_content_hash TEXT, created_at TEXT NOT NULL,
+      completed_at TEXT
+    );
+    CREATE TABLE generation_model_call_mapping (
+      generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+      model_call_id TEXT NOT NULL UNIQUE REFERENCES model_calls(id) ON DELETE CASCADE,
+      ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+      PRIMARY KEY (generation_id, model_call_id), UNIQUE (generation_id, ordinal)
+    );
+    INSERT INTO conversations VALUES
+      ('conversation-v11', 'project-v11', '测试对话', '2026-01-01T00:00:00.000Z',
+       '2026-01-01T00:01:00.000Z');
+    INSERT INTO conversation_sessions VALUES
+      ('session-v11', 'conversation-v11', 1, 'active', 'conversation_started', 'system', NULL,
+       0, NULL, 0, '2026-01-01T00:00:00.000Z', NULL);
+    INSERT INTO model_calls VALUES
+      ('call-v11', 'openai-compatible', 'model-v11', '{}', 'completed', 'stop', NULL,
+       10, 5, NULL, 15, '2026-01-01T00:00:10.000Z', '2026-01-01T00:01:00.000Z');
+    INSERT INTO messages
+      (id, conversation_id, sequence, role, content, created_at, session_id, model_call_id)
+      VALUES ('message-v11', 'conversation-v11', 0, 'assistant', '保留的回复',
+              '2026-01-01T00:01:00.000Z', 'session-v11', 'call-v11');
+    INSERT INTO generations VALUES
+      ('generation-v11', 'conversation-v11', 'completed', '保留的回复', NULL, NULL, NULL, NULL,
+       '2026-01-01T00:00:10.000Z', '2026-01-01T00:01:00.000Z');
+    INSERT INTO generation_model_call_mapping VALUES ('generation-v11', 'call-v11', 1);
+  `);
+}
 
 function createV10ConversationFixture(database: DatabaseSync): void {
   // Create the v10 conversation subsystem and one completed compaction chain.

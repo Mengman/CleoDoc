@@ -21,7 +21,7 @@ import {
   selectConversationFromHistory,
   truncateText,
 } from "./conversation-ui.js";
-import { printDocuments, saveInteractively } from "./document-output.js";
+import { printDocuments } from "./document-output.js";
 import { generateOnce } from "./send-chat-message.js";
 
 export interface InteractiveChatOptions {
@@ -37,6 +37,11 @@ export async function runInteractiveChat(
   chat: ChatService,
   options: InteractiveChatOptions,
 ): Promise<void> {
+  // Run the stateful CLI conversation loop, including navigation, compaction, and Tool approval.
+  // 1. Restore the requested conversation and initialize input and compaction state.
+  // 2. Parse interactive commands while preserving blocked or interrupted drafts.
+  // 3. Send ordinary input through ChatService and update the active conversation.
+  // 4. Coordinate automatic compaction and release terminal resources on exit.
   let readline = createInterface({ input: context.input, output: context.output });
   let conversationId = options.initialConversationId;
   const inputController = new ChatInputController();
@@ -134,7 +139,7 @@ export async function runInteractiveChat(
       if (line === "/exit") return;
       if (line === "/help") {
         context.output.write(
-          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /instructions [history|restore <revision>]  /save <path>  /read <path>  /documents  /exit\n",
+          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /instructions [history|restore <revision>]  /read <path>  /documents  /exit\n",
         );
         continue;
       }
@@ -204,10 +209,6 @@ export async function runInteractiveChat(
       }
       if (line.startsWith("/instructions restore ")) {
         await restoreProjectInstructions(context, chat, readline, line);
-        continue;
-      }
-      if (line.startsWith("/save ")) {
-        await saveInteractively(context, chat, readline, line.slice(6).trim());
         continue;
       }
       if (line.startsWith("/read ")) {

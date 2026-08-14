@@ -25,23 +25,13 @@ export type CompactionModelCallPhase = "primary" | "segment" | "reduce";
 export class ModelCallRepository {
   constructor(private readonly projectDatabase: ProjectDatabase) {}
 
-  async beginGenerationCall(input: {
-    generationId: string;
-    ordinal: number;
+  async beginCall(input: {
     providerId: string;
     model: string;
     requestOptions: Readonly<Record<string, unknown>>;
   }): Promise<ModelCallRecord> {
     const call = createRunningCall(input);
-    await this.projectDatabase.transaction((database) => {
-      insertModelCall(database, call);
-      database
-        .prepare(
-          `INSERT INTO generation_model_call_mapping
-           (generation_id, model_call_id, ordinal) VALUES (?, ?, ?)`,
-        )
-        .run(input.generationId, call.id, input.ordinal);
-    });
+    await this.projectDatabase.write((database) => insertModelCall(database, call));
     return call;
   }
 

@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("ChatService", () => {
-  it("persists a streamed generation and only saves it after an explicit call", async () => {
+  it("persists a streamed chat turn and supports continuing the conversation", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
@@ -76,14 +76,6 @@ describe("ChatService", () => {
           contextSource: "provider",
         }),
       );
-      expect(await new DocumentService(project.root).list()).toHaveLength(0);
-
-      const saved = await chat.saveGeneration("manuscript/chapter-001.md", {
-        generationId: result.generationId,
-      });
-      expect(saved.relativePath).toBe("manuscript/chapter-001.md");
-      expect((await new DocumentService(project.root).read(saved.id)).content).toBe(result.content);
-
       const continuation = await chat.send({
         conversationId: result.conversationId,
         projectId: project.manifest.id,
@@ -91,25 +83,6 @@ describe("ChatService", () => {
         signal: new AbortController().signal,
       });
       expect(continuation.conversationId).toBe(result.conversationId);
-    } finally {
-      await chat.close();
-    }
-  });
-
-  it("does not save cancelled or failed generations", async () => {
-    const directory = await createTemporaryDirectory();
-    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
-      path.join(directory, "novel.cleo"),
-    );
-    const provider = new MutableModelMessageSender(
-      new FakeModelProvider("第一次回答"),
-      "stable-model",
-    );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
-    try {
-      await expect(chat.saveGeneration("manuscript/empty.md")).rejects.toMatchObject({
-        code: "GENERATION_NOT_FOUND",
-      });
     } finally {
       await chat.close();
     }
@@ -285,7 +258,9 @@ describe("ChatService", () => {
           raw.prepare("SELECT COUNT(*) AS count FROM model_calls WHERE status = 'completed'").get(),
         ).toEqual({ count: 2 });
         expect(
-          raw.prepare("SELECT COUNT(*) AS count FROM generation_model_call_mapping").get(),
+          raw
+            .prepare("SELECT COUNT(*) AS count FROM messages WHERE model_call_id IS NOT NULL")
+            .get(),
         ).toEqual({ count: 2 });
       } finally {
         raw.close();

@@ -5,9 +5,6 @@ import type {
   ChatMessage,
   ConversationRecord,
   ConversationSummary,
-  GenerationRecord,
-  GenerationStatus,
-  ModelUsage,
   StoredMessage,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
@@ -39,19 +36,6 @@ interface MessageRow {
   tool_calls_json: string | null;
   model_call_id: string | null;
   created_at: string;
-}
-
-interface GenerationRow {
-  id: string;
-  conversation_id: string;
-  status: GenerationStatus;
-  content: string;
-  usage_json: string | null;
-  error_code: string | null;
-  saved_document_path: string | null;
-  saved_content_hash: string | null;
-  created_at: string;
-  completed_at: string | null;
 }
 
 export class ConversationRepository {
@@ -222,159 +206,6 @@ export class ConversationRepository {
     };
   }
 
-  async beginGeneration(conversationId: string): Promise<GenerationRecord> {
-    // Create a provider-independent generation record before model execution starts.
-    // 1. Allocate stable identifiers and creation time.
-    // 2. Insert the running generation for the conversation.
-    // 3. Return its initial application representation.
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    await this.projectDatabase.write((database) => {
-      database
-        .prepare(
-          `INSERT INTO generations
-           (id, conversation_id, status, content, created_at)
-           VALUES (?, ?, 'running', '', ?)`,
-        )
-        .run(id, conversationId, now);
-    });
-
-    return {
-      id,
-      conversationId,
-      status: "running",
-      content: "",
-      usage: null,
-      errorCode: null,
-      savedDocumentPath: null,
-      savedContentHash: null,
-      createdAt: now,
-      completedAt: null,
-    };
-  }
-
-  async finishGeneration(input: {
-    generationId: string;
-    status: Exclude<GenerationStatus, "running">;
-    content: string;
-    usage?: ModelUsage;
-    errorCode?: string;
-    addAssistantMessage?: boolean;
-    sessionId?: string;
-    reasoningContent?: string;
-    modelCallId?: string;
-  }): Promise<(StoredMessage & { role: "assistant" }) | null> {
-    const completedAt = new Date().toISOString();
-    return this.projectDatabase.transaction((database) => {
-      const row = database
-        .prepare("SELECT conversation_id FROM generations WHERE id = ?")
-        .get(input.generationId) as { conversation_id: string } | undefined;
-      if (row === undefined) {
-        throw new AppError("GENERATION_NOT_FOUND", "找不到生成记录。");
-      }
-
-      database
-        .prepare(
-          `UPDATE generations
-           SET status = ?, content = ?, usage_json = ?, error_code = ?, completed_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          input.status,
-          input.content,
-          input.usage === undefined ? null : JSON.stringify(input.usage),
-          input.errorCode ?? null,
-          completedAt,
-          input.generationId,
-        );
-
-      if (input.addAssistantMessage === true) {
-        const sessionId = input.sessionId;
-        if (sessionId === undefined) {
-          throw new AppError("VALIDATION_ERROR", "写入 Assistant 消息时必须指定 Session。");
-        }
-        const sequenceRow = database
-          .prepare(
-            "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence FROM messages WHERE conversation_id = ?",
-          )
-          .get(row.conversation_id) as { next_sequence: number };
-        const id = randomUUID();
-        const sequence = Number(sequenceRow.next_sequence);
-        const message = {
-          role: "assistant",
-          content: input.content,
-          ...(input.reasoningContent === undefined
-            ? {}
-            : { reasoningContent: input.reasoningContent }),
-        } as const satisfies ChatMessage;
-        const messageRowid = this.insertMessage(
-          database,
-          row.conversation_id,
-          message,
-          sequence,
-          completedAt,
-          id,
-          sessionId,
-          input.modelCallId ?? null,
-        );
-        database
-          .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
-          .run(completedAt, row.conversation_id);
-        return {
-          ...message,
-          messageRowid,
-          id,
-          conversationId: row.conversation_id,
-          sessionId,
-          modelCallId: input.modelCallId ?? null,
-          sequence,
-          createdAt: completedAt,
-        };
-      }
-      return null;
-    });
-  }
-
-  getGeneration(id: string): GenerationRecord | null {
-    const row = this.projectDatabase.read(
-      (database) =>
-        database.prepare("SELECT * FROM generations WHERE id = ?").get(id) as
-          GenerationRow | undefined,
-    );
-    return row === undefined ? null : mapGeneration(row);
-  }
-
-  getLastCompletedGeneration(): GenerationRecord | null {
-    const row = this.projectDatabase.read(
-      (database) =>
-        database
-          .prepare(
-            "SELECT * FROM generations WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1",
-          )
-          .get() as GenerationRow | undefined,
-    );
-    return row === undefined ? null : mapGeneration(row);
-  }
-
-  async markGenerationSaved(
-    generationId: string,
-    relativePath: string,
-    contentHash: string,
-  ): Promise<void> {
-    await this.projectDatabase.write((database) => {
-      const result = database
-        .prepare(
-          `UPDATE generations
-           SET saved_document_path = ?, saved_content_hash = ?
-           WHERE id = ? AND status = 'completed'`,
-        )
-        .run(relativePath, contentHash, generationId);
-      if (Number(result.changes) !== 1) {
-        throw new AppError("GENERATION_NOT_FOUND", "找不到可保存的完整生成结果。");
-      }
-    });
-  }
-
   private insertMessage(
     database: DatabaseSync,
     conversationId: string,
@@ -445,20 +276,5 @@ function mapMessage(row: MessageRow): StoredMessage {
       ? {}
       : { toolCalls: JSON.parse(row.tool_calls_json) as StoredMessage["toolCalls"] }),
     createdAt: row.created_at,
-  };
-}
-
-function mapGeneration(row: GenerationRow): GenerationRecord {
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    status: row.status,
-    content: row.content,
-    usage: row.usage_json === null ? null : (JSON.parse(row.usage_json) as ModelUsage),
-    errorCode: row.error_code,
-    savedDocumentPath: row.saved_document_path,
-    savedContentHash: row.saved_content_hash,
-    createdAt: row.created_at,
-    completedAt: row.completed_at,
   };
 }

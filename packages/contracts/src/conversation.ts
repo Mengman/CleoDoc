@@ -37,24 +37,8 @@ export interface ModelCallRecord {
   completedAt: string | null;
 }
 
-export type GenerationStatus = "running" | "completed" | "cancelled" | "failed";
-
-export interface GenerationRecord {
-  id: string;
+export interface ChatTurnResult {
   conversationId: string;
-  status: GenerationStatus;
-  content: string;
-  usage: ModelUsage | null;
-  errorCode: string | null;
-  savedDocumentPath: string | null;
-  savedContentHash: string | null;
-  createdAt: string;
-  completedAt: string | null;
-}
-
-export interface ChatGenerationResult {
-  conversationId: string;
-  generationId: string;
   content: string;
   usage: ModelUsage | null;
   userMessage: StoredMessage & { role: "user" };

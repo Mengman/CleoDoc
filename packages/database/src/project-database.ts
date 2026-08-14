@@ -6,6 +6,7 @@ import { AppError } from "../../contracts/src/index.js";
 import { CURRENT_SCHEMA_SQL, CURRENT_SCHEMA_VERSION } from "./current-schema.js";
 import {
   SCHEMA_V10_TO_V11_SQL,
+  SCHEMA_V11_TO_V12_SQL,
   SCHEMA_V8_TO_V9_SQL,
   SCHEMA_V9_TO_V10_SQL,
 } from "./schema-migrations.js";
@@ -130,6 +131,11 @@ export class ProjectDatabase {
   }
 
   private initializeSchema(): void {
+    // Create or migrate the project database to the single supported current schema.
+    // 1. Read the ordered migration history and reject unsupported future versions.
+    // 2. Apply every supported forward migration needed by complete v8-v11 databases.
+    // 3. Reject unversioned or obsolete databases that already contain application data.
+    // 4. Install the complete v12 baseline for a new empty project database.
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -152,22 +158,30 @@ export class ProjectDatabase {
       return;
     }
 
-    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 11) {
+    if (newestVersion === 8 && CURRENT_SCHEMA_VERSION === 12) {
       this.applyMigration(SCHEMA_V8_TO_V9_SQL, 9);
       this.applyV9ToV10Migration();
       this.applyV10ToV11Migration();
+      this.applyMigration(SCHEMA_V11_TO_V12_SQL, 12);
       return;
     }
 
-    if (newestVersion === 9 && CURRENT_SCHEMA_VERSION === 11) {
+    if (newestVersion === 9 && CURRENT_SCHEMA_VERSION === 12) {
       this.removeObsoleteSourceTagsColumn();
       this.applyV9ToV10Migration();
       this.applyV10ToV11Migration();
+      this.applyMigration(SCHEMA_V11_TO_V12_SQL, 12);
       return;
     }
 
-    if (newestVersion === 10 && CURRENT_SCHEMA_VERSION === 11) {
+    if (newestVersion === 10 && CURRENT_SCHEMA_VERSION === 12) {
       this.applyV10ToV11Migration();
+      this.applyMigration(SCHEMA_V11_TO_V12_SQL, 12);
+      return;
+    }
+
+    if (newestVersion === 11 && CURRENT_SCHEMA_VERSION === 12) {
+      this.applyMigration(SCHEMA_V11_TO_V12_SQL, 12);
       return;
     }
 

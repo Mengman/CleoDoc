@@ -60,7 +60,7 @@ flowchart TB
 | `packages/contracts` | 跨模块公共类型、Schema 和稳定错误码 |
 | `packages/config` | 默认 YAML、用户覆盖、应用状态和进程内配置快照 |
 | `packages/project` | 项目创建、路径边界、正文 CRUD 和原子文件写入 |
-| `packages/database` | Schema v11、连接、事务、Repository、FTS 和 Vector Adapter |
+| `packages/database` | Schema v12、连接、事务、Repository、FTS 和 Vector Adapter |
 | `packages/cdm` | 严格 XML、draft Schema、Node/Mark、Node ID、序列化和遍历 |
 | `packages/document-ingestion` | TXT/Markdown 到临时 CDM、来源范围、语言检测和 ChunkDraft |
 | `packages/knowledge` | 资料 CRUD、恢复、索引编排以及面向 Tool 的知识服务 |
@@ -137,7 +137,7 @@ Project 1 ── N Conversation 1 ── N Session 1 ── N Message
 4. Tool 参数完整拼接后进行 Schema 校验、审批和执行；Runtime 注入可信的 Project/Conversation 范围。
 5. Tool Result 使用统一 `{ tool, status, data | error }` 结构返回模型并写入 Message。
 6. 模型继续调用 Tool，或返回有效 Assistant Content 结束回合；默认最多 8 轮。
-7. 每次 Provider 请求独立记录 ModelCall；Generation 通过映射表关联多次调用。
+7. 每次 Provider 请求独立记录业务无关的 ModelCall；完整聊天内容与 Tool 协议只写入 Message，Assistant Message 可单向引用产生它的 ModelCall。
 
 当前 Tool 清单和 JSON 契约以 [Tool Call 设计](./TOOL_CALL_DESIGN.md)为准。
 
@@ -176,7 +176,7 @@ v0.1 在 Project、`material`、可选唯一 title 和当前 Source Revision 范
 
 - 每个 Project 一个数据库，不建立跨项目共享连接或默认检索。
 - 使用 Node.js `node:sqlite`、WAL、外键、`busy_timeout` 和单写入队列。
-- Schema v11 是新项目基线；支持完整 v8→v9→v10→v11、v9→v10→v11 与 v10→v11 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v11 的数据库。
+- Schema v12 是新项目基线；支持完整 v8→v9→v10→v11→v12、v9→v10→v11→v12、v10→v11→v12 与 v11→v12 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v12 的数据库。
 - Conversation Message 与资料 Chunk 分别使用 External Content FTS；Content 只保存在对应普通表中。
 - Message 不可修改；`message_rowid` 只供 SQLite/FTS 关联。
 - Embedding 模型以 `(model_name, revision)` 唯一；Chunk 向量以模型行和 Chunk 行联合主键保存。
@@ -283,8 +283,7 @@ CDM/TipTap、Draft、Git/语义 Diff、知识图、设定审批、阶段 Agent�
 2. 跨 Conversation 历史查询的范围、权限和权威等级。
 3. 多语言 Source 何时生成多套 Embedding，以及不同语言结果如何融合。
 4. 资料更新后 Chunk ID 的继承和既有引用迁移。
-5. Generation 与 Message 的模型正文是否长期同时保留。
-6. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
-7. v0.3 的 CDM v1、作品迁移、Draft、版本和阶段 Agent 最终边界。
+5. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
+6. v0.3 的 CDM v1、作品迁移、Draft、版本和阶段 Agent 最终边界。
 
 这些问题保留在对应领域文档中；本文件只记录它们对系统边界的影响，不提前给出实现。

@@ -1,5 +1,5 @@
 import type {
-  ChatGenerationResult,
+  ChatTurnResult,
   ConversationRecord,
   ConversationSummary,
   ConversationSession,
@@ -13,7 +13,6 @@ import type {
   ModelToolDefinition,
   ModelUsage,
   ProjectInstructionRevision,
-  SavedDocument,
   StoredMessage,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
@@ -135,7 +134,13 @@ export class ChatService {
     return service;
   }
 
-  async send(input: SendMessageInput): Promise<ChatGenerationResult> {
+  async send(input: SendMessageInput): Promise<ChatTurnResult> {
+    // Execute one persisted user turn against the current provider and Tool runtime.
+    // 1. Resolve the conversation, Session, provider execution, and context budget.
+    // 2. Persist the user message before starting any remote model request.
+    // 3. Record each model request independently and persist complete Tool protocol messages.
+    // 4. Persist the final Assistant message and update the active Session budget.
+    // 5. Return the completed visible turn or rethrow a scoped application error.
     const execution = await this.requireProvider().createExecution();
     const contextBudgetPolicy = this.contextBudgetPolicyFor(execution);
     const conversation =
@@ -165,8 +170,6 @@ export class ChatService {
       { role: "user", content: input.prompt },
       session.id,
     );
-    const generation = await this.repository.beginGeneration(conversation.id);
-    let streamedContent = "";
     let usage: ModelUsage | undefined;
     const tools = this.getToolRuntime(conversation);
 
@@ -204,9 +207,7 @@ export class ChatService {
         const estimatedContextTokens = estimateTokens(
           JSON.stringify(modelRequestForBudget(modelRequest)),
         );
-        const modelCall = await this.modelCalls.beginGenerationCall({
-          generationId: generation.id,
-          ordinal: round + 1,
+        const modelCall = await this.modelCalls.beginCall({
           providerId: execution.providerId,
           model: execution.model,
           requestOptions: describeModelRequestWithExecution(modelRequest, execution),
@@ -218,7 +219,6 @@ export class ChatService {
               roundReasoning += event.text;
             } else if (event.type === "text-delta") {
               roundContent += event.text;
-              streamedContent += event.text;
             } else if (event.type === "usage") {
               usage = mergeUsage(usage, event.usage);
               roundUsage = mergeUsage(roundUsage, event.usage);
@@ -331,19 +331,16 @@ export class ChatService {
           continue;
         }
 
-        const assistantMessage = await this.repository.finishGeneration({
-          generationId: generation.id,
-          status: "completed",
-          content: roundContent,
-          ...(usage === undefined ? {} : { usage }),
-          addAssistantMessage: true,
-          sessionId: session.id,
-          ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
-          modelCallId: modelCall.id,
-        });
-        if (assistantMessage === null) {
-          throw new AppError("DATABASE_ERROR", "生成完成后未能写入 Assistant 消息。");
-        }
+        const assistantMessage = await this.repository.addMessage(
+          conversation.id,
+          {
+            role: "assistant",
+            content: roundContent,
+            ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
+          },
+          session.id,
+          modelCall.id,
+        );
         const status = this.getContextStatusWithPolicy(
           conversation,
           contextBudgetPolicy,
@@ -357,7 +354,6 @@ export class ChatService {
         );
         return {
           conversationId: conversation.id,
-          generationId: generation.id,
           content: roundContent,
           usage: usage ?? null,
           userMessage,
@@ -370,19 +366,11 @@ export class ChatService {
       );
     } catch (error) {
       const appError = asAppError(error);
-      await this.repository.finishGeneration({
-        generationId: generation.id,
-        status: appError.code === "GENERATION_CANCELLED" ? "cancelled" : "failed",
-        content: streamedContent,
-        ...(usage === undefined ? {} : { usage }),
-        errorCode: appError.code,
-      });
       throw new AppError(appError.code, appError.message, {
         cause: appError,
         details: {
           ...appError.details,
           conversationId: conversation.id,
-          generationId: generation.id,
         },
       });
     }
@@ -510,22 +498,6 @@ export class ChatService {
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
       ...(input.onDebugEvent === undefined ? {} : { onDebugEvent: input.onDebugEvent }),
     });
-  }
-
-  async saveGeneration(
-    relativePath: string,
-    options: { generationId?: string; overwrite?: boolean } = {},
-  ): Promise<SavedDocument> {
-    const generation =
-      options.generationId === undefined
-        ? this.repository.getLastCompletedGeneration()
-        : this.repository.getGeneration(options.generationId);
-    if (generation === null || generation.status !== "completed") {
-      throw new AppError("GENERATION_NOT_FOUND", "没有可保存的完整生成结果。");
-    }
-    const saved = await this.documents.save(relativePath, generation.content, options.overwrite);
-    await this.repository.markGenerationSaved(generation.id, saved.relativePath, saved.contentHash);
-    return saved;
   }
 
   async readDocumentIntoConversation(conversationId: string, idOrPath: string): Promise<void> {

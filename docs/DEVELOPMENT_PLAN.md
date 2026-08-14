@@ -17,7 +17,7 @@ v0.2 不改变作品事实格式、知识语义、Agent 创作流程或版本模
 | 能力 | 状态 | v0.2 UI 化范围 |
 | --- | --- | --- |
 | CLI、项目与安全文件读写 | 完成 | 项目创建、打开、状态、文档操作和审批界面 |
-| SQLite | 完成 | 复用 Schema v11、健康状态和项目生命周期 |
+| SQLite | 完成 | 复用 Schema v12、健康状态和项目生命周期 |
 | LLM Provider | 完成 | OpenAI-compatible 配置和连接测试 |
 | Conversation / Session | 完成 | 对话创建、恢复、压缩、重试和历史回查界面 |
 | Reasoning 与流式输出 | 完成 | 在聊天界面区分展示并支持取消 |

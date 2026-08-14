@@ -133,13 +133,7 @@ npm run cleo -- provider test openai-compatible
 npm run cleo -- chat
 ```
 
-对话完成后输入：
-
-```text
-/save manuscript/chapter-001.md
-```
-
-也可以直接委托主笔整理并保存，例如：
+需要将内容写入作品时，可以直接委托主笔整理并保存，例如：
 
 ```text
 请总结我们刚才确定的人物设定，并保存到 manuscript/character-notes.md
@@ -166,13 +160,11 @@ npm run cleo -- conversation list
 npm run cleo -- conversation show <conversation-id>
 ```
 
-也可以执行可脚本化的单轮生成和显式保存：
+也可以执行可脚本化的单轮生成：
 
 ```powershell
-npm run cleo -- chat --prompt "写一个约 800 字的悬疑小说开场" --save manuscript/chapter-001.md
+npm run cleo -- chat --prompt "写一个约 800 字的悬疑小说开场"
 ```
-
-若目标文档已经存在，单轮模式必须显式增加 `--overwrite`；交互模式会再次询问确认。
 
 ## 文档命令
 
@@ -180,7 +172,6 @@ npm run cleo -- chat --prompt "写一个约 800 字的悬疑小说开场" --save
 npm run cleo -- document list
 npm run cleo -- document show manuscript/chapter-001.md
 npm run cleo -- document create manuscript/notes.md --content "# 章节笔记"
-npm run cleo -- document save-last manuscript/chapter-002.md
 npm run cleo -- document delete manuscript/notes.md
 ```
 
@@ -227,7 +218,7 @@ Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需�
 ## 安全约束
 
 - API Key 仅从环境变量读取，不写入配置、项目、日志或 Git。
-- 生成结果只有在用户执行保存命令，或在交互模式明确批准 LLM 的 `write_project_document` Tool Call 后，才写入正文。
+- 模型生成结果只有在交互模式明确批准 LLM 的 `write_project_document` Tool Call 后，才写入正文。
 - 所有正文路径限定在项目的 `manuscript/` 内，并拒绝路径穿越和符号链接。
 - LLM 只能通过受控工具列出、分段读取和写入当前项目文档；工具参数经过 Schema 校验，循环轮数使用软件配置。
 - 文档使用临时文件、同步和原子替换保存；SQLite 失败不会覆盖已保存 Markdown。
