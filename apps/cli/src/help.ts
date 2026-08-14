@@ -23,9 +23,9 @@ export const helpText = `CleoDoc v0.1 CLI
     --prompt <text>       单轮非交互调用
 
   cleo document list [--project <directory>]
-  cleo document show <document-id|path> [--project <directory>]
+  cleo document show <path> [--project <directory>]
   cleo document create <path> [--content <text>] [--project <directory>]
-  cleo document delete <document-id|path> [--project <directory>]
+  cleo document delete <path> [--project <directory>]
 
   cleo material add <file> [--title <标题>]
     [--encoding <utf-8|gb2312|gbk|gb18030>]

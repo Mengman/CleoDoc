@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -45,9 +45,10 @@ describe("ProjectService and DocumentService", () => {
     const documents = new DocumentService(project.root);
 
     const saved = await documents.save("manuscript/chapter-001.md", "# 第一章\n\n雨夜。\n");
-    const read = await documents.read(saved.id);
+    const read = await documents.read(saved.relativePath);
 
     expect(saved.created).toBe(true);
+    expect(saved).not.toHaveProperty("id");
     expect(read.content).toContain("雨夜");
     expect(await documents.list()).toHaveLength(1);
 
@@ -61,10 +62,49 @@ describe("ProjectService and DocumentService", () => {
       true,
     );
     expect(overwritten.created).toBe(false);
-    expect((await documents.read(overwritten.id)).content).toContain("天亮了");
+    expect((await documents.read(overwritten.relativePath)).content).toContain("天亮了");
 
-    await documents.delete(overwritten.id);
+    await documents.delete(overwritten.relativePath);
     expect(await documents.list()).toHaveLength(0);
+  });
+
+  it("lists and reads nested Markdown and plain-text manuscripts without making TXT writable", async () => {
+    // Verify the desktop read model without broadening the existing Markdown mutation contract.
+    // 1. Create nested Markdown, TXT, and unsupported manuscript files.
+    // 2. Confirm the read-only list and reader expose only the two supported formats.
+    // 3. Confirm the original document API still treats TXT as read-only external content.
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const nestedDirectory = path.join(project.root, "manuscript", "volume-01");
+    await mkdir(nestedDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(path.join(project.root, "manuscript", "chapter-001.md"), "# 第一章\n\n潮声。\n"),
+      writeFile(path.join(nestedDirectory, "chapter-002.txt"), "第二章\n灯塔亮了。\n"),
+      writeFile(path.join(nestedDirectory, "notes.json"), '{"ignored":true}\n'),
+    ]);
+
+    const readable = await new DocumentService(project.root).listReadableDocuments();
+    expect(readable.map((document) => document.relativePath)).toEqual([
+      "manuscript/chapter-001.md",
+      "manuscript/volume-01/chapter-002.txt",
+    ]);
+    expect(
+      (await new DocumentService(project.root).list()).map((document) => document.relativePath),
+    ).toEqual(["manuscript/chapter-001.md"]);
+
+    const documents = new DocumentService(project.root);
+    expect((await documents.readReadableDocument("chapter-001.md")).content).toContain("潮声");
+    expect((await documents.readReadableDocument("volume-01/chapter-002.txt")).content).toContain(
+      "灯塔亮了",
+    );
+    await expect(documents.read("volume-01/chapter-002.txt")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    await expect(documents.save("volume-01/new.txt", "不可写入")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
   });
 
   it("rejects paths outside manuscript and project", async () => {
@@ -76,6 +116,7 @@ describe("ProjectService and DocumentService", () => {
 
     for (const unsafePath of ["../escape.md", "manuscript/../../escape.md", "C:\\escape.md"]) {
       await expect(documents.save(unsafePath, "unsafe")).rejects.toBeInstanceOf(AppError);
+      await expect(documents.readReadableDocument(unsafePath)).rejects.toBeInstanceOf(AppError);
     }
   });
 });

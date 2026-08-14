@@ -500,8 +500,8 @@ export class ChatService {
     });
   }
 
-  async readDocumentIntoConversation(conversationId: string, idOrPath: string): Promise<void> {
-    const document = await this.documents.read(idOrPath);
+  async readDocumentIntoConversation(conversationId: string, relativePath: string): Promise<void> {
+    const document = await this.documents.read(relativePath);
     const session = this.sessions.getCurrentSession(conversationId);
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可写入上下文。");

@@ -45,5 +45,5 @@ export function installInterruptHandler(
 
 export function printSaved(context: CliCommandContext, saved: SavedDocument): void {
   context.output.write(`${saved.created ? "已创建" : "已覆盖"}：${saved.relativePath}\n`);
-  context.output.write(`文档 ID：${saved.id}\n内容哈希：${saved.contentHash}\n`);
+  context.output.write(`内容哈希：${saved.contentHash}\n`);
 }

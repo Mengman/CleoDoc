@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -47,6 +47,37 @@ describe("DesktopProjectRuntime", () => {
       },
     });
     expect(JSON.stringify(state)).not.toContain(project.root);
+    await fixture.runtime.dispose();
+  });
+
+  it("lists and reads Markdown and TXT only from the active project", async () => {
+    // Verify that desktop manuscript reads remain bound to the current project session.
+    // 1. Open a project containing Markdown, TXT, and unsupported manuscript files.
+    // 2. List and read the two supported formats through the desktop runtime.
+    // 3. Switch projects and confirm the same path cannot read the previous project.
+    const fixture = await createRuntimeFixture();
+    const first = await fixture.projectService.create(path.join(fixture.root, "works.cleo"));
+    await Promise.all([
+      writeFile(path.join(first.root, "manuscript", "chapter-001.md"), "# 第一章\n"),
+      writeFile(path.join(first.root, "manuscript", "chapter-002.txt"), "第二章\n"),
+      writeFile(path.join(first.root, "manuscript", "notes.json"), '{"ignored":true}\n'),
+    ]);
+    await fixture.runtime.open(first.root);
+
+    const documents = await fixture.runtime.listManuscriptDocuments();
+    expect(documents.map((document) => document.relativePath)).toEqual([
+      "manuscript/chapter-001.md",
+      "manuscript/chapter-002.txt",
+    ]);
+    expect(
+      (await fixture.runtime.readManuscriptDocument("manuscript/chapter-002.txt")).content,
+    ).toBe("第二章\n");
+
+    const second = await fixture.projectService.create(path.join(fixture.root, "empty.cleo"));
+    await fixture.runtime.open(second.root);
+    await expect(
+      fixture.runtime.readManuscriptDocument("manuscript/chapter-002.txt"),
+    ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
     await fixture.runtime.dispose();
   });
 

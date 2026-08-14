@@ -16,6 +16,7 @@ export interface LibrarySidebarProps {
   readonly itemCount: number;
   readonly emptyIcon: ReactNode;
   readonly projectState: DesktopProjectState;
+  readonly content?: ReactNode;
 }
 
 export function LibrarySidebar({
@@ -26,10 +27,12 @@ export function LibrarySidebar({
   itemCount,
   emptyIcon,
   projectState,
+  content,
 }: LibrarySidebarProps): ReactNode {
   // Render the common list shell used by the works and materials sidebars.
   // 1. Show the current feature heading, search field, and active project summary.
-  // 2. Reserve the list area for the feature-specific data connected in later stages.
+  // 2. Render feature-owned list content without moving its data into the shared shell.
+  // 3. Keep the existing empty state for features that have not connected their list yet.
   return (
     <aside className="library-panel">
       <div className="panel-heading">
@@ -63,11 +66,13 @@ export function LibrarySidebar({
         <small>{itemCount} 项</small>
       </div>
 
-      <div className="panel-empty">
-        <div className="empty-mini-icon">{emptyIcon}</div>
-        <strong>暂无内容</strong>
-        <span>项目打开后将在这里显示</span>
-      </div>
+      {content ?? (
+        <div className="panel-empty">
+          <div className="empty-mini-icon">{emptyIcon}</div>
+          <strong>暂无内容</strong>
+          <span>项目打开后将在这里显示</span>
+        </div>
+      )}
     </aside>
   );
 }

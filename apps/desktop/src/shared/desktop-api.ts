@@ -7,6 +7,8 @@ export const desktopChannels = {
   chooseAndOpenProject: "desktop:choose-and-open-project",
   closeProject: "desktop:close-project",
   projectStateChanged: "desktop:project-state-changed",
+  listManuscriptDocuments: "desktop:list-manuscript-documents",
+  readManuscriptDocument: "desktop:read-manuscript-document",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
   listConversations: "desktop:list-conversations",
@@ -81,6 +83,32 @@ export const desktopProjectOperationResultSchema = z.discriminatedUnion("outcome
       error: desktopOperationErrorSchema,
     })
     .strict(),
+]);
+
+export const manuscriptPathSchema = z
+  .string()
+  .regex(/^manuscript\/(?:[^/\\]+\/)*[^/\\]+\.(?:md|txt)$/i)
+  .refine((value) => !value.split("/").some((segment) => segment === "." || segment === ".."));
+
+export const manuscriptListResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      documents: z.array(manuscriptPathSchema),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
+export const manuscriptReadResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      relativePath: manuscriptPathSchema,
+      content: z.string(),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
 export const desktopLlmApiSettingsSchema = z
@@ -205,6 +233,8 @@ export const sendDesktopChatMessageResultSchema = z.discriminatedUnion("outcome"
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
+export type ManuscriptListResult = z.infer<typeof manuscriptListResultSchema>;
+export type ManuscriptReadResult = z.infer<typeof manuscriptReadResultSchema>;
 export type ShowWindowMenuInput = z.infer<typeof showWindowMenuInputSchema>;
 export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
@@ -230,6 +260,8 @@ export interface CleoDocDesktopApi {
   readonly chooseAndOpenProject: () => Promise<DesktopProjectOperationResult>;
   readonly closeProject: () => Promise<DesktopProjectOperationResult>;
   readonly onProjectStateChanged: (listener: (state: DesktopProjectState) => void) => () => void;
+  readonly listManuscriptDocuments: () => Promise<ManuscriptListResult>;
+  readonly readManuscriptDocument: (relativePath: string) => Promise<ManuscriptReadResult>;
   readonly getLlmApiSettings: () => Promise<DesktopLlmApiSettings>;
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,

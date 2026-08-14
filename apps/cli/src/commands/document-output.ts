@@ -7,5 +7,5 @@ export async function printDocuments(
 ): Promise<void> {
   const list = await documents.list();
   if (list.length === 0) context.output.write("尚无正文文档。\n");
-  for (const document of list) context.output.write(`${document.id}\t${document.relativePath}\n`);
+  for (const document of list) context.output.write(`${document.relativePath}\n`);
 }

@@ -7,6 +7,9 @@ import {
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
   desktopChatMessageEventSchema,
+  manuscriptListResultSchema,
+  manuscriptPathSchema,
+  manuscriptReadResultSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
@@ -88,6 +91,49 @@ describe("desktopProjectStateSchema", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("desktop manuscript document schemas", () => {
+  it("exposes only portable read-only manuscript data", () => {
+    // Verify the complete renderer contract for listing and reading manuscript files.
+    // 1. Accept a portable Markdown/TXT path and a flat plain-text response.
+    // 2. Reject document wrappers and generated document identifiers.
+    // 3. Reject absolute, traversing, or unsupported manuscript paths in responses.
+    const relativePath = "manuscript/第一卷/第一章.md";
+    expect(
+      manuscriptListResultSchema.parse({
+        outcome: "success",
+        documents: [relativePath],
+      }),
+    ).toMatchObject({ outcome: "success", documents: [relativePath] });
+    expect(
+      manuscriptReadResultSchema.parse({
+        outcome: "success",
+        relativePath,
+        content: "# 第一章\n",
+      }),
+    ).toMatchObject({ outcome: "success", content: "# 第一章\n" });
+
+    expect(() =>
+      manuscriptListResultSchema.parse({
+        outcome: "success",
+        documents: [{ relativePath, id: "doc_0123456789abcdef" }],
+      }),
+    ).toThrow();
+    expect(() => manuscriptPathSchema.parse("doc_0123456789abcdef")).toThrow();
+    for (const relativePath of [
+      "D:/private/第一章.md",
+      "manuscript/../第一章.md",
+      "manuscript/第一章.json",
+    ]) {
+      expect(() =>
+        manuscriptListResultSchema.parse({
+          outcome: "success",
+          documents: [relativePath],
+        }),
+      ).toThrow();
+    }
   });
 });
 

@@ -237,6 +237,7 @@ flowchart TB
 - v0.2 继续以当前 Markdown/JSON 作品和 TXT/Markdown 资料作为事实源，不执行 CDM 迁移。
 - Desktop 为 Markdown 提供安全只读渲染，为 TXT 提供保留换行的只读展示。
 - 作品服务补充 `.txt` 列出与读取，但不增加 TXT 编辑、富文本编辑、自动保存、Draft 或版本语义。
+- Desktop Runtime 只从当前活动项目列出和读取作品；Renderer 通过 Typed IPC 使用列表返回的项目内相对路径读取正文，不创建额外文档 ID，也不暴露绝对路径、内容哈希或文件系统访问能力。
 - Markdown 渲染结果是不可信内容，不能执行脚本、获得 Node 权限或绕过外部链接策略。
 
 ### 8.3 v0.1 能力 UI 化

@@ -42,6 +42,7 @@ export interface DesktopProjectChatContext {
 interface ActiveProject {
   readonly project: OpenProject;
   readonly database: ProjectDatabase;
+  readonly documents: DocumentService;
   readonly documentCount: number;
   readonly controller: AbortController;
   readonly tasks: Map<string, Promise<unknown>>;
@@ -174,6 +175,14 @@ export class DesktopProjectRuntime {
     return this.requireActiveProject().conversations.getRecentHistory(conversationId, 20);
   }
 
+  listManuscriptDocuments() {
+    return this.requireActiveProject().documents.listReadableDocuments();
+  }
+
+  readManuscriptDocument(relativePath: string) {
+    return this.requireActiveProject().documents.readReadableDocument(relativePath);
+  }
+
   runChatTask<T>(operation: (context: DesktopProjectChatContext) => Promise<T>): Promise<T> {
     // Run one chat use case against services owned by the current project session.
     const active = this.requireActiveProject();
@@ -203,7 +212,8 @@ export class DesktopProjectRuntime {
       if (!database.quickCheck()) {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");
       }
-      const documentCount = (await new DocumentService(project.root).list()).length;
+      const documents = new DocumentService(project.root);
+      const documentCount = (await documents.list()).length;
       const chat = await ChatService.usingDatabase(
         project.root,
         database,
@@ -213,6 +223,7 @@ export class DesktopProjectRuntime {
       const activeProject: ActiveProject = {
         project,
         database,
+        documents,
         documentCount,
         controller: new AbortController(),
         tasks: new Map(),

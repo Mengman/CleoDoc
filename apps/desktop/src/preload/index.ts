@@ -8,6 +8,9 @@ import {
   desktopConversationHistoryResultSchema,
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
+  manuscriptListResultSchema,
+  manuscriptPathSchema,
+  manuscriptReadResultSchema,
   sendDesktopChatMessageResultSchema,
   desktopProjectOperationResultSchema,
   desktopProjectStateSchema,
@@ -46,6 +49,17 @@ const desktopApi: CleoDocDesktopApi = {
     return () =>
       ipcRenderer.removeListener(desktopChannels.projectStateChanged, handleStateChanged);
   },
+  listManuscriptDocuments: async () =>
+    manuscriptListResultSchema.parse(
+      await ipcRenderer.invoke(desktopChannels.listManuscriptDocuments),
+    ),
+  readManuscriptDocument: async (relativePath) =>
+    manuscriptReadResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.readManuscriptDocument,
+        manuscriptPathSchema.parse(relativePath),
+      ),
+    ),
   getLlmApiSettings: async () =>
     desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),
   saveLlmApiSettings: async (input) =>

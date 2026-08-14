@@ -277,6 +277,48 @@ svg {
 .panel-empty span {
   font-size: 10px;
 }
+.manuscript-list {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.manuscript-list-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #a7b1c2;
+  background: #111b29;
+  font-size: 11px;
+}
+.manuscript-list-item svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: #8f82e8;
+}
+.manuscript-list-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.works-list-state {
+  padding: 24px 12px;
+  color: #718096;
+  text-align: center;
+  font-size: 10px;
+}
+.works-list-state.error {
+  color: #d28a8a;
+}
 .reader-panel {
   grid-column: 2;
   grid-row: 1;

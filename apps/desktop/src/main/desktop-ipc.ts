@@ -4,6 +4,9 @@ import {
   desktopChannels,
   desktopConversationHistoryResultSchema,
   desktopConversationListResultSchema,
+  manuscriptListResultSchema,
+  manuscriptPathSchema,
+  manuscriptReadResultSchema,
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
@@ -132,6 +135,42 @@ export function registerDesktopIpc(
       return desktopProjectOperationResultSchema.parse({
         outcome: "error",
         state: runtime.getState(),
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.listManuscriptDocuments, async (event) => {
+    // Return only portable identities for readable documents in the current project.
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const documents = await runtime.listManuscriptDocuments();
+      return manuscriptListResultSchema.parse({
+        outcome: "success",
+        documents: documents.map(({ relativePath }) => relativePath),
+      });
+    } catch (error) {
+      return manuscriptListResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.readManuscriptDocument, async (event, rawInput: unknown) => {
+    // Read one listed manuscript through the current project runtime and return no private metadata.
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const relativePath = manuscriptPathSchema.parse(rawInput);
+      const { summary, content } = await runtime.readManuscriptDocument(relativePath);
+      return manuscriptReadResultSchema.parse({
+        outcome: "success",
+        relativePath: summary.relativePath,
+        content,
+      });
+    } catch (error) {
+      return manuscriptReadResultSchema.parse({
+        outcome: "error",
         error: toDesktopOperationError(error),
       });
     }

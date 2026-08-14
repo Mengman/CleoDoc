@@ -26,16 +26,16 @@ export async function runDocumentCommand(
       const list = await documents.list();
       if (list.length === 0) context.output.write("尚无正文文档。\n");
       for (const document of list) {
-        context.output.write(`${document.id}\t${document.relativePath}\t${document.size} bytes\n`);
+        context.output.write(`${document.relativePath}\t${document.size} bytes\n`);
       }
       return;
     }
     case "show": {
       if (reference === undefined || parsed.positionals.length !== 2) {
-        throw new AppError("VALIDATION_ERROR", "用法：cleo document show <document-id|path>");
+        throw new AppError("VALIDATION_ERROR", "用法：cleo document show <path>");
       }
       const document = await documents.read(reference);
-      context.output.write(`--- ${document.summary.relativePath} (${document.summary.id}) ---\n`);
+      context.output.write(`--- ${document.summary.relativePath} ---\n`);
       context.output.write(document.content);
       if (!document.content.endsWith("\n")) context.output.write("\n");
       return;
@@ -52,7 +52,7 @@ export async function runDocumentCommand(
     }
     case "delete": {
       if (reference === undefined || parsed.positionals.length !== 2) {
-        throw new AppError("VALIDATION_ERROR", "用法：cleo document delete <document-id|path>");
+        throw new AppError("VALIDATION_ERROR", "用法：cleo document delete <path>");
       }
       const deleted = await documents.delete(reference);
       context.output.write(`已删除：${deleted.relativePath}\n`);
