@@ -8,6 +8,7 @@ export const desktopChannels = {
   closeProject: "desktop:close-project",
   projectStateChanged: "desktop:project-state-changed",
   listManuscriptDocuments: "desktop:list-manuscript-documents",
+  listMaterials: "desktop:list-materials",
   readManuscriptDocument: "desktop:read-manuscript-document",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
@@ -106,6 +107,16 @@ export const manuscriptReadResultSchema = z.discriminatedUnion("outcome", [
       outcome: z.literal("success"),
       relativePath: manuscriptPathSchema,
       content: z.string(),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
+export const materialListResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      materials: z.array(z.string().trim().min(1)),
     })
     .strict(),
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
@@ -235,6 +246,7 @@ export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
 export type ManuscriptListResult = z.infer<typeof manuscriptListResultSchema>;
 export type ManuscriptReadResult = z.infer<typeof manuscriptReadResultSchema>;
+export type MaterialListResult = z.infer<typeof materialListResultSchema>;
 export type ShowWindowMenuInput = z.infer<typeof showWindowMenuInputSchema>;
 export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
@@ -262,6 +274,7 @@ export interface CleoDocDesktopApi {
   readonly onProjectStateChanged: (listener: (state: DesktopProjectState) => void) => () => void;
   readonly listManuscriptDocuments: () => Promise<ManuscriptListResult>;
   readonly readManuscriptDocument: (relativePath: string) => Promise<ManuscriptReadResult>;
+  readonly listMaterials: () => Promise<MaterialListResult>;
   readonly getLlmApiSettings: () => Promise<DesktopLlmApiSettings>;
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,

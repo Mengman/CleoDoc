@@ -5,6 +5,7 @@ import {
   desktopConversationHistoryResultSchema,
   desktopConversationListResultSchema,
   manuscriptListResultSchema,
+  materialListResultSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   desktopLlmApiSettingsResultSchema,
@@ -170,6 +171,23 @@ export function registerDesktopIpc(
       });
     } catch (error) {
       return manuscriptReadResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.listMaterials, async (event) => {
+    // Return only imported material titles from the active project.
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const materials = await runtime.listMaterials();
+      return materialListResultSchema.parse({
+        outcome: "success",
+        materials: materials.map(({ title }) => title),
+      });
+    } catch (error) {
+      return materialListResultSchema.parse({
         outcome: "error",
         error: toDesktopOperationError(error),
       });

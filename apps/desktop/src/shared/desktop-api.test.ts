@@ -10,6 +10,7 @@ import {
   manuscriptListResultSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
+  materialListResultSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
@@ -134,6 +135,24 @@ describe("desktop manuscript document schemas", () => {
         }),
       ).toThrow();
     }
+  });
+});
+
+describe("desktop material list schema", () => {
+  it("exposes imported material titles without internal metadata", () => {
+    // Verify the renderer receives only the titles required by the current list UI.
+    expect(
+      materialListResultSchema.parse({
+        outcome: "success",
+        materials: ["人物名册", "港口资料"],
+      }),
+    ).toEqual({ outcome: "success", materials: ["人物名册", "港口资料"] });
+    expect(() =>
+      materialListResultSchema.parse({
+        outcome: "success",
+        materials: [{ title: "人物名册", relativePath: "materials/private.json" }],
+      }),
+    ).toThrow();
   });
 });
 

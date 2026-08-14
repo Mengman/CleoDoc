@@ -41,7 +41,7 @@ export function CreativeWorkspace({
           onOpenDocument={onOpenManuscript}
         />
       ) : (
-        <MaterialsSidebar />
+        <MaterialsSidebar projectState={projectState} />
       )}
       <DocumentWorkspace
         tabs={manuscriptTabs}

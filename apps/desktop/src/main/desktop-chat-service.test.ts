@@ -14,7 +14,11 @@ import type {
   ProviderHealth,
 } from "../../../../packages/contracts/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
-import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import {
+  TEST_CHAT_OPTIONS,
+  TEST_DATABASE_OPTIONS,
+  TEST_MATERIAL_OPTIONS,
+} from "../../../../test/runtime-options.js";
 import { MutableModelMessageSender } from "../../../../test/model-sender.js";
 import type { DesktopChatMessageEvent } from "../shared/desktop-api.js";
 import { DesktopChatService } from "./desktop-chat-service.js";
@@ -109,6 +113,7 @@ async function createFixture(): Promise<{
     busyTimeoutMs: TEST_DATABASE_OPTIONS.busyTimeoutMs,
     appStateService,
     chat: TEST_CHAT_OPTIONS,
+    maxMaterialImportBytes: TEST_MATERIAL_OPTIONS.maxImportBytes,
     provider,
   });
   const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

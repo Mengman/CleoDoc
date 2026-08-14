@@ -5,9 +5,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
+import { MaterialService } from "../../../../packages/knowledge/src/index.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
 import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
-import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../../test/runtime-options.js";
+import {
+  TEST_CHAT_OPTIONS,
+  TEST_DATABASE_OPTIONS,
+  TEST_MATERIAL_OPTIONS,
+} from "../../../../test/runtime-options.js";
 import { senderForProvider } from "../../../../test/model-sender.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
 
@@ -78,6 +83,33 @@ describe("DesktopProjectRuntime", () => {
     await expect(
       fixture.runtime.readManuscriptDocument("manuscript/chapter-002.txt"),
     ).rejects.toMatchObject({ code: "DOCUMENT_NOT_FOUND" });
+    await fixture.runtime.dispose();
+  });
+
+  it("lists imported materials from the active project", async () => {
+    // Verify the desktop material list remains bound to the active project.
+    // 1. Import two materials through the existing material application service.
+    // 2. Load their titles through the desktop runtime.
+    // 3. Switch projects and confirm the previous titles are no longer visible.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "materials.cleo"));
+    const materials = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    await materials.addText("灯塔守卫名册", { title: "人物名册" });
+    await materials.addText("潮汐与港口记录", { title: "港口资料", format: "markdown" });
+    await materials.close();
+
+    await fixture.runtime.open(project.root);
+
+    expect((await fixture.runtime.listMaterials()).map(({ title }) => title).sort()).toEqual([
+      "人物名册",
+      "港口资料",
+    ]);
+
+    const second = await fixture.projectService.create(
+      path.join(fixture.root, "empty-materials.cleo"),
+    );
+    await fixture.runtime.open(second.root);
+    await expect(fixture.runtime.listMaterials()).resolves.toEqual([]);
     await fixture.runtime.dispose();
   });
 
@@ -196,6 +228,7 @@ async function createRuntimeFixture(): Promise<{
         context: TEST_CHAT_OPTIONS.context,
         compaction: TEST_CHAT_OPTIONS.compaction,
       },
+      maxMaterialImportBytes: TEST_MATERIAL_OPTIONS.maxImportBytes,
       provider: senderForProvider(new FakeModelProvider("ok")),
     }),
   };

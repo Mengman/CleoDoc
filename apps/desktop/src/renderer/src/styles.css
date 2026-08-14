@@ -218,6 +218,32 @@ svg {
   overflow: auto;
   list-style: none;
 }
+.material-list {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.material-list-item {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #a7b1c2;
+  background: #111b29;
+  font-size: 11px;
+}
+.material-list-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .manuscript-list-item {
   display: flex;
   align-items: center;

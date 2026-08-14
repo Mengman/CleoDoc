@@ -9,6 +9,7 @@ import {
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
+  materialListResultSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   sendDesktopChatMessageResultSchema,
@@ -60,6 +61,8 @@ const desktopApi: CleoDocDesktopApi = {
         manuscriptPathSchema.parse(relativePath),
       ),
     ),
+  listMaterials: async () =>
+    materialListResultSchema.parse(await ipcRenderer.invoke(desktopChannels.listMaterials)),
   getLlmApiSettings: async () =>
     desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),
   saveLlmApiSettings: async (input) =>

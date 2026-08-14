@@ -238,6 +238,7 @@ flowchart TB
 - Desktop 当前对 Markdown 和 TXT 都提供保留换行的纯文本只读展示，不解析 Markdown 标记；后续如引入 Markdown 渲染，仍必须沿用不可信内容安全边界。
 - 作品服务补充 `.txt` 列出与读取，但不增加 TXT 编辑、富文本编辑、自动保存、Draft 或版本语义。
 - Desktop Runtime 只从当前活动项目列出和读取作品；Renderer 通过 Typed IPC 使用列表返回的项目内相对路径读取正文，不创建额外文档 ID，也不暴露绝对路径、内容哈希或文件系统访问能力。
+- Desktop Runtime 通过复用项目数据库连接的 `MaterialService` 加载当前项目资料；现阶段 Typed IPC 只向 Renderer 返回资料标题列表，不暴露资料路径、索引元数据或读取能力。
 - Renderer 以项目内相对路径标识已打开的作品标签页；标签页在作品、资料和设置界面切换期间保留，但活动项目变化时必须整体清空，异步读取旧项目返回的结果不得写入新项目界面。
 - Markdown 原文是不可信内容，不能执行其中的脚本、获得 Node 权限或绕过外部链接策略。
 

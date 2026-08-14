@@ -10,6 +10,7 @@ export default defineConfig({
     build: {
       outDir: "out/main",
       rollupOptions: {
+        external: ["node-llama-cpp", /^@node-llama-cpp\//],
         input: fromRoot("./apps/desktop/src/main/index.ts"),
         output: { entryFileNames: "index.js" },
       },

@@ -97,6 +97,7 @@ async function startDesktop(): Promise<void> {
   const projectRuntime = new DesktopProjectRuntime({
     busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
     chat: createDesktopChatServiceOptions(),
+    maxMaterialImportBytes: loadedConfig.config.materials.maxImportBytes,
     provider: providerService,
   });
   const llmSettings = new DesktopLlmSettingsService(providerService);

@@ -12,6 +12,7 @@ import {
   type ModelMessageSender,
 } from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
+import { MaterialService } from "../../../../packages/knowledge/src/material-service.js";
 import {
   DocumentService,
   type OpenProject,
@@ -54,6 +55,7 @@ export interface DesktopProjectRuntimeOptions {
   readonly busyTimeoutMs: number;
   readonly appStateService?: AppStateService;
   readonly chat: Omit<ChatServiceOptions, "database">;
+  readonly maxMaterialImportBytes: number;
   readonly provider: ModelMessageSender;
 }
 
@@ -179,6 +181,16 @@ export class DesktopProjectRuntime {
     return this.requireActiveProject().documents.listReadableDocuments();
   }
 
+  listMaterials() {
+    const active = this.requireActiveProject();
+    return MaterialService.list(
+      active.project.root,
+      active.project.manifest.id,
+      active.database,
+      this.options.maxMaterialImportBytes,
+    );
+  }
+
   readManuscriptDocument(relativePath: string) {
     return this.requireActiveProject().documents.readReadableDocument(relativePath);
   }
@@ -207,7 +219,6 @@ export class DesktopProjectRuntime {
     const database = await ProjectDatabase.open(project.root, {
       busyTimeoutMs: this.options.busyTimeoutMs,
     });
-
     try {
       if (!database.quickCheck()) {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");

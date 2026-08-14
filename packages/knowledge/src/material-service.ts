@@ -110,6 +110,20 @@ export class MaterialService {
     }
   }
 
+  static async list(
+    projectRoot: string,
+    projectId: string,
+    database: ProjectDatabase,
+    maxImportBytes: number,
+  ): Promise<KnowledgeSource[]> {
+    // Load project materials through an existing project database connection.
+    await ensureMaterialDirectories(projectRoot);
+    const repository = new MaterialRepository(database);
+    const sources = await readMaterialMetadataSources(projectRoot, projectId, maxImportBytes);
+    await repository.synchronize(sources);
+    return repository.list();
+  }
+
   async addFile(
     filePath: string,
     options: AddFileMaterialOptions = {},
@@ -385,69 +399,17 @@ export class MaterialService {
   }
 
   private async synchronizeProjection(): Promise<void> {
-    const sources = await this.readMetadataSources();
+    // Refresh the database projection from validated portable material sources.
+    const sources = await readMaterialMetadataSources(
+      this.projectRoot,
+      this.projectId,
+      this.maxImportBytes,
+    );
     await this.repository.synchronize(sources);
   }
 
-  private async readMetadataSources(): Promise<KnowledgeSource[]> {
-    const metadataDirectory = await resolveInsideProject(this.projectRoot, "sources/metadata");
-    const entries = await readdir(metadataDirectory.absolutePath, { withFileTypes: true });
-    const sources: KnowledgeSource[] = [];
-    const hashes = new Set<string>();
-    const titles = new Set<string>();
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) {
-        continue;
-      }
-      const metadataPath = await resolveInsideProject(
-        this.projectRoot,
-        `sources/metadata/${entry.name}`,
-      );
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(await readFile(metadataPath.absolutePath, "utf8")) as unknown;
-      } catch (error) {
-        throw new AppError("VALIDATION_ERROR", `资料元数据文件无效：${entry.name}`, {
-          cause: error,
-        });
-      }
-      const source = parseKnowledgeSource(parsed, `资料元数据文件无效：${entry.name}`);
-      if (source.projectId !== this.projectId || `${source.id}.json` !== entry.name) {
-        throw new AppError("VALIDATION_ERROR", `资料元数据与当前项目不匹配：${entry.name}`);
-      }
-      const content = await this.readSourceContent(source);
-      if (
-        hashContent(content) !== source.contentHash ||
-        Buffer.byteLength(content, "utf8") !== source.size
-      ) {
-        throw new AppError("VALIDATION_ERROR", `资料内容与元数据哈希不一致：${source.title}`);
-      }
-      if (hashes.has(source.contentHash)) {
-        throw new AppError("MATERIAL_ALREADY_EXISTS", `存在重复的资料元数据：${source.title}`);
-      }
-      if (titles.has(source.title)) {
-        throw new AppError("MATERIAL_ALREADY_EXISTS", `存在同名的资料元数据：${source.title}`);
-      }
-      hashes.add(source.contentHash);
-      titles.add(source.title);
-      sources.push(source);
-    }
-    return sources;
-  }
-
-  private async readSourceContent(source: KnowledgeSource): Promise<string> {
-    const resolved = await resolveInsideProject(this.projectRoot, source.relativePath);
-    try {
-      return await readStoredUtf8Text(resolved.absolutePath, this.maxImportBytes);
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-      throw new AppError("VALIDATION_ERROR", `资料原始文件不存在：${source.title}`, {
-        cause: error,
-      });
-    }
+  private readSourceContent(source: KnowledgeSource): Promise<string> {
+    return readMaterialSourceContent(this.projectRoot, source, this.maxImportBytes);
   }
 
   private async resolveMetadataPath(id: string) {
@@ -460,5 +422,71 @@ export class MaterialService {
 
   private async resolveDerivedChunksPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `.cleo/derived/chunks/${id}.chunks.json`);
+  }
+}
+
+async function readMaterialMetadataSources(
+  projectRoot: string,
+  projectId: string,
+  maxImportBytes: number,
+): Promise<KnowledgeSource[]> {
+  // Read and validate every portable material manifest in the current project.
+  // 1. Parse only JSON files from the project metadata directory.
+  // 2. Verify project ownership, source content hashes, and stored byte sizes.
+  // 3. Reject duplicate content or titles before returning the valid sources.
+  const metadataDirectory = await resolveInsideProject(projectRoot, "sources/metadata");
+  const entries = await readdir(metadataDirectory.absolutePath, { withFileTypes: true });
+  const sources: KnowledgeSource[] = [];
+  const hashes = new Set<string>();
+  const titles = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+    const metadataPath = await resolveInsideProject(projectRoot, `sources/metadata/${entry.name}`);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(metadataPath.absolutePath, "utf8")) as unknown;
+    } catch (error) {
+      throw new AppError("VALIDATION_ERROR", `资料元数据文件无效：${entry.name}`, {
+        cause: error,
+      });
+    }
+    const source = parseKnowledgeSource(parsed, `资料元数据文件无效：${entry.name}`);
+    if (source.projectId !== projectId || `${source.id}.json` !== entry.name) {
+      throw new AppError("VALIDATION_ERROR", `资料元数据与当前项目不匹配：${entry.name}`);
+    }
+    const content = await readMaterialSourceContent(projectRoot, source, maxImportBytes);
+    if (
+      hashContent(content) !== source.contentHash ||
+      Buffer.byteLength(content, "utf8") !== source.size
+    ) {
+      throw new AppError("VALIDATION_ERROR", `资料内容与元数据哈希不一致：${source.title}`);
+    }
+    if (hashes.has(source.contentHash)) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `存在重复的资料元数据：${source.title}`);
+    }
+    if (titles.has(source.title)) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `存在同名的资料元数据：${source.title}`);
+    }
+    hashes.add(source.contentHash);
+    titles.add(source.title);
+    sources.push(source);
+  }
+  return sources;
+}
+async function readMaterialSourceContent(
+  projectRoot: string,
+  source: KnowledgeSource,
+  maxImportBytes: number,
+): Promise<string> {
+  // Read one material fact source and normalize file failures into application errors.
+  const resolved = await resolveInsideProject(projectRoot, source.relativePath);
+  try {
+    return await readStoredUtf8Text(resolved.absolutePath, maxImportBytes);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("VALIDATION_ERROR", `资料原始文件不存在：${source.title}`, {
+      cause: error,
+    });
   }
 }
