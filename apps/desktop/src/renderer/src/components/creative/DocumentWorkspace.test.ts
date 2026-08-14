@@ -28,11 +28,14 @@ describe("DocumentWorkspace", () => {
         activePath: "manuscript/第二章.txt",
         runtimeInfo: null,
         onActivate: () => undefined,
+        onClose: () => undefined,
       }),
     );
 
     expect(html).toContain("第一章.md");
     expect(html).toContain("第二章.txt");
+    expect(html).toContain('aria-label="关闭 第一章.md"');
+    expect(html).toContain('aria-label="关闭 第二章.txt"');
     expect(html).toContain("# 纯文本标题\n");
     expect(html).toContain("&lt;script&gt;危险内容&lt;/script&gt;");
     expect(html).not.toContain("不应显示的正文");

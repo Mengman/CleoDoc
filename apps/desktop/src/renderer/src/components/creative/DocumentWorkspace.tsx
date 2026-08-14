@@ -3,6 +3,7 @@ import {
   BookOpen as OpenBookIcon,
   Eye as EyeIcon,
   FileCode2 as MarkdownIcon,
+  X as CloseIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -19,6 +20,7 @@ export interface DocumentWorkspaceProps {
   readonly activePath: string | null;
   readonly runtimeInfo: DesktopRuntimeInfo | null;
   readonly onActivate: (relativePath: string) => void;
+  readonly onClose: (relativePath: string) => void;
 }
 
 export function DocumentWorkspace({
@@ -26,9 +28,10 @@ export function DocumentWorkspace({
   activePath,
   runtimeInfo,
   onActivate,
+  onClose,
 }: DocumentWorkspaceProps): ReactNode {
   // Render the shared manuscript tabs and the active document as unformatted text.
-  // 1. Keep every opened document in one ordered tab bar and activate tabs on demand.
+  // 1. Keep every opened document in one ordered tab bar with activation and close actions.
   // 2. Show the existing empty surface or the active tab's loading, error, or text content.
   // 3. Preserve original text line breaks and report the active project-relative path.
   const activeTab = tabs.find((tab) => tab.relativePath === activePath) ?? null;
@@ -38,17 +41,29 @@ export function DocumentWorkspace({
       <div className="reader-tabs document-tab-bar">
         <div className="document-tabs" role="tablist" aria-label="已打开文档">
           {tabs.map((tab) => (
-            <button
+            <div
               key={tab.relativePath}
               className={`reader-tab${tab.relativePath === activePath ? " active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={tab.relativePath === activePath}
               title={tab.relativePath}
-              onClick={() => onActivate(tab.relativePath)}
             >
-              {fileName(tab.relativePath)}
-            </button>
+              <button
+                className="reader-tab-label"
+                type="button"
+                role="tab"
+                aria-selected={tab.relativePath === activePath}
+                onClick={() => onActivate(tab.relativePath)}
+              >
+                {fileName(tab.relativePath)}
+              </button>
+              <button
+                className="reader-tab-close"
+                type="button"
+                aria-label={`关闭 ${fileName(tab.relativePath)}`}
+                onClick={() => onClose(tab.relativePath)}
+              >
+                <CloseIcon />
+              </button>
+            </div>
           ))}
         </div>
         <div className="reader-meta">

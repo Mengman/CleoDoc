@@ -27,7 +27,7 @@ export function FeatureArea({
   // 1. Expose no tabs from a previous project, then clear retained state after project changes.
   // 2. Open each manuscript path once and apply its asynchronous result only to that project.
   // 3. Preserve the tab collection while the settings workspace temporarily replaces the view.
-  // 4. Pass tab activation separately from opening so revisiting a tab never rereads the file.
+  // 4. Handle tab activation and closing without rereading documents that remain open.
   const projectId = projectState.status === "open" ? projectState.project.id : null;
   const [manuscripts, setManuscripts] = useState<ManuscriptWorkspaceState>({
     projectId,
@@ -74,6 +74,21 @@ export function FeatureArea({
     setManuscripts((current) =>
       current.projectId === projectId ? { ...current, activePath: relativePath } : current,
     );
+  }
+
+  function closeManuscript(relativePath: string): void {
+    // Remove one tab and activate its next neighbor when the active tab closes.
+    setManuscripts((current) => {
+      if (current.projectId !== projectId) return current;
+      const closedIndex = current.tabs.findIndex((tab) => tab.relativePath === relativePath);
+      if (closedIndex === -1) return current;
+      const tabs = current.tabs.filter((tab) => tab.relativePath !== relativePath);
+      const activePath =
+        current.activePath === relativePath
+          ? (tabs[closedIndex]?.relativePath ?? tabs[closedIndex - 1]?.relativePath ?? null)
+          : current.activePath;
+      return { ...current, tabs, activePath };
+    });
   }
 
   function updateLoadedManuscript(
@@ -129,6 +144,7 @@ export function FeatureArea({
           activeManuscriptPath={visibleManuscripts.activePath}
           onOpenManuscript={openManuscript}
           onActivateManuscript={activateManuscript}
+          onCloseManuscript={closeManuscript}
         />
       )}
     </section>

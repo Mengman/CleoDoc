@@ -55,16 +55,20 @@ svg {
 }
 .feature-area {
   grid-column: 2;
+  height: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 .creative-workspace {
   display: grid;
   grid-template-columns: 292px minmax(480px, 1fr) 370px;
+  grid-template-rows: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .panel-heading,
@@ -262,7 +266,10 @@ svg {
   grid-row: 1;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 42px;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: #0a111a;
 }
 .reader-tabs {
@@ -279,23 +286,53 @@ svg {
   overflow-y: hidden;
 }
 .reader-tab {
+  display: flex;
+  align-items: center;
   flex: 0 0 auto;
   align-self: stretch;
-  max-width: 180px;
-  padding: 0 8px;
-  overflow: hidden;
-  border: 0;
+  min-width: 0;
+  max-width: 200px;
   border-bottom: 2px solid transparent;
   color: #7f8ba0;
+  background: transparent;
+}
+.reader-tab.active {
+  color: #ddd9ff;
+  border-bottom-color: var(--purple);
+}
+.reader-tab-label {
+  min-width: 0;
+  padding: 0 4px 0 8px;
+  overflow: hidden;
+  border: 0;
+  color: inherit;
   background: transparent;
   cursor: pointer;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.reader-tab.active {
-  color: #ddd9ff;
-  border-bottom-color: var(--purple);
+.reader-tab-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #758196;
+  background: transparent;
+  cursor: pointer;
+}
+.reader-tab-close:hover {
+  color: #d9dee8;
+  background: #222d3d;
+}
+.reader-tab-close svg {
+  width: 13px;
+  height: 13px;
 }
 .reader-meta {
   flex: 0 0 auto;
@@ -321,7 +358,9 @@ svg {
   display: grid;
   min-height: 0;
   padding: 20px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 .document-surface {
   position: relative;
