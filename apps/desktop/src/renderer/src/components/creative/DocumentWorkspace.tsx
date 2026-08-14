@@ -37,26 +37,21 @@ export function DocumentWorkspace({
     <main className="reader-panel document-workspace">
       <div className="reader-tabs document-tab-bar">
         <div className="document-tabs" role="tablist" aria-label="已打开文档">
-          {tabs.length === 0 ? (
-            <span className="reader-tab active empty">阅读</span>
-          ) : (
-            tabs.map((tab) => (
-              <button
-                key={tab.relativePath}
-                className={`reader-tab${tab.relativePath === activePath ? " active" : ""}`}
-                type="button"
-                role="tab"
-                aria-selected={tab.relativePath === activePath}
-                title={tab.relativePath}
-                onClick={() => onActivate(tab.relativePath)}
-              >
-                {fileName(tab.relativePath)}
-              </button>
-            ))
-          )}
+          {tabs.map((tab) => (
+            <button
+              key={tab.relativePath}
+              className={`reader-tab${tab.relativePath === activePath ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={tab.relativePath === activePath}
+              title={tab.relativePath}
+              onClick={() => onActivate(tab.relativePath)}
+            >
+              {fileName(tab.relativePath)}
+            </button>
+          ))}
         </div>
         <div className="reader-meta">
-          <span className="format-pill">Markdown / TXT</span>
           <span className="readonly-pill">
             <EyeIcon /> 只读模式
           </span>

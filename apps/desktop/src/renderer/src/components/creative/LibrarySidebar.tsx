@@ -1,38 +1,25 @@
-import {
-  ChevronDown as ChevronIcon,
-  FileText as DocumentIcon,
-  Plus as PlusIcon,
-  Search as SearchIcon,
-} from "lucide-react";
 import type { ReactNode } from "react";
-
-import type { DesktopProjectState } from "../../../../shared/desktop-api.js";
 
 export interface LibrarySidebarProps {
   readonly title: string;
   readonly description: string;
-  readonly searchLabel: string;
   readonly listLabel: string;
   readonly itemCount: number;
   readonly emptyIcon: ReactNode;
-  readonly projectState: DesktopProjectState;
   readonly content?: ReactNode;
 }
 
 export function LibrarySidebar({
   title,
   description,
-  searchLabel,
   listLabel,
   itemCount,
   emptyIcon,
-  projectState,
   content,
 }: LibrarySidebarProps): ReactNode {
   // Render the common list shell used by the works and materials sidebars.
-  // 1. Show the current feature heading, search field, and active project summary.
-  // 2. Render feature-owned list content without moving its data into the shared shell.
-  // 3. Keep the existing empty state for features that have not connected their list yet.
+  // 1. Show the current feature heading and list summary.
+  // 2. Render feature-owned content or the existing empty state.
   return (
     <aside className="library-panel">
       <div className="panel-heading">
@@ -40,25 +27,6 @@ export function LibrarySidebar({
           <h1>{title}</h1>
           <p>{description}</p>
         </div>
-        <button className="square-button" type="button" disabled aria-label="添加">
-          <PlusIcon />
-        </button>
-      </div>
-
-      <label className="search-box">
-        <SearchIcon />
-        <input type="search" disabled placeholder={searchLabel} aria-label={searchLabel} />
-      </label>
-
-      <div className="project-card">
-        <div className="project-mark">
-          <DocumentIcon />
-        </div>
-        <div>
-          <span>当前项目</span>
-          <strong>{projectState.status === "open" ? projectState.project.name : "未打开"}</strong>
-        </div>
-        <ChevronIcon />
       </div>
 
       <div className="list-heading">

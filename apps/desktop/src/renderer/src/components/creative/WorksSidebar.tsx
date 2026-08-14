@@ -68,11 +68,9 @@ export function WorksSidebar({
     <LibrarySidebar
       title="作品区"
       description="管理作品结构与文档"
-      searchLabel="搜索作品…"
       listLabel="作品目录"
       itemCount={documents.length}
       emptyIcon={<DocumentIcon />}
-      projectState={projectState}
       content={content}
     />
   );
