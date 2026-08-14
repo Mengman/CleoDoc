@@ -6,8 +6,12 @@ import { LibrarySidebar } from "./LibrarySidebar.js";
 
 export function WorksSidebar({
   projectState,
+  activeDocumentPath,
+  onOpenDocument,
 }: {
   readonly projectState: DesktopProjectState;
+  readonly activeDocumentPath: string | null;
+  readonly onOpenDocument: (relativePath: string) => void;
 }): ReactNode {
   // Load and render the readable manuscript files owned by the active project.
   // 1. Clear the previous list whenever the active project changes or closes.
@@ -50,7 +54,15 @@ export function WorksSidebar({
   else if (loading) content = <WorksListState message="正在加载作品…" />;
   else if (error !== null) content = <WorksListState message={error} error />;
   else if (documents.length === 0) content = <WorksListState message="当前项目暂无作品" />;
-  else content = <ManuscriptList documents={documents} />;
+  else {
+    content = (
+      <ManuscriptList
+        documents={documents}
+        activeDocumentPath={activeDocumentPath}
+        onOpenDocument={onOpenDocument}
+      />
+    );
+  }
 
   return (
     <LibrarySidebar
@@ -68,16 +80,26 @@ export function WorksSidebar({
 
 export function ManuscriptList({
   documents,
+  activeDocumentPath,
+  onOpenDocument,
 }: {
   readonly documents: readonly string[];
+  readonly activeDocumentPath: string | null;
+  readonly onOpenDocument: (relativePath: string) => void;
 }): ReactNode {
-  // Display each manuscript by its path below the manuscript directory.
+  // Display each manuscript path and open the selected file in the shared document workspace.
   return (
     <ul className="manuscript-list">
       {documents.map((relativePath) => (
-        <li key={relativePath} className="manuscript-list-item">
-          <DocumentIcon />
-          <span>{relativePath.slice("manuscript/".length)}</span>
+        <li key={relativePath}>
+          <button
+            type="button"
+            className={`manuscript-list-item${relativePath === activeDocumentPath ? " active" : ""}`}
+            onClick={() => onOpenDocument(relativePath)}
+          >
+            <DocumentIcon />
+            <span>{relativePath.slice("manuscript/".length)}</span>
+          </button>
         </li>
       ))}
     </ul>

@@ -292,12 +292,24 @@ svg {
   display: flex;
   align-items: center;
   gap: 9px;
+  width: 100%;
   min-width: 0;
   padding: 9px 10px;
+  border: 0;
   border-radius: 8px;
   color: #a7b1c2;
   background: #111b29;
+  cursor: pointer;
   font-size: 11px;
+  text-align: left;
+}
+.manuscript-list-item:hover {
+  color: #d4dae5;
+  background: #172234;
+}
+.manuscript-list-item.active {
+  color: #ded9ff;
+  background: #272143;
 }
 .manuscript-list-item svg {
   flex: 0 0 auto;
@@ -333,21 +345,41 @@ svg {
   border-bottom: 1px solid var(--line);
   background: #0d151f;
 }
-.reader-tab {
+.document-tabs {
+  display: flex;
   align-self: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.reader-tab {
+  flex: 0 0 auto;
+  align-self: stretch;
+  max-width: 180px;
   padding: 0 8px;
+  overflow: hidden;
   border: 0;
   border-bottom: 2px solid transparent;
   color: #7f8ba0;
   background: transparent;
+  cursor: pointer;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .reader-tab.active {
   color: #ddd9ff;
   border-bottom-color: var(--purple);
 }
+.reader-tab.empty {
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
 .reader-meta {
+  flex: 0 0 auto;
   gap: 8px;
+  margin-left: 12px;
 }
 .format-pill,
 .readonly-pill {
@@ -386,6 +418,30 @@ svg {
   background: radial-gradient(circle at 50% 30%, #19243a 0, #101925 40%, #0e1722 75%);
   box-shadow: 0 24px 70px #0004;
   text-align: center;
+}
+.document-content {
+  display: block;
+  min-height: 100%;
+  padding: 54px 64px;
+  overflow: visible;
+  background: #101925;
+  text-align: left;
+}
+.document-content pre {
+  margin: 0;
+  color: #d9dee8;
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.document-state strong {
+  color: #a7b1c2;
+  font-size: 12px;
+}
+.document-state.error strong {
+  color: #d28a8a;
 }
 .document-accent {
   position: absolute;
@@ -457,6 +513,12 @@ svg {
   color: #67748a;
   background: #0d151f;
   font-size: 9px;
+}
+.reader-footer > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .runtime-version {
   color: #718096;

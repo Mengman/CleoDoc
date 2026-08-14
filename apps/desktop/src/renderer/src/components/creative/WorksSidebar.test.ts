@@ -11,6 +11,8 @@ describe("ManuscriptList", () => {
     const html = renderToStaticMarkup(
       createElement(ManuscriptList, {
         documents: ["manuscript/第一卷/第一章.md", "manuscript/人物设定.txt"],
+        activeDocumentPath: "manuscript/人物设定.txt",
+        onOpenDocument: () => undefined,
       }),
     );
 
@@ -18,5 +20,6 @@ describe("ManuscriptList", () => {
     expect(html).toContain("人物设定.txt");
     expect(html).not.toContain("manuscript/");
     expect(html.indexOf("第一卷/第一章.md")).toBeLessThan(html.indexOf("人物设定.txt"));
+    expect(html).toContain('class="manuscript-list-item active"');
   });
 });
