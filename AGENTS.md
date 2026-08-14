@@ -126,7 +126,7 @@ v0.1 检索路径为：
 
 ## 6. LLM 与 Agent 规则
 
-- v0.1 首先支持 OpenAI-compatible 和 Ollama Provider。
+- 当前只支持 OpenAI-compatible Provider；未经版本规划不得增加新的 Provider 适配。
 - CLI 的 API Key 从环境变量或当前进程交互输入读取；Desktop 允许通过操作系统安全凭据能力加密持久化。密钥不得明文写入软件配置、项目、数据库、日志或 Git，也不得返回 Renderer 回显。
 - 统一处理流式文本、取消、Tool Call、Token 用量，以及鉴权、限流、超时和上下文超限错误。
 - Tool 参数必须经过 Schema 校验；Tool 只能读取当前任务被授权的项目范围。

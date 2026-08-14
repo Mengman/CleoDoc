@@ -64,10 +64,6 @@ llm:
           maxOutputTokens: 384000
           reasoningSupported: true
           reasoningEfforts: [low, medium, high]
-    ollama:
-      displayName: Ollama
-      baseUrl: http://127.0.0.1:11434
-      models: {}
   timeouts:
     connectionMs: 60000
     streamIdleMs: 120000

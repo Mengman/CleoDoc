@@ -18,7 +18,7 @@ v0.2 不改变作品事实格式、知识语义、Agent 创作流程或版本模
 | --- | --- | --- |
 | CLI、项目与安全文件读写 | 完成 | 项目创建、打开、状态、文档操作和审批界面 |
 | SQLite | 完成 | 复用 Schema v11、健康状态和项目生命周期 |
-| LLM Provider | 完成 | OpenAI-compatible/Ollama 选择、配置和连接测试 |
+| LLM Provider | 完成 | OpenAI-compatible 配置和连接测试 |
 | Conversation / Session | 完成 | 对话创建、恢复、压缩、重试和历史回查界面 |
 | Reasoning 与流式输出 | 完成 | 在聊天界面区分展示并支持取消 |
 | 模型调用审计与 Debug 日志 | 完成 | v0.2 保留底层能力，不提供调用记录或诊断 UI |
@@ -324,7 +324,7 @@ flowchart LR
 1. 创建或打开现有项目，并查看 Markdown/TXT 作品。
 2. 导入并查看中英文 Markdown/TXT 资料。
 3. 重建 Chunk、FTS 和 Embedding，并执行普通与语义检索。
-4. 配置 OpenAI-compatible 或 Ollama，与真实模型对话。
+4. 配置 OpenAI-compatible，与真实模型对话。
 5. 让模型调用 RAG Tool 检索资料并调用文档 Tool 读取作品。
 6. 经用户审批保存生成文档，并在阅读区查看结果。
 7. 触发上下文压缩，退出应用并恢复 Conversation 继续工作。

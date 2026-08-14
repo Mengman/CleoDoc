@@ -40,7 +40,7 @@ flowchart TB
     APP --> CONFIG["packages/config"]
     CLI --> PROVIDER_SERVICE["ProviderService"]
     AGENT --> PROVIDER_SERVICE
-    PROVIDER_SERVICE --> PROVIDERS["OpenAI-compatible / Ollama"]
+    PROVIDER_SERVICE --> PROVIDERS["OpenAI-compatible"]
     KNOWLEDGE --> INGEST["packages/document-ingestion"]
     KNOWLEDGE --> RAG["packages/rag"]
     INGEST --> CDM["packages/cdm"]
@@ -65,7 +65,7 @@ flowchart TB
 | `packages/document-ingestion` | TXT/Markdown 到临时 CDM、来源范围、语言检测和 ChunkDraft |
 | `packages/knowledge` | 资料 CRUD、恢复、索引编排以及面向 Tool 的知识服务 |
 | `packages/rag` | GGUF 模型定义、Tokenizer、Embedding Worker、混合召回和证据组装 |
-| `packages/model-providers` | `ProviderService`、Provider 配置与密钥边界、实例缓存、OpenAI-compatible/Ollama 协议适配 |
+| `packages/model-providers` | `ProviderService`、Provider 配置与密钥边界、实例缓存和 OpenAI-compatible 协议适配 |
 | `packages/agent` | Context、Tool Catalog/Runtime、Tool Loop、Session 压缩和历史回查 |
 
 `packages/cdm` 是叶子协议包；Document Ingestion 可以依赖 CDM，但不访问 Project 或 SQLite。RAG 从纯文本 Chunk 开始，不解析或持久化 CDM。CleoDoc 业务通过 Knowledge/Application Service 使用 RAG，不把 Repository 直接暴露给 Agent。

@@ -269,10 +269,7 @@ export class ProviderService implements ModelMessageSender {
     };
     validateModelParameters(config.llm.modelParameters, capabilities);
     const environment = this.options.environment ?? process.env;
-    const baseUrl =
-      overrides?.baseUrl ??
-      (providerId === "ollama" ? environment.OLLAMA_BASE_URL : environment.OPENAI_BASE_URL) ??
-      provider.baseUrl;
+    const baseUrl = overrides?.baseUrl ?? environment.OPENAI_BASE_URL ?? provider.baseUrl;
     return {
       providerId,
       providerName: provider.displayName,

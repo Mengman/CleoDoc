@@ -45,7 +45,7 @@ export function providerServiceFromArguments(
       modelId,
       baseUrl:
         optionString(parsed, "base-url") ??
-        (providerId === "ollama" ? environment.OLLAMA_BASE_URL : environment.OPENAI_BASE_URL) ??
+        environment.OPENAI_BASE_URL ??
         configuredProvider.baseUrl,
       connectionTimeoutMs:
         optionPositiveInteger(parsed, "connect-timeout-ms") ??

@@ -405,7 +405,7 @@ v0.2 不改变项目目录的数据语义，也不创建 `.cleo/git`、提案目
 
 ### 7.3 Agent 运行时
 
-v0.2 沿用 v0.1 的单一前台 Tool Loop、Conversation/Session、压缩、历史回查、项目 Tool 和 RAG Tool，只增加桌面交互与任务状态展示。OpenAI-compatible 和 Ollama 是 v0.2 的全部 Provider；新 Provider、AgentJob、ChangeSet、Checkpoint 和阶段工作流顺延到 v0.3，任何版本都不得静默切换模型或供应商。
+v0.2 沿用 v0.1 的单一前台 Tool Loop、Conversation/Session、压缩、历史回查、项目 Tool 和 RAG Tool，只增加桌面交互与任务状态展示。OpenAI-compatible 是 v0.2 唯一支持的 Provider；新 Provider、AgentJob、ChangeSet、Checkpoint 和阶段工作流顺延到 v0.3，任何版本都不得静默切换模型或供应商。
 
 ## 8. 核心公共类型
 
@@ -456,7 +456,7 @@ v0.2 沿用 v0.1 的单一前台 Tool Loop、Conversation/Session、压缩、历
 - 用户可以从桌面安装版创建、打开、关闭和继续使用现有项目。
 - 可以查看 Markdown/TXT 作品和资料，阅读过程不改写原文件。
 - 可以通过 UI 完成现有资料导入、重命名、删除、索引、Embedding 和混合检索。
-- 可以配置 OpenAI-compatible/Ollama，与主笔流式对话，查看 Reasoning，并取消当前生成。
+- 可以配置 OpenAI-compatible，与主笔流式对话，查看 Reasoning，并取消当前生成。
 - 可以新建和恢复 Conversation，查看 Session、触发压缩并在重启后继续工作。
 - 模型可以继续调用现有文档、历史和 RAG Tool；写入和项目指令修改必须由用户批准。
 - 项目指令当前 Revision、历史和恢复可以通过 UI 操作。

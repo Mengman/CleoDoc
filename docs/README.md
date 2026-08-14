@@ -33,7 +33,7 @@
 - 数据库：完整 Schema v11；支持完整 v8、v9、v10 项目顺序前向升级。
 - 文档事实源：当前作品使用 Markdown/JSON，资料保留原 TXT/Markdown 文件；CDM 是已实现最小 Core、尚未完成作品迁移的目标协议。
 - 本地知识：TXT/Markdown 解析、Tokenizer 切片、FTS5、GGUF Embedding、sqlite-vec 精确向量检索和混合 RAG 已完成。
-- Agent：OpenAI-compatible/Ollama、多轮 Tool Loop、Conversation 级 Runtime、Session 压缩、Reasoning 展示、ModelCall 审计和本地 RAG Tool 已完成。
+- Agent：OpenAI-compatible、多轮 Tool Loop、Conversation 级 Runtime、Session 压缩、Reasoning 展示、ModelCall 审计和本地 RAG Tool 已完成。
 - 发布：跨平台 CLI 打包和 v0.1 人工垂直闭环验收均已完成；当前进入 v0.2 Desktop UI 规划与实施。
 
 ## 未决事项的维护规则

@@ -435,7 +435,6 @@ Tool Result 必须通过对应 Tool Class 的 `getCompactionMessage()` 投影，
 
 - LLM 只生成 `summary` 正文，不生成 JSON。
 - 不向 OpenAI-compatible Provider 发送 `response_format: { type: "json_object" }`。
-- 不向 Ollama 发送 `format: "json"`。
 - 压缩继续显式关闭 Thinking，并保持 `tools: []`。
 - 不设置 Provider 输出 Token 上限，摘要长度建议目标仍只写入 Prompt。
 - Session ID、消息边界、消息数量、模型和时间等字段全部由 CleoDoc 生成。

@@ -49,7 +49,7 @@ describe("SoftwareConfigService", () => {
       path.join(home, "config.yaml"),
       `gpuAcceleration: false
 llm:
-  selectedProvider: ollama
+  selectedProvider: missing-provider
   timeouts:
     connectionMs: 90000
 context:
@@ -72,7 +72,7 @@ unknownSetting: true
 
     const result = await createService(home).load();
 
-    expect(result.config.llm.selectedProvider).toBe("ollama");
+    expect(result.config.llm.selectedProvider).toBe("openai-compatible");
     expect(result.config.llm.timeouts.connectionMs).toBe(90_000);
     expect(result.config.context.softCompactionRatio).toBe(0.75);
     expect(result.config.debug.enabled).toBe(true);
@@ -83,6 +83,7 @@ unknownSetting: true
     expect(result.warnings.map((warning) => warning.path)).toEqual(
       expect.arrayContaining([
         "context.softCompactionRatio",
+        "llm.selectedProvider",
         "rag.embedding.models",
         "unknownSetting",
       ]),

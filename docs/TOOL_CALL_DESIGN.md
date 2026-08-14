@@ -1435,7 +1435,7 @@ classDiagram
 当前实现继续保持以下边界：
 
 - `loadedToolVersions` 按精确 `name + version` 恢复，版本变化后必须重新通过 Catalog `get` 加载。
-- OpenAI-compatible 和 Ollama 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。
+- OpenAI-compatible 的 Function Tool 协议没有独立版本字段，完整定义继续把版本加入描述；Tool Result 与 ModelCall 记录保留独立整数版本。
 - SQLite 中的文档 Hash 和项目指令 Revision 不进入 LLM 可见 Tool Result。
 - `write_draft` 仍未进入实现范围。三个 RAG Tool 已通过 `KnowledgeToolService` 接入 `ProjectToolCatalog` 和 Tool Loop；Service 由 CLI Chat 生命周期创建一次并注入 `ChatService`，Tool 本身不持有 Project 或 Conversation 状态。
 - RAG Tool 结果继续作为普通 Tool Result Message 持久化；普通检索 Query、候选、排除项和排序诊断不写数据库。压缩时只保留语言、数量、页码等必要状态，不保留 Query、证据正文、Source 或 Chunk ID。

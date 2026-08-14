@@ -43,7 +43,4 @@ export async function runConfigCommand(
   context.output.write(
     `OPENAI_BASE_URL：${process.env.OPENAI_BASE_URL ? "已设置" : "使用默认值"}\n`,
   );
-  context.output.write(
-    `OLLAMA_BASE_URL：${process.env.OLLAMA_BASE_URL ? "已设置" : "使用默认值"}\n`,
-  );
 }

@@ -7,7 +7,7 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo config
 
   cleo provider list
-  cleo provider test <openai-compatible|ollama> [--base-url <url>]
+  cleo provider test openai-compatible [--base-url <url>]
 
   cleo chat [--project <directory>] --model <model> [选项]
     --provider <id>       覆盖软件配置选择的 Provider
@@ -72,7 +72,6 @@ export const helpText = `CleoDoc v0.1 CLI
 环境变量：
   CLEODOC_API_KEY   当前 Provider 的 API Key（不会写入配置或项目）
   OPENAI_BASE_URL   OpenAI-compatible API 根地址
-  OLLAMA_BASE_URL   Ollama 地址，默认 http://127.0.0.1:11434
   CLEODOC_MODEL     未提供 --model 时使用的模型
   CLEODOC_LLM_CONNECT_TIMEOUT_MS      连接/首响应超时
   CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS  流连续无数据超时
