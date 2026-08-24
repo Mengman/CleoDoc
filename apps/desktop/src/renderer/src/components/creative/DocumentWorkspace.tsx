@@ -7,8 +7,6 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 
-import type { DesktopRuntimeInfo } from "../../../../shared/desktop-api.js";
-
 export interface DocumentTab {
   readonly source: "manuscript" | "material";
   readonly reference: string;
@@ -19,7 +17,6 @@ export interface DocumentTab {
 export interface DocumentWorkspaceProps {
   readonly tabs: readonly DocumentTab[];
   readonly activeTabKey: string | null;
-  readonly runtimeInfo: DesktopRuntimeInfo | null;
   readonly onActivate: (tab: DocumentTab) => void;
   readonly onClose: (tab: DocumentTab) => void;
 }
@@ -27,7 +24,6 @@ export interface DocumentWorkspaceProps {
 export function DocumentWorkspace({
   tabs,
   activeTabKey,
-  runtimeInfo,
   onActivate,
   onClose,
 }: DocumentWorkspaceProps): ReactNode {
@@ -88,16 +84,6 @@ export function DocumentWorkspace({
           </article>
         )}
       </section>
-
-      <footer className="reader-footer">
-        <span>{activeTab === null ? "未选择文档" : documentLocation(activeTab)}</span>
-        <span className="runtime-version">
-          <i />
-          {runtimeInfo === null
-            ? "正在连接桌面运行时…"
-            : `Electron ${runtimeInfo.electronVersion} · ${runtimeInfo.platform}`}
-        </span>
-      </footer>
     </main>
   );
 }

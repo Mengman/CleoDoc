@@ -28,7 +28,6 @@ describe("DocumentWorkspace", () => {
           },
         ],
         activeTabKey: "material:港口资料",
-        runtimeInfo: null,
         onActivate: () => undefined,
         onClose: () => undefined,
       }),

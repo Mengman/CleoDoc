@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { DesktopProjectState, DesktopRuntimeInfo } from "../../../shared/desktop-api.js";
+import type { DesktopProjectState } from "../../../shared/desktop-api.js";
 import type { NavigationId } from "../ui-types.js";
 import { CreativeWorkspace } from "./creative/CreativeWorkspace.js";
 import { documentTabKey, type DocumentTab } from "./creative/DocumentWorkspace.js";
@@ -10,7 +10,6 @@ import { SettingsWorkspace } from "./settings/SettingsWorkspace.js";
 export interface FeatureAreaProps {
   readonly activeNavigation: NavigationId;
   readonly projectState: DesktopProjectState;
-  readonly runtimeInfo: DesktopRuntimeInfo | null;
 }
 
 interface DocumentWorkspaceState {
@@ -19,11 +18,7 @@ interface DocumentWorkspaceState {
   readonly activeTabKey: string | null;
 }
 
-export function FeatureArea({
-  activeNavigation,
-  projectState,
-  runtimeInfo,
-}: FeatureAreaProps): ReactNode {
+export function FeatureArea({ activeNavigation, projectState }: FeatureAreaProps): ReactNode {
   // Own the project-bound document tabs while switching visible feature workspaces.
   // 1. Expose no tabs from a previous project, then clear retained state after project changes.
   // 2. Open each manuscript path once and apply its asynchronous result only to that project.
@@ -188,7 +183,6 @@ export function FeatureArea({
         <CreativeWorkspace
           activeSidebar={activeNavigation}
           projectState={projectState}
-          runtimeInfo={runtimeInfo}
           documentTabs={visibleDocuments.tabs}
           activeDocumentTabKey={visibleDocuments.activeTabKey}
           onOpenManuscript={openManuscript}

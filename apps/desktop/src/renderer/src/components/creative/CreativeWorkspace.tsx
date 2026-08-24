@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { DesktopProjectState, DesktopRuntimeInfo } from "../../../../shared/desktop-api.js";
+import type { DesktopProjectState } from "../../../../shared/desktop-api.js";
 import type { CreativeSidebarId } from "../../ui-types.js";
 import { ChatPanel } from "./ChatPanel.js";
 import { DocumentWorkspace, documentTabKey, type DocumentTab } from "./DocumentWorkspace.js";
@@ -10,7 +10,6 @@ import { WorksSidebar } from "./WorksSidebar.js";
 export interface CreativeWorkspaceProps {
   readonly activeSidebar: CreativeSidebarId;
   readonly projectState: DesktopProjectState;
-  readonly runtimeInfo: DesktopRuntimeInfo | null;
   readonly documentTabs: readonly DocumentTab[];
   readonly activeDocumentTabKey: string | null;
   readonly onOpenManuscript: (relativePath: string) => void;
@@ -24,7 +23,6 @@ export interface CreativeWorkspaceProps {
 export function CreativeWorkspace({
   activeSidebar,
   projectState,
-  runtimeInfo,
   documentTabs,
   activeDocumentTabKey,
   onOpenManuscript,
@@ -58,7 +56,6 @@ export function CreativeWorkspace({
       <DocumentWorkspace
         tabs={documentTabs}
         activeTabKey={activeDocumentTabKey}
-        runtimeInfo={runtimeInfo}
         onActivate={onActivateDocument}
         onClose={onCloseDocument}
       />

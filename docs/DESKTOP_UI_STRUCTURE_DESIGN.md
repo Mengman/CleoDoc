@@ -6,7 +6,7 @@
 
 ## 1. 设计目标
 
-CleoDoc 桌面界面分为三个层级：窗口标题栏、全局导航区和功能区。
+CleoDoc 桌面界面分为四个层级：窗口标题栏、全局导航区、功能区和状态栏。
 
 设计需要满足以下目标：
 
@@ -24,15 +24,16 @@ CleoDoc 桌面窗口
 │  ├─ 软件 Logo
 │  ├─ 软件菜单
 │  └─ 窗口控制：最小化、最大化/还原、关闭
-└─ 应用主体
+├─ 应用主体
    ├─ 导航区
    └─ 功能区
       ├─ 作品界面
       ├─ 资料界面
       └─ 设置界面
+└─ 状态栏
 ```
 
-`Windows-titlebar` 位于窗口顶部。导航区和功能区位于标题栏下方，并共同占据剩余窗口空间。
+`Windows-titlebar` 位于窗口顶部，状态栏固定在窗口底部。导航区和功能区位于两者之间，并共同占据剩余窗口空间。
 
 ## 3. Windows-titlebar
 
@@ -61,6 +62,12 @@ CleoDoc 桌面窗口
 设置入口在视觉上可以与作品、资料入口分组，但仍然属于同一个全局导航区。
 
 查询等其他 v0.2 能力的具体导航归属尚未在本文确定。在得到新的 UI 决策前，不因其业务存在而自动增加新的顶级导航入口。
+
+## 4.5 状态栏
+
+状态栏固定在窗口最底部，横跨导航区和功能区。它用于展示当前桌面应用的简短运行状态；没有任务时显示“就绪”。
+
+聊天生成、上下文压缩、索引和 Embedding 等长任务进入界面化后，其进度、可取消状态和结果提示统一显示在状态栏中。状态栏不替代任务中心，当前阶段不增加独立面板、历史记录或新的操作入口。
 
 ## 5. 功能区
 
@@ -218,7 +225,7 @@ v0.2 的资料阅读支持 Markdown 和纯文本。资料阅读与作品阅读�
 DesktopShell
 ├─ WindowTitlebar
 ├─ PrimaryNavigation
-└─ FeatureArea
+├─ FeatureArea
    ├─ CreativeWorkspace
    │  ├─ WorksSidebar 或 MaterialsSidebar
    │  ├─ DocumentWorkspace
@@ -228,6 +235,7 @@ DesktopShell
    └─ SettingsWorkspace
       ├─ SettingsNavigation
       └─ SettingsContent
+└─ StatusBar
 ```
 
 其中 `CreativeWorkspace` 表示作品和资料共用的工作区外壳。作品与资料的差异只存在于左侧导航块；`DocumentWorkspace` 和 `ChatPanel` 不消费当前选择的是作品还是资料，始终保持同一实例和同一状态来源。
