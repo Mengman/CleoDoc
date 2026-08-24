@@ -1,5 +1,13 @@
 import { ArrowUp, ChevronDown } from "lucide-react";
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 
 export interface ChatApprovalActions {
   readonly approvalLabel: string;
@@ -30,10 +38,19 @@ export function ChatComposer({
   // 2. Submit on Enter while preserving Shift+Enter for multiline prompts.
   // 3. Disable sending while a request is active or the draft is empty.
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (approval === null) setApprovalMenuOpen(false);
   }, [approval]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea === null) return;
+    const maximumHeight = 256;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maximumHeight)}px`;
+  }, [value]);
 
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -69,6 +86,7 @@ export function ChatComposer({
   return (
     <form className="chat-composer" onSubmit={submit}>
       <textarea
+        ref={textareaRef}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -113,7 +131,6 @@ export function ChatComposer({
           <ArrowUp />
         </button>
       </div>
-      <span>Enter 发送 · Shift+Enter 换行</span>
     </form>
   );
 }

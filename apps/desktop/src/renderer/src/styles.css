@@ -756,41 +756,39 @@ svg {
   padding: 18px;
 }
 .chat-composer {
-  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 12px 14px 22px;
-  border-top: 1px solid var(--line);
-  background: #0d151f;
+  grid-template-rows: minmax(72px, auto) auto;
+  gap: 6px;
+  margin: 10px 12px 12px;
+  padding: 8px;
+  border: 1px solid #2a374b;
+  border-radius: 14px;
+  background: #111b28;
 }
 .chat-composer textarea {
-  min-height: 68px;
-  max-height: 180px;
-  resize: vertical;
-  padding: 11px 42px 11px 12px;
-  border: 1px solid #2a374b;
-  border-radius: 12px;
+  min-height: 72px;
+  max-height: 256px;
+  resize: none;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
   outline: none;
   color: #d6dce7;
-  background: #111b28;
+  background: transparent;
   font: inherit;
   font-size: 11px;
   line-height: 1.55;
-}
-.chat-composer textarea:focus {
-  border-color: #7767d8;
+  overflow-y: auto;
 }
 .chat-composer textarea::placeholder {
   color: #66748a;
 }
 .chat-composer button {
-  align-self: end;
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
-  margin-bottom: 3px;
+  margin: 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -805,13 +803,6 @@ svg {
 }
 .chat-composer button svg {
   width: 17px;
-}
-.chat-composer > span {
-  position: absolute;
-  right: 56px;
-  bottom: 7px;
-  color: #566377;
-  font-size: 8px;
 }
 .chat-panel-state {
   margin: 24px 18px;

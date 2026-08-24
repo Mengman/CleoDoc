@@ -1,13 +1,15 @@
 .chat-composer-actions {
   display: flex;
-  align-items: end;
+  align-items: center;
+  justify-content: end;
   gap: 8px;
+  min-height: 34px;
 }
 
 .chat-approval-control {
   position: relative;
   display: flex;
-  align-items: end;
+  align-items: center;
   overflow: visible;
   border-radius: 9px;
 }
