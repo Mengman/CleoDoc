@@ -101,6 +101,41 @@ export async function chooseAndOpenProject(
   }
 }
 
+export async function chooseAndCreateProject(
+  window: BrowserWindow,
+  runtime: DesktopProjectRuntime,
+): Promise<DesktopProjectOperationResult> {
+  // Let the user select an empty directory, create the project, and open the resulting session.
+  // 1. Use the system dialog so directory selection and creation remain outside the renderer.
+  // 2. Preserve the active project when the selection is cancelled or the directory is rejected.
+  // 3. Publish only the new renderer-safe project state after successful creation and opening.
+  const selection = await dialog.showOpenDialog(window, {
+    title: "新建 CleoDoc 项目",
+    buttonLabel: "在此创建项目",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (selection.canceled || selection.filePaths[0] === undefined) {
+    return desktopProjectOperationResultSchema.parse({
+      outcome: "cancelled",
+      state: runtime.getState(),
+    });
+  }
+
+  try {
+    const state = await runtime.create(selection.filePaths[0]);
+    sendProjectState(window, state);
+    return desktopProjectOperationResultSchema.parse({ outcome: "success", state });
+  } catch (error) {
+    const state = runtime.getState();
+    sendProjectState(window, state);
+    return desktopProjectOperationResultSchema.parse({
+      outcome: "error",
+      state,
+      error: toDesktopOperationError(error),
+    });
+  }
+}
+
 async function chooseAndImportMaterial(window: BrowserWindow, runtime: DesktopProjectRuntime) {
   // Select one supported material file and import it into the current project.
   // 1. Let the operating system return one TXT or Markdown file, or preserve state on cancel.
@@ -435,6 +470,17 @@ export function registerDesktopIpc(
 
     Menu.buildFromTemplate(
       createWindowMenuTemplate(input.menuId, process.env.ELECTRON_RENDERER_URL !== undefined, {
+        onCreateProject: () => {
+          // Keep project-creation failures separate from the current workspace contents.
+          void chooseAndCreateProject(window, runtime).then((result) => {
+            if (result.outcome !== "error") return;
+            void dialog.showMessageBox(window, {
+              type: "error",
+              title: "无法新建项目",
+              message: result.error.message,
+            });
+          });
+        },
         onOpenProject: () => {
           // Run the project picker and show a native error dialog when opening fails.
           void chooseAndOpenProject(window, runtime).then((result) => {

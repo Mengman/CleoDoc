@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import type { ProjectManifest, ProjectStatus } from "../../contracts/src/index.js";
@@ -39,7 +39,7 @@ export class ProjectService {
 
   async create(directory: string, name?: string): Promise<OpenProject> {
     // Create a project directory with its manifest and initial storage structure.
-    // 1. Resolve the requested directory and reject an existing project manifest.
+    // 1. Resolve the requested directory and reject an existing project or non-empty directory.
     // 2. Create the required fact-source and runtime directories, then persist the manifest.
     // 3. Initialize the project database once so its schema is ready for later use.
     const root = path.resolve(directory);
@@ -54,6 +54,10 @@ export class ProjectService {
     });
     if (existing !== null) {
       throw new AppError("PROJECT_ALREADY_EXISTS", "该目录已经是 CleoDoc 项目。");
+    }
+    const entries = await readdir(canonicalRoot);
+    if (entries.length > 0) {
+      throw new AppError("PROJECT_DIRECTORY_NOT_EMPTY", "新项目目录必须为空。");
     }
 
     const now = new Date().toISOString();

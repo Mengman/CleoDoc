@@ -2,6 +2,7 @@ export const appErrorCodes = [
   "VALIDATION_ERROR",
   "PROJECT_NOT_FOUND",
   "PROJECT_ALREADY_EXISTS",
+  "PROJECT_DIRECTORY_NOT_EMPTY",
   "PATH_OUTSIDE_PROJECT",
   "DOCUMENT_NOT_FOUND",
   "DOCUMENT_ALREADY_EXISTS",
@@ -72,6 +73,7 @@ export function getExitCode(code: AppErrorCode): number {
     case "EMBEDDING_MODEL_NOT_FOUND":
       return 3;
     case "PROJECT_ALREADY_EXISTS":
+    case "PROJECT_DIRECTORY_NOT_EMPTY":
     case "DOCUMENT_ALREADY_EXISTS":
     case "MATERIAL_ALREADY_EXISTS":
       return 4;

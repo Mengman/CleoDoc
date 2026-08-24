@@ -3,6 +3,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import type { WindowMenuId } from "../shared/desktop-api.js";
 
 export interface WindowMenuActions {
+  readonly onCreateProject?: () => void;
   readonly onOpenProject?: () => void;
 }
 
@@ -23,7 +24,11 @@ export function createWindowMenuTemplate(
           enabled: actions.onOpenProject !== undefined,
           click: actions.onOpenProject,
         },
-        { label: "新建项目…", enabled: false },
+        {
+          label: "新建项目…",
+          enabled: actions.onCreateProject !== undefined,
+          click: actions.onCreateProject,
+        },
         { type: "separator" },
         { label: "退出 CleoDoc", role: "quit" },
       ];

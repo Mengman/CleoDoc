@@ -126,6 +126,22 @@ export class DesktopProjectRuntime {
     });
   }
 
+  async create(directory: string): Promise<DesktopProjectState> {
+    // Create a new project without disturbing the current session when creation is rejected.
+    return this.enqueue(async () => {
+      const projectService = new ProjectService({ busyTimeoutMs: this.options.busyTimeoutMs });
+      const project = await projectService.create(directory);
+      await this.closeActiveProject();
+      try {
+        await this.openActiveProject(project.root);
+        return this.getState();
+      } catch (error) {
+        await this.closeActiveProject();
+        throw error;
+      }
+    });
+  }
+
   async close(): Promise<DesktopProjectState> {
     return this.enqueue(async () => {
       await this.closeActiveProject();

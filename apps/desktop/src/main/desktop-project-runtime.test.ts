@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -56,6 +56,36 @@ describe("DesktopProjectRuntime", () => {
       },
     });
     expect(JSON.stringify(state)).not.toContain(project.root);
+    await fixture.runtime.dispose();
+  });
+
+  it("creates and opens an empty project without replacing the active project on rejection", async () => {
+    // Verify native project creation keeps the previous session until creation succeeds.
+    // 1. Open an existing project and create a new empty directory through the runtime.
+    // 2. Confirm the new project becomes active with a renderer-safe summary.
+    // 3. Reject a non-empty directory and confirm the active project remains unchanged.
+    const fixture = await createRuntimeFixture();
+    const existing = await fixture.projectService.create(path.join(fixture.root, "existing.cleo"));
+    await fixture.runtime.open(existing.root);
+
+    const created = await fixture.runtime.create(path.join(fixture.root, "new-project.cleo"));
+    expect(created).toMatchObject({
+      status: "open",
+      project: { name: "new-project", documentCount: 0, database: "ok" },
+    });
+    await expect(
+      ProjectService.readProject(path.join(fixture.root, "new-project.cleo")),
+    ).resolves.toMatchObject({
+      manifest: { name: "new-project" },
+    });
+
+    const rejectedDirectory = path.join(fixture.root, "non-empty.cleo");
+    await mkdir(rejectedDirectory);
+    await writeFile(path.join(rejectedDirectory, "notes.txt"), "保留文件");
+    await expect(fixture.runtime.create(rejectedDirectory)).rejects.toMatchObject({
+      code: "PROJECT_DIRECTORY_NOT_EMPTY",
+    });
+    expect(fixture.runtime.getState()).toEqual(created);
     await fixture.runtime.dispose();
   });
 
