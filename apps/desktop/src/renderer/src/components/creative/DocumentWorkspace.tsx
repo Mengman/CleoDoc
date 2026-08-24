@@ -9,32 +9,33 @@ import type { ReactNode } from "react";
 
 import type { DesktopRuntimeInfo } from "../../../../shared/desktop-api.js";
 
-export interface ManuscriptTab {
-  readonly relativePath: string;
+export interface DocumentTab {
+  readonly source: "manuscript" | "material";
+  readonly reference: string;
   readonly content: string | null;
   readonly error: string | null;
 }
 
 export interface DocumentWorkspaceProps {
-  readonly tabs: readonly ManuscriptTab[];
-  readonly activePath: string | null;
+  readonly tabs: readonly DocumentTab[];
+  readonly activeTabKey: string | null;
   readonly runtimeInfo: DesktopRuntimeInfo | null;
-  readonly onActivate: (relativePath: string) => void;
-  readonly onClose: (relativePath: string) => void;
+  readonly onActivate: (tab: DocumentTab) => void;
+  readonly onClose: (tab: DocumentTab) => void;
 }
 
 export function DocumentWorkspace({
   tabs,
-  activePath,
+  activeTabKey,
   runtimeInfo,
   onActivate,
   onClose,
 }: DocumentWorkspaceProps): ReactNode {
-  // Render the shared manuscript tabs and the active document as unformatted text.
+  // Render the shared manuscript and material tabs as unformatted text.
   // 1. Keep every opened document in one ordered tab bar with activation and close actions.
   // 2. Show the existing empty surface or the active tab's loading, error, or text content.
   // 3. Preserve original text line breaks and report the active project-relative path.
-  const activeTab = tabs.find((tab) => tab.relativePath === activePath) ?? null;
+  const activeTab = tabs.find((tab) => documentTabKey(tab) === activeTabKey) ?? null;
 
   return (
     <main className="reader-panel document-workspace">
@@ -42,24 +43,24 @@ export function DocumentWorkspace({
         <div className="document-tabs" role="tablist" aria-label="已打开文档">
           {tabs.map((tab) => (
             <div
-              key={tab.relativePath}
-              className={`reader-tab${tab.relativePath === activePath ? " active" : ""}`}
-              title={tab.relativePath}
+              key={documentTabKey(tab)}
+              className={`reader-tab${documentTabKey(tab) === activeTabKey ? " active" : ""}`}
+              title={documentLocation(tab)}
             >
               <button
                 className="reader-tab-label"
                 type="button"
                 role="tab"
-                aria-selected={tab.relativePath === activePath}
-                onClick={() => onActivate(tab.relativePath)}
+                aria-selected={documentTabKey(tab) === activeTabKey}
+                onClick={() => onActivate(tab)}
               >
-                {fileName(tab.relativePath)}
+                {documentTitle(tab)}
               </button>
               <button
                 className="reader-tab-close"
                 type="button"
-                aria-label={`关闭 ${fileName(tab.relativePath)}`}
-                onClick={() => onClose(tab.relativePath)}
+                aria-label={`关闭 ${documentTitle(tab)}`}
+                onClick={() => onClose(tab)}
               >
                 <CloseIcon />
               </button>
@@ -89,7 +90,7 @@ export function DocumentWorkspace({
       </section>
 
       <footer className="reader-footer">
-        <span>{activeTab === null ? "未选择文档" : activeTab.relativePath}</span>
+        <span>{activeTab === null ? "未选择文档" : documentLocation(activeTab)}</span>
         <span className="runtime-version">
           <i />
           {runtimeInfo === null
@@ -143,6 +144,16 @@ function DocumentState({
   );
 }
 
-function fileName(relativePath: string): string {
-  return relativePath.slice(relativePath.lastIndexOf("/") + 1);
+export function documentTabKey(tab: Pick<DocumentTab, "source" | "reference">): string {
+  return `${tab.source}:${tab.reference}`;
+}
+
+function documentTitle(tab: DocumentTab): string {
+  return tab.source === "manuscript"
+    ? tab.reference.slice(tab.reference.lastIndexOf("/") + 1)
+    : tab.reference;
+}
+
+function documentLocation(tab: DocumentTab): string {
+  return tab.source === "manuscript" ? tab.reference : `资料/${tab.reference}`;
 }

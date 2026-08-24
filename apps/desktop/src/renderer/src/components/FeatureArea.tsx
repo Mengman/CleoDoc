@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { DesktopProjectState, DesktopRuntimeInfo } from "../../../shared/desktop-api.js";
 import type { NavigationId } from "../ui-types.js";
 import { CreativeWorkspace } from "./creative/CreativeWorkspace.js";
-import type { ManuscriptTab } from "./creative/DocumentWorkspace.js";
+import { documentTabKey, type DocumentTab } from "./creative/DocumentWorkspace.js";
 import { SettingsWorkspace } from "./settings/SettingsWorkspace.js";
 
 export interface FeatureAreaProps {
@@ -12,10 +12,10 @@ export interface FeatureAreaProps {
   readonly runtimeInfo: DesktopRuntimeInfo | null;
 }
 
-interface ManuscriptWorkspaceState {
+interface DocumentWorkspaceState {
   readonly projectId: string | null;
-  readonly tabs: readonly ManuscriptTab[];
-  readonly activePath: string | null;
+  readonly tabs: readonly DocumentTab[];
+  readonly activeTabKey: string | null;
 }
 
 export function FeatureArea({
@@ -29,103 +29,122 @@ export function FeatureArea({
   // 3. Preserve the tab collection while the settings workspace temporarily replaces the view.
   // 4. Handle tab activation and closing without rereading documents that remain open.
   const projectId = projectState.status === "open" ? projectState.project.id : null;
-  const [manuscripts, setManuscripts] = useState<ManuscriptWorkspaceState>({
+  const [documents, setDocuments] = useState<DocumentWorkspaceState>({
     projectId,
     tabs: [],
-    activePath: null,
+    activeTabKey: null,
   });
-  const visibleManuscripts =
-    manuscripts.projectId === projectId ? manuscripts : { projectId, tabs: [], activePath: null };
+  const visibleDocuments =
+    documents.projectId === projectId ? documents : { projectId, tabs: [], activeTabKey: null };
 
   useEffect(() => {
-    setManuscripts({ projectId, tabs: [], activePath: null });
+    setDocuments({ projectId, tabs: [], activeTabKey: null });
   }, [projectId]);
 
   function openManuscript(relativePath: string): void {
-    // Activate an existing tab or create one placeholder and load its text through Typed IPC.
+    openDocument("manuscript", relativePath);
+  }
+
+  function openMaterial(title: string): void {
+    openDocument("material", title);
+  }
+
+  function openDocument(source: DocumentTab["source"], reference: string): void {
+    // Activate one open tab or load a new manuscript or material tab through Typed IPC.
     // 1. Reuse an existing tab without issuing another file read.
-    // 2. Append and activate a loading tab for a newly selected project path.
-    // 3. Apply the eventual content or safe error only to the originating project.
+    // 2. Append and activate a loading tab for a newly selected current-project document.
+    // 3. Apply the eventual content or safe error only to the originating project and tab.
     const requestProjectId = projectId;
     if (requestProjectId === null) return;
-    if (visibleManuscripts.tabs.some((tab) => tab.relativePath === relativePath)) {
-      activateManuscript(relativePath);
+    const tab: DocumentTab = { source, reference, content: null, error: null };
+    if (
+      visibleDocuments.tabs.some((existing) => documentTabKey(existing) === documentTabKey(tab))
+    ) {
+      activateDocument(tab);
       return;
     }
-    setManuscripts((current) => {
-      const state = current.projectId === requestProjectId ? current : visibleManuscripts;
+    setDocuments((current) => {
+      const state = current.projectId === requestProjectId ? current : visibleDocuments;
       return {
         ...state,
-        activePath: relativePath,
-        tabs: [...state.tabs, { relativePath, content: null, error: null }],
+        activeTabKey: documentTabKey(tab),
+        tabs: [...state.tabs, tab],
       };
     });
-    void window.cleodoc
-      .readManuscriptDocument(relativePath)
-      .then((result) => {
-        updateLoadedManuscript(requestProjectId, relativePath, result);
-      })
+    const reader =
+      source === "manuscript"
+        ? window.cleodoc.readManuscriptDocument(reference)
+        : window.cleodoc.readMaterial(reference);
+    void reader
+      .then((result) => updateLoadedDocument(requestProjectId, tab, result))
       .catch(() => {
-        updateManuscriptError(requestProjectId, relativePath, "无法读取文档");
+        updateDocumentError(requestProjectId, tab, "无法读取文档");
       });
   }
 
-  function activateManuscript(relativePath: string): void {
-    setManuscripts((current) =>
-      current.projectId === projectId ? { ...current, activePath: relativePath } : current,
+  function activateDocument(tab: DocumentTab): void {
+    setDocuments((current) =>
+      current.projectId === projectId ? { ...current, activeTabKey: documentTabKey(tab) } : current,
     );
   }
 
-  function closeManuscript(relativePath: string): void {
+  function closeDocument(tab: DocumentTab): void {
     // Remove one tab and activate its next neighbor when the active tab closes.
-    setManuscripts((current) => {
+    setDocuments((current) => {
       if (current.projectId !== projectId) return current;
-      const closedIndex = current.tabs.findIndex((tab) => tab.relativePath === relativePath);
+      const closingKey = documentTabKey(tab);
+      const closedIndex = current.tabs.findIndex((item) => documentTabKey(item) === closingKey);
       if (closedIndex === -1) return current;
-      const tabs = current.tabs.filter((tab) => tab.relativePath !== relativePath);
-      const activePath =
-        current.activePath === relativePath
-          ? (tabs[closedIndex]?.relativePath ?? tabs[closedIndex - 1]?.relativePath ?? null)
-          : current.activePath;
-      return { ...current, tabs, activePath };
+      const tabs = current.tabs.filter((item) => documentTabKey(item) !== closingKey);
+      const nextActiveTab = tabs[closedIndex] ?? tabs[closedIndex - 1] ?? null;
+      return {
+        ...current,
+        tabs,
+        activeTabKey:
+          current.activeTabKey === closingKey
+            ? nextActiveTab === null
+              ? null
+              : documentTabKey(nextActiveTab)
+            : current.activeTabKey,
+      };
     });
   }
 
-  function updateLoadedManuscript(
+  function updateLoadedDocument(
     requestProjectId: string,
-    relativePath: string,
-    result: Awaited<ReturnType<typeof window.cleodoc.readManuscriptDocument>>,
+    tab: DocumentTab,
+    result:
+      | Awaited<ReturnType<typeof window.cleodoc.readManuscriptDocument>>
+      | Awaited<ReturnType<typeof window.cleodoc.readMaterial>>,
   ): void {
     // Apply one read result only when its project and tab are still active in this workspace.
     if (result.outcome === "error") {
-      updateManuscriptError(requestProjectId, relativePath, result.error.message);
+      updateDocumentError(requestProjectId, tab, result.error.message);
       return;
     }
-    setManuscripts((current) =>
+    setDocuments((current) =>
       current.projectId !== requestProjectId
         ? current
         : {
             ...current,
-            tabs: current.tabs.map((tab) =>
-              tab.relativePath === relativePath ? { ...tab, content: result.content } : tab,
+            tabs: current.tabs.map((item) =>
+              documentTabKey(item) === documentTabKey(tab)
+                ? { ...item, content: result.content }
+                : item,
             ),
           },
     );
   }
 
-  function updateManuscriptError(
-    requestProjectId: string,
-    relativePath: string,
-    message: string,
-  ): void {
+  function updateDocumentError(requestProjectId: string, tab: DocumentTab, message: string): void {
     // Keep a failed tab visible with its safe read error when the project still matches.
-    setManuscripts((current) =>
+    setDocuments((current) =>
       current.projectId !== requestProjectId
         ? current
         : {
             ...current,
-            tabs: current.tabs.map((tab) =>
-              tab.relativePath === relativePath ? { ...tab, error: message } : tab,
+            tabs: current.tabs.map((item) =>
+              documentTabKey(item) === documentTabKey(tab) ? { ...item, error: message } : item,
             ),
           },
     );
@@ -140,11 +159,12 @@ export function FeatureArea({
           activeSidebar={activeNavigation}
           projectState={projectState}
           runtimeInfo={runtimeInfo}
-          manuscriptTabs={visibleManuscripts.tabs}
-          activeManuscriptPath={visibleManuscripts.activePath}
+          documentTabs={visibleDocuments.tabs}
+          activeDocumentTabKey={visibleDocuments.activeTabKey}
           onOpenManuscript={openManuscript}
-          onActivateManuscript={activateManuscript}
-          onCloseManuscript={closeManuscript}
+          onOpenMaterial={openMaterial}
+          onActivateDocument={activateDocument}
+          onCloseDocument={closeDocument}
         />
       )}
     </section>

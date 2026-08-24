@@ -124,6 +124,24 @@ export class MaterialService {
     return repository.list();
   }
 
+  static async readByTitle(
+    projectRoot: string,
+    projectId: string,
+    database: ProjectDatabase,
+    maxImportBytes: number,
+    title: string,
+  ): Promise<MaterialWithContent> {
+    // Read one current-project material selected by its unique user-visible title.
+    const source = (
+      await MaterialService.list(projectRoot, projectId, database, maxImportBytes)
+    ).find((item) => item.title === title);
+    if (source === undefined) throw materialNotFound(title);
+    return {
+      source,
+      content: await readMaterialSourceContent(projectRoot, source, maxImportBytes),
+    };
+  }
+
   async addFile(
     filePath: string,
     options: AddFileMaterialOptions = {},

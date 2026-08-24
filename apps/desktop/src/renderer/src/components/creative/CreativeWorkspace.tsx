@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import type { DesktopProjectState, DesktopRuntimeInfo } from "../../../../shared/desktop-api.js";
 import type { CreativeSidebarId } from "../../ui-types.js";
 import { ChatPanel } from "./ChatPanel.js";
-import { DocumentWorkspace, type ManuscriptTab } from "./DocumentWorkspace.js";
+import { DocumentWorkspace, documentTabKey, type DocumentTab } from "./DocumentWorkspace.js";
 import { MaterialsSidebar } from "./MaterialsSidebar.js";
 import { WorksSidebar } from "./WorksSidebar.js";
 
@@ -11,44 +11,50 @@ export interface CreativeWorkspaceProps {
   readonly activeSidebar: CreativeSidebarId;
   readonly projectState: DesktopProjectState;
   readonly runtimeInfo: DesktopRuntimeInfo | null;
-  readonly manuscriptTabs: readonly ManuscriptTab[];
-  readonly activeManuscriptPath: string | null;
+  readonly documentTabs: readonly DocumentTab[];
+  readonly activeDocumentTabKey: string | null;
   readonly onOpenManuscript: (relativePath: string) => void;
-  readonly onActivateManuscript: (relativePath: string) => void;
-  readonly onCloseManuscript: (relativePath: string) => void;
+  readonly onOpenMaterial: (title: string) => void;
+  readonly onActivateDocument: (tab: DocumentTab) => void;
+  readonly onCloseDocument: (tab: DocumentTab) => void;
 }
 
 export function CreativeWorkspace({
   activeSidebar,
   projectState,
   runtimeInfo,
-  manuscriptTabs,
-  activeManuscriptPath,
+  documentTabs,
+  activeDocumentTabKey,
   onOpenManuscript,
-  onActivateManuscript,
-  onCloseManuscript,
+  onOpenMaterial,
+  onActivateDocument,
+  onCloseDocument,
 }: CreativeWorkspaceProps): ReactNode {
   // Keep the document workspace and chat panel shared while switching only the left sidebar.
   // 1. Switch the feature-specific left sidebar without recreating the shared panels.
-  // 2. Forward manuscript selection, activation, and closing to the shared tab state.
+  // 2. Forward manuscript and material selection, activation, and closing to shared tab state.
   // 3. Keep the chat panel bound to the current project session.
   return (
     <div className="creative-workspace">
       {activeSidebar === "works" ? (
         <WorksSidebar
           projectState={projectState}
-          activeDocumentPath={activeManuscriptPath}
+          activeDocumentPath={activeManuscriptPath(documentTabs, activeDocumentTabKey)}
           onOpenDocument={onOpenManuscript}
         />
       ) : (
-        <MaterialsSidebar projectState={projectState} />
+        <MaterialsSidebar
+          projectState={projectState}
+          activeMaterialTitle={activeMaterialTitle(documentTabs, activeDocumentTabKey)}
+          onOpenMaterial={onOpenMaterial}
+        />
       )}
       <DocumentWorkspace
-        tabs={manuscriptTabs}
-        activePath={activeManuscriptPath}
+        tabs={documentTabs}
+        activeTabKey={activeDocumentTabKey}
         runtimeInfo={runtimeInfo}
-        onActivate={onActivateManuscript}
-        onClose={onCloseManuscript}
+        onActivate={onActivateDocument}
+        onClose={onCloseDocument}
       />
       <ChatPanel
         key={projectState.status === "open" ? projectState.project.id : "closed"}
@@ -56,4 +62,20 @@ export function CreativeWorkspace({
       />
     </div>
   );
+}
+
+function activeManuscriptPath(
+  tabs: readonly DocumentTab[],
+  activeTabKey: string | null,
+): string | null {
+  const tab = tabs.find((item) => documentTabKey(item) === activeTabKey);
+  return tab?.source === "manuscript" ? tab.reference : null;
+}
+
+function activeMaterialTitle(
+  tabs: readonly DocumentTab[],
+  activeTabKey: string | null,
+): string | null {
+  const tab = tabs.find((item) => documentTabKey(item) === activeTabKey);
+  return tab?.source === "material" ? tab.reference : null;
 }

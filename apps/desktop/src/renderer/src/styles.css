@@ -232,12 +232,24 @@ svg {
 .material-list-item {
   display: flex;
   align-items: center;
+  width: 100%;
   min-width: 0;
   padding: 9px 10px;
+  border: 0;
   border-radius: 8px;
   color: #a7b1c2;
   background: #111b29;
+  cursor: pointer;
   font-size: 11px;
+  text-align: left;
+}
+.material-list-item:hover {
+  color: #d4dae5;
+  background: #172234;
+}
+.material-list-item.active {
+  color: #ded9ff;
+  background: #272143;
 }
 .material-list-item span {
   overflow: hidden;

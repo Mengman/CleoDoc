@@ -210,6 +210,17 @@ export class DesktopProjectRuntime {
     );
   }
 
+  readMaterial(title: string) {
+    const active = this.requireActiveProject();
+    return MaterialService.readByTitle(
+      active.project.root,
+      active.project.manifest.id,
+      active.database,
+      this.options.maxMaterialImportBytes,
+      title,
+    );
+  }
+
   readManuscriptDocument(relativePath: string) {
     return this.requireActiveProject().documents.readReadableDocument(relativePath);
   }

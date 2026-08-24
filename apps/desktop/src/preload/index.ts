@@ -11,6 +11,8 @@ import {
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
+  materialReadResultSchema,
+  materialTitleSchema,
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   sendDesktopChatMessageResultSchema,
@@ -73,6 +75,10 @@ const desktopApi: CleoDocDesktopApi = {
     ),
   listMaterials: async () =>
     materialListResultSchema.parse(await ipcRenderer.invoke(desktopChannels.listMaterials)),
+  readMaterial: async (title) =>
+    materialReadResultSchema.parse(
+      await ipcRenderer.invoke(desktopChannels.readMaterial, materialTitleSchema.parse(title)),
+    ),
   getLlmApiSettings: async () =>
     desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),
   saveLlmApiSettings: async (input) =>

@@ -151,6 +151,13 @@ describe("DesktopProjectRuntime", () => {
       "人物名册",
       "港口资料",
     ]);
+    await expect(fixture.runtime.readMaterial("人物名册")).resolves.toMatchObject({
+      source: { title: "人物名册" },
+      content: "灯塔守卫名册",
+    });
+    await expect(fixture.runtime.readMaterial("不存在的资料")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
 
     const second = await fixture.projectService.create(
       path.join(fixture.root, "empty-materials.cleo"),

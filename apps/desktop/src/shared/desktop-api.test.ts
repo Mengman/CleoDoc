@@ -12,6 +12,7 @@ import {
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   materialListResultSchema,
+  materialReadResultSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
@@ -146,8 +147,8 @@ describe("desktop manuscript document schemas", () => {
 });
 
 describe("desktop material list schema", () => {
-  it("exposes imported material titles without internal metadata", () => {
-    // Verify the renderer receives only the titles required by the current list UI.
+  it("exposes material titles and read-only content without internal metadata", () => {
+    // Verify the renderer can select a material by title and receive only safe reading content.
     expect(
       materialListResultSchema.parse({
         outcome: "success",
@@ -158,6 +159,21 @@ describe("desktop material list schema", () => {
       materialListResultSchema.parse({
         outcome: "success",
         materials: [{ title: "人物名册", relativePath: "materials/private.json" }],
+      }),
+    ).toThrow();
+    expect(
+      materialReadResultSchema.parse({
+        outcome: "success",
+        title: "人物名册",
+        content: "林默\n港口守夜人",
+      }),
+    ).toEqual({ outcome: "success", title: "人物名册", content: "林默\n港口守夜人" });
+    expect(() =>
+      materialReadResultSchema.parse({
+        outcome: "success",
+        title: "人物名册",
+        content: "林默",
+        relativePath: "materials/private.txt",
       }),
     ).toThrow();
   });

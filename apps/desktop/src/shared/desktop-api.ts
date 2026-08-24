@@ -10,6 +10,7 @@ export const desktopChannels = {
   listManuscriptDocuments: "desktop:list-manuscript-documents",
   manuscriptDocumentsChanged: "desktop:manuscript-documents-changed",
   listMaterials: "desktop:list-materials",
+  readMaterial: "desktop:read-material",
   readManuscriptDocument: "desktop:read-manuscript-document",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
@@ -120,6 +121,19 @@ export const materialListResultSchema = z.discriminatedUnion("outcome", [
     .object({
       outcome: z.literal("success"),
       materials: z.array(z.string().trim().min(1)),
+    })
+    .strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
+export const materialTitleSchema = z.string().trim().min(1).max(200);
+
+export const materialReadResultSchema = z.discriminatedUnion("outcome", [
+  z
+    .object({
+      outcome: z.literal("success"),
+      title: materialTitleSchema,
+      content: z.string(),
     })
     .strict(),
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
@@ -251,6 +265,7 @@ export type ManuscriptListResult = z.infer<typeof manuscriptListResultSchema>;
 export type ManuscriptDocumentsChangedEvent = z.infer<typeof manuscriptDocumentsChangedEventSchema>;
 export type ManuscriptReadResult = z.infer<typeof manuscriptReadResultSchema>;
 export type MaterialListResult = z.infer<typeof materialListResultSchema>;
+export type MaterialReadResult = z.infer<typeof materialReadResultSchema>;
 export type ShowWindowMenuInput = z.infer<typeof showWindowMenuInputSchema>;
 export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
@@ -282,6 +297,7 @@ export interface CleoDocDesktopApi {
   ) => () => void;
   readonly readManuscriptDocument: (relativePath: string) => Promise<ManuscriptReadResult>;
   readonly listMaterials: () => Promise<MaterialListResult>;
+  readonly readMaterial: (title: string) => Promise<MaterialReadResult>;
   readonly getLlmApiSettings: () => Promise<DesktopLlmApiSettings>;
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,
