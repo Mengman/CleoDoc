@@ -5,10 +5,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
+import { AppError } from "../../../../packages/contracts/src/index.js";
 import { MaterialService } from "../../../../packages/knowledge/src/index.js";
+import type { MaterialServiceOptions } from "../../../../packages/knowledge/src/material-types.js";
 import { ProjectService } from "../../../../packages/project/src/index.js";
 import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
 import {
+  createTestMaterialOptions,
   TEST_CHAT_OPTIONS,
   TEST_DATABASE_OPTIONS,
   TEST_MATERIAL_OPTIONS,
@@ -161,10 +164,27 @@ describe("DesktopProjectRuntime", () => {
     const inputPath = path.join(fixture.root, "harbor-notes.md");
     await writeFile(inputPath, "# 港口笔记\n\n潮汐在黎明前转向。\n", "utf8");
     await expect(fixture.runtime.importMaterial(inputPath)).resolves.toMatchObject({
-      created: true,
-      inputEncoding: "utf-8",
-      source: { title: "harbor-notes", format: "markdown" },
+      imported: {
+        created: true,
+        inputEncoding: "utf-8",
+        source: { title: "harbor-notes", format: "markdown" },
+      },
+      embeddingFailure: null,
     });
+    const importedMaterials = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    try {
+      await expect(importedMaterials.getIndexStatus()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            title: "harbor-notes",
+            embeddedChunkCount: 1,
+            pendingEmbeddingCount: 0,
+          }),
+        ]),
+      );
+    } finally {
+      await importedMaterials.close();
+    }
     await expect(fixture.runtime.readMaterial("harbor-notes")).resolves.toMatchObject({
       content: "# 港口笔记\n\n潮汐在黎明前转向。\n",
     });
@@ -185,6 +205,38 @@ describe("DesktopProjectRuntime", () => {
     );
     await fixture.runtime.open(second.root);
     await expect(fixture.runtime.listMaterials()).resolves.toEqual([]);
+    await fixture.runtime.dispose();
+  });
+
+  it("keeps an imported material when automatic embedding cannot complete", async () => {
+    // Verify an embedding failure is reported separately and never rolls back imported material facts.
+    const materials = createTestMaterialOptions();
+    const fixture = await createRuntimeFixture({
+      materials: {
+        ...materials,
+        embeddingModels: {
+          ...materials.embeddingModels,
+          zh: {
+            ...materials.embeddingModels.zh,
+            async runEmbeddingTask() {
+              throw new AppError("EMBEDDING_GENERATION_FAILED", "Embedding 推理失败。");
+            },
+          },
+        },
+      },
+    });
+    const project = await fixture.projectService.create(path.join(fixture.root, "embedding.cleo"));
+    await fixture.runtime.open(project.root);
+    const inputPath = path.join(fixture.root, "lighthouse.txt");
+    await writeFile(inputPath, "灯塔守卫在黎明前更换煤油灯。", "utf8");
+
+    await expect(fixture.runtime.importMaterial(inputPath)).resolves.toMatchObject({
+      imported: { source: { title: "lighthouse" } },
+      embeddingFailure: { code: "EMBEDDING_GENERATION_FAILED" },
+    });
+    await expect(fixture.runtime.readMaterial("lighthouse")).resolves.toMatchObject({
+      content: "灯塔守卫在黎明前更换煤油灯。",
+    });
     await fixture.runtime.dispose();
   });
 
@@ -281,7 +333,9 @@ describe("DesktopProjectRuntime", () => {
   });
 });
 
-async function createRuntimeFixture(): Promise<{
+async function createRuntimeFixture(
+  options: { readonly materials?: MaterialServiceOptions } = {},
+): Promise<{
   root: string;
   runtime: DesktopProjectRuntime;
   projectService: ProjectService;
@@ -303,7 +357,7 @@ async function createRuntimeFixture(): Promise<{
         context: TEST_CHAT_OPTIONS.context,
         compaction: TEST_CHAT_OPTIONS.compaction,
       },
-      materials: TEST_MATERIAL_OPTIONS,
+      materials: options.materials ?? TEST_MATERIAL_OPTIONS,
       provider: senderForProvider(new FakeModelProvider("ok")),
     }),
   };

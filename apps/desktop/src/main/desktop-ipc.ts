@@ -116,12 +116,20 @@ async function chooseAndImportMaterial(window: BrowserWindow, runtime: DesktopPr
   }
   try {
     const result = await runtime.importMaterial(selection.filePaths[0]);
+    if (result.embeddingFailure !== null) {
+      await dialog.showMessageBox(window, {
+        type: "warning",
+        title: "资料已导入，但 Embedding 未完成",
+        message: "资料已保存，但暂时无法生成 Embedding。",
+        detail: result.embeddingFailure.message,
+      });
+    }
     return materialImportResultSchema.parse({
       outcome: "success",
       material: {
-        title: result.source.title,
-        inputEncoding: result.inputEncoding,
-        created: result.created,
+        title: result.imported.source.title,
+        inputEncoding: result.imported.inputEncoding,
+        created: result.imported.created,
       },
     });
   } catch (error) {

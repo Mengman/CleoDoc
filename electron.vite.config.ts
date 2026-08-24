@@ -11,8 +11,11 @@ export default defineConfig({
       outDir: "out/main",
       rollupOptions: {
         external: ["node-llama-cpp", /^@node-llama-cpp\//],
-        input: fromRoot("./apps/desktop/src/main/index.ts"),
-        output: { entryFileNames: "index.js" },
+        input: {
+          index: fromRoot("./apps/desktop/src/main/index.ts"),
+          "chunks/embedding-worker": fromRoot("./packages/rag/src/embedding-worker.ts"),
+        },
+        output: { entryFileNames: "[name].js" },
       },
     },
   },

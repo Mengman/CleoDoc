@@ -45,6 +45,11 @@ export interface DesktopProjectChatContext {
   readonly conversations: Pick<ConversationHistoryService, "getConversation" | "getRecentHistory">;
 }
 
+export interface DesktopMaterialImportTaskResult {
+  readonly imported: Awaited<ReturnType<MaterialService["addFile"]>>;
+  readonly embeddingFailure: { readonly code: string; readonly message: string } | null;
+}
+
 interface ActiveProject {
   readonly project: OpenProject;
   readonly database: ProjectDatabase;
@@ -222,12 +227,28 @@ export class DesktopProjectRuntime {
     );
   }
 
-  async importMaterial(filePath: string) {
-    // Import one chosen file through the current project's existing material service.
-    const task = this.startTask(async ({ projectRoot }) => {
+  async importMaterial(filePath: string): Promise<DesktopMaterialImportTaskResult> {
+    // Import and index one chosen file through the current project's material service.
+    // 1. Persist the validated source and create its document, chunk, and FTS projections.
+    // 2. Generate pending embeddings only for a newly created source after those facts are ready.
+    // 3. Preserve the imported source when a recoverable embedding failure leaves work pending.
+    const task = this.startTask(async ({ projectRoot, signal }) => {
       const materials = await MaterialService.open(projectRoot, this.options.materials);
       try {
-        return await materials.addFile(filePath);
+        const imported = await materials.addFile(filePath);
+        if (!imported.created) return { imported, embeddingFailure: null };
+        const embedding = await materials.embedIndex({ signal, continueOnError: true });
+        const failedModel = embedding.models.find((model) => model.errorCode !== null);
+        return {
+          imported,
+          embeddingFailure:
+            failedModel === undefined
+              ? null
+              : {
+                  code: failedModel.errorCode ?? "EMBEDDING_GENERATION_FAILED",
+                  message: failedModel.errorMessage ?? "无法生成资料 Embedding。",
+                },
+        };
       } finally {
         await materials.close();
       }
