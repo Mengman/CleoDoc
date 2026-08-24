@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -650,66 +650,6 @@ describe("session compaction", () => {
     }
   });
 });
-
-class CompactionAwareProvider implements ModelProvider {
-  readonly id = "compaction-script";
-  readonly displayName = "Compaction Script";
-  readonly requests: ProviderModelRequest[] = [];
-  readonly summary = "# 当前目标\n\n继续创作小说。\n\n# 已确认决定\n\n- 主角是一名退休刑警。";
-  compactionChunks = 0;
-  private normalCalls = 0;
-
-  async validateConfiguration(): Promise<ProviderHealth> {
-    return { ok: true, message: "ready" };
-  }
-
-  async *stream(request: ProviderModelRequest): AsyncIterable<ModelEvent> {
-    this.requests.push(request);
-    if (request.messages[0]?.content.includes("会话上下文压缩器")) {
-      const firstBoundary = Math.floor(this.summary.length / 3);
-      const secondBoundary = Math.floor((this.summary.length * 2) / 3);
-      for (const text of [
-        this.summary.slice(0, firstBoundary),
-        this.summary.slice(firstBoundary, secondBoundary),
-        this.summary.slice(secondBoundary),
-      ]) {
-        this.compactionChunks += 1;
-        yield { type: "text-delta", text };
-      }
-      yield { type: "done", finishReason: "stop" };
-      return;
-    }
-
-    this.normalCalls += 1;
-    if (this.normalCalls === 1) {
-      yield { type: "text-delta", text: "已记录主角职业。" };
-    } else if (this.normalCalls === 2) {
-      yield {
-        type: "tool-call",
-        call: {
-          id: "load-history-search",
-          name: "project_tool_catalog",
-          argumentsJson: JSON.stringify({
-            action: "get",
-            name: "search_conversation_history",
-          }),
-        },
-      };
-    } else if (this.normalCalls === 3) {
-      yield {
-        type: "tool-call",
-        call: {
-          id: "history-1",
-          name: "search_conversation_history",
-          argumentsJson: JSON.stringify({ query: "退休刑警" }),
-        },
-      };
-    } else {
-      yield { type: "text-delta", text: "历史显示主角是退休刑警。" };
-    }
-    yield { type: "done", finishReason: "stop" };
-  }
-}
 
 class EmptyCompactionProvider implements ModelProvider {
   readonly id = "empty-script";
