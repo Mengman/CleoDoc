@@ -79,12 +79,13 @@ describe("DesktopProjectRuntime", () => {
         database: "ok",
       },
     });
-    await expect(
-      ProjectService.readProject(path.join(fixture.root, "new-project.cleo")),
-    ).resolves.toMatchObject({
+    const newProject = await ProjectService.readProject(
+      path.join(fixture.root, "new-project.cleo"),
+    );
+    expect(newProject).toMatchObject({
       manifest: { name: "new-project" },
     });
-    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(fixture.root);
+    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(path.dirname(newProject.root));
     await fixture.runtime.setRecentDirectory(path.join(fixture.root, "materials"));
     await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(
       path.join(fixture.root, "materials"),
