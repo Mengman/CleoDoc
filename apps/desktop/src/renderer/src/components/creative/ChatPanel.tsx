@@ -32,8 +32,10 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     Readonly<Record<string, readonly DesktopConversationMessage[]>>
   >({});
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
+  const [newConversationDraft, setNewConversationDraft] = useState("");
   const [listScrollTop, setListScrollTop] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [creatingConversation, setCreatingConversation] = useState(false);
   const activeRequestId = useRef<string | null>(null);
   const [activeSendingConversationId, setActiveSendingConversationId] = useState<string | null>(
     null,
@@ -52,6 +54,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     selectedConversationId.current = null;
     setMessagesByConversation({});
     setDrafts({});
+    setNewConversationDraft("");
     setListScrollTop(0);
     setError(null);
     if (projectId === null) return () => undefined;
@@ -111,16 +114,48 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   }
 
   function updateDraft(value: string): void {
-    if (selected !== null) setDrafts((current) => ({ ...current, [selected.id]: value }));
+    if (selected === null) {
+      setNewConversationDraft(value);
+      return;
+    }
+    setDrafts((current) => ({ ...current, [selected.id]: value }));
   }
 
-  async function sendMessage(prompt: string): Promise<void> {
-    // Continue the selected conversation while applying desktop-client results to UI state.
+  async function startConversation(prompt: string): Promise<void> {
+    // Create and select a new conversation before sending its first message.
+    // 1. Keep the list draft unchanged until conversation creation succeeds.
+    // 2. Add and select the new conversation before the streaming reply can arrive.
+    // 3. Reuse the regular send path so first and later messages behave identically.
+    if (creatingConversation || activeRequestId.current !== null) return;
+    setCreatingConversation(true);
+    setError(null);
+    try {
+      const result = await window.cleodoc.createConversation({ prompt });
+      if (result.outcome === "error") {
+        setError(result.error.message);
+        return;
+      }
+      selectedConversationId.current = result.conversation.id;
+      setSelected(result.conversation);
+      setConversations((current) => [
+        result.conversation,
+        ...current.filter((conversation) => conversation.id !== result.conversation.id),
+      ]);
+      setMessagesByConversation((current) => ({ ...current, [result.conversation.id]: [] }));
+      setNewConversationDraft("");
+      await sendMessage(result.conversation, prompt);
+    } catch {
+      setError("无法创建对话，请稍后重试");
+    } finally {
+      setCreatingConversation(false);
+    }
+  }
+
+  async function sendMessage(conversation: DesktopConversationItem, prompt: string): Promise<void> {
+    // Send one prompt into the supplied conversation and apply desktop-client results to UI state.
     // 1. Append the submitted text optimistically and clear only that conversation's draft.
     // 2. Delegate IPC correlation and stream subscription lifetime to DesktopChatClient.
     // 3. Replace only this turn's temporary messages with its persisted incremental result.
-    const conversation = selected;
-    if (conversation === null) return;
     const draftKey = conversation.id;
     if (prompt.length === 0 || activeRequestId.current !== null) return;
 
@@ -242,15 +277,15 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
           }}
         />
       )}
-      {selected === null ? null : (
-        <ChatComposer
-          value={drafts[selected.id] ?? ""}
-          disabled={activeSendingConversationId === selected.id}
-          placeholder="继续当前对话…"
-          onChange={updateDraft}
-          onSubmit={(prompt) => void sendMessage(prompt)}
-        />
-      )}
+      <ChatComposer
+        value={selected === null ? newConversationDraft : (drafts[selected.id] ?? "")}
+        disabled={creatingConversation || activeSendingConversationId !== null}
+        placeholder={selected === null ? "开始新的对话…" : "继续当前对话…"}
+        onChange={updateDraft}
+        onSubmit={(prompt) =>
+          void (selected === null ? startConversation(prompt) : sendMessage(selected, prompt))
+        }
+      />
     </aside>
   );
 }

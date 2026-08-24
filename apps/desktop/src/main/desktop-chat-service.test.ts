@@ -35,6 +35,20 @@ afterEach(async () => {
 });
 
 describe("DesktopChatService", () => {
+  it("creates a project conversation from its first list message", async () => {
+    // Verify a list composer can create a project-bound conversation before streaming its first turn.
+    const fixture = await createFixture();
+    const chat = new DesktopChatService(fixture.runtime);
+
+    const conversation = await chat.createConversation("讨论第三章的冲突");
+
+    expect(conversation.title).toBe("讨论第三章的冲突");
+    expect(fixture.runtime.listConversations()).toEqual([
+      expect.objectContaining({ id: conversation.id, title: "讨论第三章的冲突" }),
+    ]);
+    await fixture.runtime.dispose();
+  });
+
   it("continues a project conversation and emits only desktop chat events", async () => {
     // Verify the desktop use case returns only this turn instead of reloading recent history.
     const fixture = await createFixture();

@@ -6,6 +6,7 @@ import {
   desktopLlmApiSettingsResultSchema,
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
+  desktopConversationCreateResultSchema,
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
@@ -26,6 +27,7 @@ import {
   saveDesktopLlmApiSettingsInputSchema,
   renameDesktopMaterialInputSchema,
   getDesktopConversationHistoryInputSchema,
+  createDesktopConversationInputSchema,
   sendDesktopChatMessageInputSchema,
 } from "../shared/desktop-api.js";
 
@@ -114,6 +116,13 @@ const desktopApi: CleoDocDesktopApi = {
   listConversations: async () =>
     desktopConversationListResultSchema.parse(
       await ipcRenderer.invoke(desktopChannels.listConversations),
+    ),
+  createConversation: async (input) =>
+    desktopConversationCreateResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.createConversation,
+        createDesktopConversationInputSchema.parse(input),
+      ),
     ),
   getConversationHistory: async (input) =>
     desktopConversationHistoryResultSchema.parse(

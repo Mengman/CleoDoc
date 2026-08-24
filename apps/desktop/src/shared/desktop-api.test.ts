@@ -6,6 +6,8 @@ import {
   desktopRuntimeInfoSchema,
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
+  createDesktopConversationInputSchema,
+  desktopConversationCreateResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
@@ -319,6 +321,25 @@ describe("sendDesktopChatMessageInputSchema", () => {
         prompt: "创建对话",
       }),
     ).toThrow();
+  });
+});
+
+describe("createDesktopConversationInputSchema", () => {
+  it("accepts a first message and returns only its renderer-safe conversation", () => {
+    // Verify list submission cannot create a conversation with hidden project or database fields.
+    expect(createDesktopConversationInputSchema.parse({ prompt: "开始讨论" })).toEqual({
+      prompt: "开始讨论",
+    });
+    expect(
+      desktopConversationCreateResultSchema.parse({
+        outcome: "success",
+        conversation: { id: "7e564f20-70ec-4a3d-b820-54299948635d", title: "开始讨论" },
+      }),
+    ).toEqual({
+      outcome: "success",
+      conversation: { id: "7e564f20-70ec-4a3d-b820-54299948635d", title: "开始讨论" },
+    });
+    expect(() => createDesktopConversationInputSchema.parse({ prompt: "  " })).toThrow();
   });
 });
 

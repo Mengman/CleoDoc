@@ -34,6 +34,13 @@ export function createDesktopChatServiceOptions() {
 export class DesktopChatService {
   constructor(private readonly projects: DesktopProjectRuntime) {}
 
+  createConversation(prompt: string): Promise<DesktopChatResult["conversation"]> {
+    return this.projects.runChatTask(async ({ projectId, chat }) => {
+      const conversation = await chat.createConversation(projectId, prompt);
+      return { id: conversation.id, title: conversation.title };
+    });
+  }
+
   send(
     input: SendDesktopChatMessageInput,
     emitEvent: (event: DesktopChatMessageEvent) => void,

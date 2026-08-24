@@ -5,6 +5,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } fr
 import {
   desktopChannels,
   desktopConversationHistoryResultSchema,
+  desktopConversationCreateResultSchema,
   desktopConversationListResultSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
@@ -21,6 +22,7 @@ import {
   desktopProjectOperationResultSchema,
   desktopRuntimeInfoSchema,
   getDesktopConversationHistoryInputSchema,
+  createDesktopConversationInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
   showWindowMenuInputSchema,
@@ -440,6 +442,23 @@ export function registerDesktopIpc(
       });
     } catch (error) {
       return desktopConversationListResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.createConversation, async (event, rawInput: unknown) => {
+    // Create a new project-bound conversation before its first streamed message is sent.
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const input = createDesktopConversationInputSchema.parse(rawInput);
+      return desktopConversationCreateResultSchema.parse({
+        outcome: "success",
+        conversation: await chat.createConversation(input.prompt),
+      });
+    } catch (error) {
+      return desktopConversationCreateResultSchema.parse({
         outcome: "error",
         error: toDesktopOperationError(error),
       });

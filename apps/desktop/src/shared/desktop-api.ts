@@ -19,6 +19,7 @@ export const desktopChannels = {
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
   listConversations: "desktop:list-conversations",
+  createConversation: "desktop:create-conversation",
   getConversationHistory: "desktop:get-conversation-history",
   sendChatMessage: "desktop:send-chat-message",
   chatMessageEvent: "desktop:chat-message-event",
@@ -232,6 +233,10 @@ export const getDesktopConversationHistoryInputSchema = z
   .object({ conversationId: z.uuid() })
   .strict();
 
+export const createDesktopConversationInputSchema = z
+  .object({ prompt: z.string().trim().min(1).max(100_000) })
+  .strict();
+
 export const sendDesktopChatMessageInputSchema = z
   .object({
     requestId: z.uuid(),
@@ -287,6 +292,11 @@ export const desktopConversationHistoryResultSchema = z.discriminatedUnion("outc
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
+export const desktopConversationCreateResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("success"), conversation: desktopConversationItemSchema }).strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
 export const sendDesktopChatMessageResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
@@ -320,12 +330,14 @@ export type DesktopConversationMessage = z.infer<typeof desktopConversationMessa
 export type GetDesktopConversationHistoryInput = z.infer<
   typeof getDesktopConversationHistoryInputSchema
 >;
+export type CreateDesktopConversationInput = z.infer<typeof createDesktopConversationInputSchema>;
 export type SendDesktopChatMessageInput = z.infer<typeof sendDesktopChatMessageInputSchema>;
 export type DesktopChatMessageEvent = z.infer<typeof desktopChatMessageEventSchema>;
 export type DesktopConversationListResult = z.infer<typeof desktopConversationListResultSchema>;
 export type DesktopConversationHistoryResult = z.infer<
   typeof desktopConversationHistoryResultSchema
 >;
+export type DesktopConversationCreateResult = z.infer<typeof desktopConversationCreateResultSchema>;
 export type SendDesktopChatMessageResult = z.infer<typeof sendDesktopChatMessageResultSchema>;
 
 export interface CleoDocDesktopApi {
@@ -351,6 +363,9 @@ export interface CleoDocDesktopApi {
     input: SaveDesktopLlmApiSettingsInput,
   ) => Promise<DesktopLlmApiSettingsResult>;
   readonly listConversations: () => Promise<DesktopConversationListResult>;
+  readonly createConversation: (
+    input: CreateDesktopConversationInput,
+  ) => Promise<DesktopConversationCreateResult>;
   readonly getConversationHistory: (
     input: GetDesktopConversationHistoryInput,
   ) => Promise<DesktopConversationHistoryResult>;

@@ -38,7 +38,7 @@ export interface DesktopProjectTask<T> {
 export interface DesktopProjectChatContext {
   readonly projectId: string;
   readonly signal: AbortSignal;
-  readonly chat: Pick<ChatService, "send">;
+  readonly chat: Pick<ChatService, "createConversation" | "send">;
   readonly conversations: Pick<ConversationHistoryService, "getConversation" | "getRecentHistory">;
 }
 

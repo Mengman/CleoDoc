@@ -147,10 +147,7 @@ export class ChatService {
     const contextBudgetPolicy = this.contextBudgetPolicyFor(execution);
     const conversation =
       input.conversationId === undefined
-        ? await this.repository.createConversation({
-            projectId: input.projectId,
-            title: input.prompt.slice(0, 80),
-          })
+        ? await this.createConversation(input.projectId, input.prompt)
         : this.repository.getConversation(input.conversationId);
     if (conversation === null) {
       throw new AppError("VALIDATION_ERROR", "指定的对话不存在。");
@@ -376,6 +373,10 @@ export class ChatService {
         },
       });
     }
+  }
+
+  createConversation(projectId: string, prompt: string): Promise<ConversationRecord> {
+    return this.repository.createConversation({ projectId, title: prompt.slice(0, 80) });
   }
 
   getLatestConversation(projectId: string): ConversationSummary | null {
