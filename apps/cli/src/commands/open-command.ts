@@ -1,4 +1,5 @@
 import { AppError } from "../../../../packages/contracts/src/index.js";
+import { ProjectService } from "../../../../packages/project/src/index.js";
 import { assertOnlyOptions, type ParsedArguments } from "../arguments.js";
 import type { CliCommandContext } from "./command-context.js";
 
@@ -10,7 +11,7 @@ export async function runOpenCommand(
   if (parsed.positionals.length !== 1 || parsed.positionals[0] === undefined) {
     throw new AppError("VALIDATION_ERROR", "用法：cleo open <directory>");
   }
-  const project = await context.projectService.open(parsed.positionals[0]);
+  const project = await ProjectService.readProject(parsed.positionals[0]);
   await context.appState.setCurrentProject(project.root);
   context.output.write(`当前项目：${project.manifest.name}\n${project.root}\n`);
 }

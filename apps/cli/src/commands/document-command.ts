@@ -1,5 +1,5 @@
 import { AppError } from "../../../../packages/contracts/src/index.js";
-import { DocumentService } from "../../../../packages/project/src/index.js";
+import { DocumentService, ProjectService } from "../../../../packages/project/src/index.js";
 import { assertOnlyOptions, optionString, type ParsedArguments } from "../arguments.js";
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
 import { printSaved } from "./command-utils.js";
@@ -15,7 +15,7 @@ export async function runDocumentCommand(
   const [subcommand, reference] = parsed.positionals;
   assertOnlyOptions(parsed, ["project", "content"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
-  const project = await context.projectService.open(root);
+  const project = await ProjectService.readProject(root);
   const documents = new DocumentService(project.root);
 
   switch (subcommand) {

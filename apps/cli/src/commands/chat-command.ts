@@ -45,7 +45,6 @@ export async function runChatCommand(
   }
   const config = getSoftwareConfig();
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
-  const project = await context.projectService.open(root);
   const providerId =
     optionString(parsed, "provider") ?? config.llm.selectedProvider ?? "openai-compatible";
   const model =
@@ -58,15 +57,30 @@ export async function runChatCommand(
   }
   const provider = providerServiceFromArguments(providerId, model, parsed);
   const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
-  const knowledge = await KnowledgeToolService.open(project.root, createMaterialServiceOptions());
-  const chat = await ChatService.open(project.root, chatServiceOptions(), {
+  const project = await context.projectService.open(root);
+  const knowledge = await KnowledgeToolService.open(
+    context.projectService,
+    createMaterialServiceOptions(),
+  ).catch(async (error: unknown) => {
+    await context.projectService.close();
+    throw error;
+  });
+  const chat = await ChatService.open(context.projectService, chatServiceOptions(), {
     knowledge,
     provider,
   }).catch(async (error: unknown) => {
     await knowledge.close();
+    await context.projectService.close();
     throw error;
   });
-  const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
+  const debugLogger = debug
+    ? await LlmDebugFileLogger.create(project.root).catch(async (error: unknown) => {
+        await chat.close();
+        await knowledge.close();
+        await context.projectService.close();
+        throw error;
+      })
+    : undefined;
   const onDebugEvent = debugLogger?.onEvent;
   if (debugLogger !== undefined) {
     context.output.write(`Debug 日志：${debugLogger.filePath}\n`);
@@ -103,7 +117,11 @@ export async function runChatCommand(
       try {
         await knowledge.close();
       } finally {
-        await debugLogger?.close();
+        try {
+          await debugLogger?.close();
+        } finally {
+          await context.projectService.close();
+        }
       }
     }
   }

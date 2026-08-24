@@ -9,6 +9,7 @@ export interface RagCommandDependencies {
   readonly defaultDebug: boolean;
   readonly resolveProjectRoot: (explicitProject: string | undefined) => Promise<string>;
   readonly openMaterials: (projectRoot: string) => Promise<RagMaterialService>;
+  readonly closeProject?: () => Promise<void>;
 }
 
 export type RagMaterialService = Pick<

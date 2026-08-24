@@ -13,7 +13,12 @@ export async function runConversationCommand(
   assertOnlyOptions(parsed, ["project"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
   const project = await context.projectService.open(root);
-  const chat = await ChatService.open(project.root, chatServiceOptions());
+  const chat = await ChatService.open(context.projectService, chatServiceOptions()).catch(
+    async (error: unknown) => {
+      await context.projectService.close();
+      throw error;
+    },
+  );
   try {
     if (subcommand === "list" && parsed.positionals.length === 1) {
       const conversations = chat.listConversations(project.manifest.id);
@@ -31,6 +36,10 @@ export async function runConversationCommand(
     }
     throw new AppError("VALIDATION_ERROR", "用法：cleo conversation <list|show <conversation-id>>");
   } finally {
-    await chat.close();
+    try {
+      await chat.close();
+    } finally {
+      await context.projectService.close();
+    }
   }
 }

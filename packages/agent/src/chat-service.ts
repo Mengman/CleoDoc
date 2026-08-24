@@ -20,10 +20,10 @@ import {
   ConversationRepository,
   ModelCallRepository,
   ProjectInstructionRepository,
-  ProjectDatabase,
   SessionRepository,
 } from "../../database/src/index.js";
-import { DocumentService } from "../../project/src/index.js";
+import type { ProjectDatabase } from "../../database/src/index.js";
+import { DocumentService, ProjectService } from "../../project/src/index.js";
 import type { KnowledgeToolService } from "../../knowledge/src/index.js";
 import { ProjectToolCatalog, ProjectToolRuntime } from "./tool/index.js";
 import {
@@ -90,7 +90,7 @@ export class ChatService {
     private readonly database: ProjectDatabase,
     private readonly options: ChatServiceOptions,
     private readonly dependencies: ChatServiceDependencies,
-    private readonly ownsDatabase = true,
+    private readonly projectServiceToClose: ProjectService | undefined,
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
@@ -106,32 +106,34 @@ export class ChatService {
   }
 
   static async open(
-    projectRoot: string,
+    projectServiceOrRoot: ProjectService | string,
     options: ChatServiceOptions,
     dependencies: ChatServiceDependencies = {},
   ): Promise<ChatService> {
-    const service = new ChatService(
-      projectRoot,
-      await ProjectDatabase.open(projectRoot, options.database),
-      options,
-      dependencies,
-    );
-    await service.sessions.recoverInterruptedJobs();
-    await service.modelCalls.recoverInterruptedCalls();
-    return service;
-  }
-
-  static async usingDatabase(
-    projectRoot: string,
-    database: ProjectDatabase,
-    options: ChatServiceOptions,
-    dependencies: ChatServiceDependencies = {},
-  ): Promise<ChatService> {
-    // Attach chat behavior to an already-open project database without taking ownership of it.
-    const service = new ChatService(projectRoot, database, options, dependencies, false);
-    await service.sessions.recoverInterruptedJobs();
-    await service.modelCalls.recoverInterruptedCalls();
-    return service;
+    // Open chat behavior against an existing project session or a compatibility project scope.
+    // 1. Reuse the supplied ProjectService, or create and open one for the legacy path input.
+    // 2. Build chat repositories and recover interrupted session and model-call work.
+    // 3. Close only a compatibility ProjectService if recovery cannot complete.
+    const ownsProjectService = typeof projectServiceOrRoot === "string";
+    const projectService = ownsProjectService
+      ? new ProjectService(options.database)
+      : projectServiceOrRoot;
+    if (ownsProjectService) await projectService.open(projectServiceOrRoot);
+    try {
+      const service = new ChatService(
+        projectService.project.root,
+        projectService.database,
+        options,
+        dependencies,
+        ownsProjectService ? projectService : undefined,
+      );
+      await service.sessions.recoverInterruptedJobs();
+      await service.modelCalls.recoverInterruptedCalls();
+      return service;
+    } catch (error) {
+      if (ownsProjectService) await projectService.close();
+      throw error;
+    }
   }
 
   async send(input: SendMessageInput): Promise<ChatTurnResult> {
@@ -518,7 +520,7 @@ export class ChatService {
 
   async close(): Promise<void> {
     this.toolRuntimes.clear();
-    if (this.ownsDatabase) await this.database.close();
+    await this.projectServiceToClose?.close();
   }
 
   private getToolRuntime(conversation: ConversationRecord): ProjectToolRuntime {

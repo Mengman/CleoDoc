@@ -14,9 +14,9 @@ import { AppError, KNOWLEDGE_SOURCE_SCHEMA_VERSION } from "../../contracts/src/i
 import {
   KnowledgeContextRepository,
   MaterialRepository,
-  ProjectDatabase,
   type KnowledgeChunkContext,
 } from "../../database/src/index.js";
+import type { ProjectDatabase } from "../../database/src/index.js";
 import { detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
@@ -68,6 +68,7 @@ export class MaterialService {
     embeddingModels: MaterialServiceOptions["embeddingModels"],
     embeddingChunkBatchSize: number,
     retrieval: MaterialServiceOptions["retrieval"],
+    private readonly projectServiceToClose: ProjectService | undefined,
   ) {
     this.repository = new MaterialRepository(database);
     this.contextRepository = new KnowledgeContextRepository(database);
@@ -83,15 +84,45 @@ export class MaterialService {
   }
 
   static async open(
-    projectRoot: string,
+    projectServiceOrRoot: ProjectService | string,
     options: MaterialServiceOptions,
   ): Promise<MaterialService> {
-    const project = await new ProjectService(options.database).open(projectRoot);
-    await ensureMaterialDirectories(project.root);
-    const database = await ProjectDatabase.open(project.root, options.database);
+    // Open material behavior against an existing project session or a compatibility project scope.
+    // 1. Reuse the supplied ProjectService, or create and open one for the legacy path input.
+    // 2. Prepare material directories and initialize projections through the project database.
+    // 3. Close only a compatibility ProjectService if initialization cannot complete.
+    const ownsProjectService = typeof projectServiceOrRoot === "string";
+    const projectService = ownsProjectService
+      ? new ProjectService(options.database)
+      : projectServiceOrRoot;
+    if (ownsProjectService) await projectService.open(projectServiceOrRoot);
+    const project = projectService.project;
+    try {
+      await ensureMaterialDirectories(project.root);
+      return await MaterialService.create(
+        project.root,
+        project.manifest.id,
+        projectService.database,
+        options,
+        ownsProjectService ? projectService : undefined,
+      );
+    } catch (error) {
+      if (ownsProjectService) await projectService.close();
+      throw error;
+    }
+  }
+
+  private static async create(
+    projectRoot: string,
+    projectId: string,
+    database: ProjectDatabase,
+    options: MaterialServiceOptions,
+    projectServiceToClose: ProjectService | undefined,
+  ): Promise<MaterialService> {
+    // Initialize one material service without taking ownership of the project database.
     const service = new MaterialService(
-      project.root,
-      project.manifest.id,
+      projectRoot,
+      projectId,
       database,
       options.maxImportBytes,
       options.languageDetection,
@@ -99,47 +130,16 @@ export class MaterialService {
       options.embeddingModels,
       options.embeddingChunkBatchSize,
       options.retrieval,
+      projectServiceToClose,
     );
     try {
       await service.synchronizeProjection();
       await service.indexer.markOutdated(service.repository.list());
       return service;
     } catch (error) {
-      await database.close();
+      await service.indexer.close().catch(() => undefined);
       throw error;
     }
-  }
-
-  static async list(
-    projectRoot: string,
-    projectId: string,
-    database: ProjectDatabase,
-    maxImportBytes: number,
-  ): Promise<KnowledgeSource[]> {
-    // Load project materials through an existing project database connection.
-    await ensureMaterialDirectories(projectRoot);
-    const repository = new MaterialRepository(database);
-    const sources = await readMaterialMetadataSources(projectRoot, projectId, maxImportBytes);
-    await repository.synchronize(sources);
-    return repository.list();
-  }
-
-  static async readByTitle(
-    projectRoot: string,
-    projectId: string,
-    database: ProjectDatabase,
-    maxImportBytes: number,
-    title: string,
-  ): Promise<MaterialWithContent> {
-    // Read one current-project material selected by its unique user-visible title.
-    const source = (
-      await MaterialService.list(projectRoot, projectId, database, maxImportBytes)
-    ).find((item) => item.title === title);
-    if (source === undefined) throw materialNotFound(title);
-    return {
-      source,
-      content: await readMaterialSourceContent(projectRoot, source, maxImportBytes),
-    };
   }
 
   async addFile(
@@ -188,6 +188,12 @@ export class MaterialService {
   async list(): Promise<KnowledgeSource[]> {
     await this.synchronizeProjection();
     return this.repository.list();
+  }
+
+  async readByTitle(title: string): Promise<MaterialWithContent> {
+    const source = (await this.list()).find((item) => item.title === title);
+    if (source === undefined) throw materialNotFound(title);
+    return { source, content: await this.readSourceContent(source) };
   }
 
   async get(id: string): Promise<MaterialWithContent> {
@@ -332,7 +338,7 @@ export class MaterialService {
     try {
       await this.indexer.close();
     } finally {
-      await this.database.close();
+      await this.projectServiceToClose?.close();
     }
   }
 

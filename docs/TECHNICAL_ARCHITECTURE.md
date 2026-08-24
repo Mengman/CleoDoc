@@ -228,6 +228,7 @@ flowchart TB
 - `DesktopProjectRuntime` 负责构造并校验 Renderer-safe 的 `DesktopProjectState`；Main IPC 直接传递该可信投影，不重复解析。Preload 仍对跨进程收到的状态执行 Schema 校验，Renderer 输入和 Main 新构造的其他公共响应也继续在各自边界校验。
 - Desktop 组合层只维护一个当前主窗口引用，IPC 仅接受该窗口主 Frame 的请求。项目打开、切换或关闭后的状态只定向发送给这个窗口，窗口销毁后停止发送；不遍历全部窗口，也不维护多窗口路由或 Project/Window 映射。
 - Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接，只向桌面聊天用例提供当前项目的 ID、取消信号、`ChatService` 和 Conversation 查询边界；Provider、模型和上下文预算不再作为 Runtime 调用参数。
+- `ProjectService` 是项目数据库的唯一生命周期所有者：打开项目时创建 `ProjectDatabase`，项目结束时关闭它，并将其提供给同一项目的其他 package 服务。`MaterialService`、`ChatService` 等服务只释放自身的 Worker、Tokenizer 或内存状态，不能直接关闭数据库。Desktop Runtime 自身只保存桌面编排状态；活动项目内部持有这些 package 服务并共用该连接。保留的 `MaterialService.open(projectRoot, options)` 与 `ChatService.open(projectRoot, options)` 兼容入口会先创建一个内部 `ProjectService`，再由该项目服务完成数据库关闭；CLI 与 Desktop 必须显式创建、最后关闭 `ProjectService`。
 - Renderer 只提交 Conversation ID 和文本，`ChatService` 从共享 `ProviderService` 获取本次操作的当前 Provider、模型、模型参数和能力快照。`ProviderService` 读取安全凭据并复用内部 Provider 实例；Conversation 不保存或恢复 Provider/模型选择。
 - 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
 - Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。

@@ -11,14 +11,10 @@ import {
   asAppError,
   type ModelMessageSender,
 } from "../../../../packages/contracts/src/index.js";
-import { ProjectDatabase } from "../../../../packages/database/src/index.js";
+import type { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import { MaterialService } from "../../../../packages/knowledge/src/material-service.js";
 import type { MaterialServiceOptions } from "../../../../packages/knowledge/src/material-types.js";
-import {
-  DocumentService,
-  type OpenProject,
-  ProjectService,
-} from "../../../../packages/project/src/index.js";
+import { DocumentService, ProjectService } from "../../../../packages/project/src/index.js";
 import {
   desktopProjectStateSchema,
   type DesktopProjectState,
@@ -51,8 +47,8 @@ export interface DesktopMaterialImportTaskResult {
 }
 
 interface ActiveProject {
-  readonly project: OpenProject;
-  readonly database: ProjectDatabase;
+  readonly projectService: ProjectService;
+  readonly materials: MaterialService;
   readonly documents: DocumentService;
   readonly documentCount: number;
   readonly controller: AbortController;
@@ -72,7 +68,6 @@ export interface DesktopProjectRuntimeOptions {
 
 export class DesktopProjectRuntime {
   private readonly appStateService: AppStateService;
-  private readonly projectService: ProjectService;
   private activeProject: ActiveProject | undefined;
   private operationTail: Promise<void> = Promise.resolve();
   private manuscriptDocumentsChangedListener:
@@ -80,7 +75,6 @@ export class DesktopProjectRuntime {
 
   constructor(private readonly options: DesktopProjectRuntimeOptions) {
     this.appStateService = options.appStateService ?? new AppStateService();
-    this.projectService = new ProjectService({ busyTimeoutMs: options.busyTimeoutMs });
   }
 
   getState(): DesktopProjectState {
@@ -91,9 +85,9 @@ export class DesktopProjectRuntime {
     return desktopProjectStateSchema.parse({
       status: "open",
       project: {
-        id: active.project.manifest.id,
-        name: active.project.manifest.name,
-        language: active.project.manifest.language,
+        id: active.projectService.project.manifest.id,
+        name: active.projectService.project.manifest.name,
+        language: active.projectService.project.manifest.language,
         documentCount: active.documentCount,
         database: "ok",
       },
@@ -158,9 +152,9 @@ export class DesktopProjectRuntime {
 
     const promise = Promise.resolve().then(() =>
       operation({
-        projectId: active.project.manifest.id,
-        projectRoot: active.project.root,
-        database: active.database,
+        projectId: active.projectService.project.manifest.id,
+        projectRoot: active.projectService.project.root,
+        database: active.projectService.database,
         signal: controller.signal,
       }),
     );
@@ -207,24 +201,11 @@ export class DesktopProjectRuntime {
   }
 
   listMaterials() {
-    const active = this.requireActiveProject();
-    return MaterialService.list(
-      active.project.root,
-      active.project.manifest.id,
-      active.database,
-      this.options.materials.maxImportBytes,
-    );
+    return this.requireActiveProject().materials.list();
   }
 
   readMaterial(title: string) {
-    const active = this.requireActiveProject();
-    return MaterialService.readByTitle(
-      active.project.root,
-      active.project.manifest.id,
-      active.database,
-      this.options.materials.maxImportBytes,
-      title,
-    );
+    return this.requireActiveProject().materials.readByTitle(title);
   }
 
   async importMaterial(filePath: string): Promise<DesktopMaterialImportTaskResult> {
@@ -232,60 +213,48 @@ export class DesktopProjectRuntime {
     // 1. Persist the validated source and create its document, chunk, and FTS projections.
     // 2. Generate pending embeddings only for a newly created source after those facts are ready.
     // 3. Preserve the imported source when a recoverable embedding failure leaves work pending.
-    const task = this.startTask(async ({ projectRoot, signal }) => {
-      const materials = await MaterialService.open(projectRoot, this.options.materials);
-      try {
-        const imported = await materials.addFile(filePath);
-        if (!imported.created) return { imported, embeddingFailure: null };
-        const embedding = await materials.embedIndex({ signal, continueOnError: true });
-        const failedModel = embedding.models.find((model) => model.errorCode !== null);
-        return {
-          imported,
-          embeddingFailure:
-            failedModel === undefined
-              ? null
-              : {
-                  code: failedModel.errorCode ?? "EMBEDDING_GENERATION_FAILED",
-                  message: failedModel.errorMessage ?? "无法生成资料 Embedding。",
-                },
-        };
-      } finally {
-        await materials.close();
-      }
+    const active = this.requireActiveProject();
+    const task = this.startTask(async ({ signal }) => {
+      const imported = await active.materials.addFile(filePath);
+      if (!imported.created) return { imported, embeddingFailure: null };
+      const embedding = await active.materials.embedIndex({ signal, continueOnError: true });
+      const failedModel = embedding.models.find((model) => model.errorCode !== null);
+      return {
+        imported,
+        embeddingFailure:
+          failedModel === undefined
+            ? null
+            : {
+                code: failedModel.errorCode ?? "EMBEDDING_GENERATION_FAILED",
+                message: failedModel.errorMessage ?? "无法生成资料 Embedding。",
+              },
+      };
     });
     return await task.promise;
   }
 
   async renameMaterial(title: string, newTitle: string) {
     // Rename a current-project material using its unique user-visible title.
-    const task = this.startTask(async ({ projectRoot }) => {
-      const materials = await MaterialService.open(projectRoot, this.options.materials);
-      try {
-        const current = (await materials.list()).find((material) => material.title === title);
-        if (current === undefined) {
-          throw new AppError("MATERIAL_NOT_FOUND", `找不到资料：${title}`);
-        }
-        return await materials.rename(current.id, newTitle);
-      } finally {
-        await materials.close();
+    const active = this.requireActiveProject();
+    const task = this.startTask(async () => {
+      const current = (await active.materials.list()).find((material) => material.title === title);
+      if (current === undefined) {
+        throw new AppError("MATERIAL_NOT_FOUND", `找不到资料：${title}`);
       }
+      return await active.materials.rename(current.id, newTitle);
     });
     return await task.promise;
   }
 
   async deleteMaterial(title: string) {
     // Delete one current-project material selected by its unique user-visible title.
-    const task = this.startTask(async ({ projectRoot }) => {
-      const materials = await MaterialService.open(projectRoot, this.options.materials);
-      try {
-        const current = (await materials.list()).find((material) => material.title === title);
-        if (current === undefined) {
-          throw new AppError("MATERIAL_NOT_FOUND", `找不到资料：${title}`);
-        }
-        return await materials.remove(current.id);
-      } finally {
-        await materials.close();
+    const active = this.requireActiveProject();
+    const task = this.startTask(async () => {
+      const current = (await active.materials.list()).find((material) => material.title === title);
+      if (current === undefined) {
+        throw new AppError("MATERIAL_NOT_FOUND", `找不到资料：${title}`);
       }
+      return await active.materials.remove(current.id);
     });
     return await task.promise;
   }
@@ -315,25 +284,24 @@ export class DesktopProjectRuntime {
     // 3. Open chat resources and start the project-scoped manuscript watcher.
     // 4. Persist the selected project before publishing the new in-memory session.
     // 5. Stop partial resources when any initialization step fails.
-    const project = await this.projectService.open(directory);
-    const database = await ProjectDatabase.open(project.root, {
-      busyTimeoutMs: this.options.busyTimeoutMs,
-    });
+    const projectService = new ProjectService({ busyTimeoutMs: this.options.busyTimeoutMs });
+    const project = await projectService.open(directory);
     const controller = new AbortController();
     let stopManuscriptWatcher = (): void => undefined;
+    let materials: MaterialService | undefined;
     try {
-      if (!database.quickCheck()) {
+      if (!projectService.database.quickCheck()) {
         throw new AppError("DATABASE_ERROR", "项目数据库完整性检查失败。");
       }
       const documents = new DocumentService(project.root);
+      materials = await MaterialService.open(projectService, this.options.materials);
       const [projectDocuments, readableDocumentPaths] = await Promise.all([
         documents.list(),
         documents.listReadableDocumentPaths(),
       ]);
       const documentCount = projectDocuments.length;
-      const chat = await ChatService.usingDatabase(
-        project.root,
-        database,
+      const chat = await ChatService.open(
+        projectService,
         { database: { busyTimeoutMs: this.options.busyTimeoutMs }, ...this.options.chat },
         { provider: this.options.provider },
       );
@@ -360,13 +328,13 @@ export class DesktopProjectRuntime {
         watcherError = error;
       }
       const activeProject: ActiveProject = {
-        project,
-        database,
+        projectService,
+        materials,
         documents,
         documentCount,
         controller,
         tasks: new Map(),
-        conversations: new ConversationHistoryService(database, project.manifest.id),
+        conversations: new ConversationHistoryService(projectService.database, project.manifest.id),
         chat,
         stopManuscriptWatcher,
       };
@@ -381,7 +349,8 @@ export class DesktopProjectRuntime {
     } catch (error) {
       controller.abort();
       stopManuscriptWatcher();
-      await database.close();
+      await materials?.close().catch(() => undefined);
+      await projectService.close();
       throw error;
     }
   }
@@ -396,7 +365,8 @@ export class DesktopProjectRuntime {
       active.stopManuscriptWatcher();
       await Promise.allSettled(active.tasks.values());
       await active.chat.close();
-      await active.database.close();
+      await active.materials.close();
+      await active.projectService.close();
     }
     if (clearRememberedProject) await this.appStateService.clearCurrentProject();
   }
