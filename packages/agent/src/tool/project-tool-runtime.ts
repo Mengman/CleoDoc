@@ -171,9 +171,7 @@ export class ProjectToolRuntime {
       );
     }
     const choice = await approve({
-      toolName: tool.name,
-      toolVersion: tool.version,
-      input,
+      approvalLabel: tool.approvalLabel,
     });
     if (choice === "reject") {
       return toolFailure("USER_REJECTED", "用户拒绝了本次 Tool 调用。");

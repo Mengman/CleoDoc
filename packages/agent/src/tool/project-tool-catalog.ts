@@ -114,6 +114,7 @@ export class ProjectToolCatalog implements Tool<ProjectToolCatalogInput, Project
     "发现当前项目可用的 Tool。使用 list 分页查看全部 Tool；使用 get 按名称取得完整定义并使该版本从下一轮起可调用。";
   readonly exposure = "full";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = [
     {
       code: "TOOL_NOT_FOUND",

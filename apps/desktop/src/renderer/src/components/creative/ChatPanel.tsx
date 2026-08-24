@@ -6,6 +6,7 @@ import type {
   DesktopConversationItem,
   DesktopConversationMessage,
   DesktopProjectState,
+  DesktopToolApprovalChoice,
 } from "../../../../shared/desktop-api.js";
 import { DesktopChatClient } from "../../desktop-chat-client.js";
 import { ChatComposer } from "./ChatComposer.js";
@@ -43,6 +44,11 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   const [streamingReasoningMessageId, setStreamingReasoningMessageId] = useState<string | null>(
     null,
   );
+  const [pendingToolApproval, setPendingToolApproval] = useState<{
+    readonly requestId: string;
+    readonly conversationId: string;
+    readonly approvalLabel: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,6 +61,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     setMessagesByConversation({});
     setDrafts({});
     setNewConversationDraft("");
+    setPendingToolApproval(null);
     setListScrollTop(0);
     setError(null);
     if (projectId === null) return () => undefined;
@@ -206,7 +213,36 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
       if (activeRequestId.current === requestId) activeRequestId.current = null;
       setStreamingReasoningMessageId(null);
       setActiveSendingConversationId(null);
+      setPendingToolApproval((current) => (current?.requestId === requestId ? null : current));
     }
+  }
+
+  function resolveToolApproval(choice: DesktopToolApprovalChoice): void {
+    // Submit one pending authorization choice and restore the control only if the request is stale.
+    // 1. Remove the visible control immediately to prevent duplicate decisions.
+    // 2. Resolve the correlated main-process approval through Typed IPC.
+    // 3. Restore the control and report a safe error only when it could not be accepted.
+    const approval = pendingToolApproval;
+    if (approval === null) return;
+    setPendingToolApproval(null);
+    void window.cleodoc
+      .resolveToolApproval({
+        requestId: approval.requestId,
+        conversationId: approval.conversationId,
+        choice,
+      })
+      .then(
+        (result) => {
+          if (result.outcome === "error") {
+            setError(result.error.message);
+            setPendingToolApproval(approval);
+          }
+        },
+        () => {
+          setError("无法提交授权决定，请稍后重试");
+          setPendingToolApproval(approval);
+        },
+      );
   }
 
   function acceptChatEvent(event: DesktopChatMessageEvent): void {
@@ -215,6 +251,14 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
     // 2. Append reasoning or content deltas to that conversation's temporary assistant message.
     // 3. Track active reasoning disclosure only while its conversation remains visible.
     const messageId = `streaming-${event.requestId}`;
+    if (event.type === "tool-approval-requested") {
+      setPendingToolApproval({
+        requestId: event.requestId,
+        conversationId: event.conversationId,
+        approvalLabel: event.approvalLabel,
+      });
+      return;
+    }
     if (event.type === "reasoning-complete") {
       if (event.conversationId === selectedConversationId.current) {
         setStreamingReasoningMessageId(null);
@@ -281,6 +325,16 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
         value={selected === null ? newConversationDraft : (drafts[selected.id] ?? "")}
         disabled={creatingConversation || activeSendingConversationId !== null}
         placeholder={selected === null ? "开始新的对话…" : "继续当前对话…"}
+        approval={
+          pendingToolApproval === null
+            ? null
+            : {
+                approvalLabel: pendingToolApproval.approvalLabel,
+                onAllowOnce: () => resolveToolApproval("allow_once"),
+                onReject: () => resolveToolApproval("reject"),
+                onAllowUntilExit: () => resolveToolApproval("allow_until_exit"),
+              }
+        }
         onChange={updateDraft}
         onSubmit={(prompt) =>
           void (selected === null ? startConversation(prompt) : sendMessage(selected, prompt))

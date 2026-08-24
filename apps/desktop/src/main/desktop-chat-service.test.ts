@@ -83,6 +83,47 @@ describe("DesktopChatService", () => {
     ]);
     await fixture.runtime.dispose();
   });
+
+  it("waits for a desktop approval before executing a write Tool", async () => {
+    // Verify the renderer can settle one pending Tool request without exposing its input over events.
+    const fixture = await createFixture();
+    const initial = await fixture.runtime.runChatTask(({ projectId, signal, chat }) =>
+      chat.send({ projectId, prompt: "开始对话", signal }),
+    );
+    fixture.provider.use(new ApprovalProvider(), "deepseek-v4-flash");
+    const chat = new DesktopChatService(fixture.runtime);
+    const requestId = "8e564f20-70ec-4a3d-b820-54299948635d";
+    const events: DesktopChatMessageEvent[] = [];
+
+    const result = await chat.send(
+      { requestId, conversationId: initial.conversationId, prompt: "保存章节" },
+      (event) => {
+        events.push(event);
+        if (event.type === "tool-approval-requested") {
+          expect(
+            chat.resolveToolApproval({
+              requestId: event.requestId,
+              conversationId: event.conversationId,
+              choice: "allow_once",
+            }),
+          ).toBe(true);
+        }
+      },
+    );
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool-approval-requested",
+        requestId,
+        approvalLabel: "文件写入",
+      }),
+    );
+    expect(result.messages[1].content).toBe("章节已保存。");
+    expect((await fixture.runtime.readManuscriptDocument("manuscript/approval.md")).content).toBe(
+      "# 授权章节\n",
+    );
+    await fixture.runtime.dispose();
+  });
 });
 
 class ScriptedProvider implements ModelProvider {
@@ -101,6 +142,37 @@ class ScriptedProvider implements ModelProvider {
   async *stream(): AsyncIterable<ModelEvent> {
     if (this.reasoning !== undefined) yield { type: "reasoning-delta", text: this.reasoning };
     yield { type: "text-delta", text: this.content };
+    yield { type: "done", finishReason: "stop" };
+  }
+}
+
+class ApprovalProvider implements ModelProvider {
+  readonly id = "approval-script";
+  readonly displayName = "Approval Script Provider";
+  private requestCount = 0;
+
+  async validateConfiguration(): Promise<ProviderHealth> {
+    return { ok: true, message: "ready" };
+  }
+
+  async *stream(): AsyncIterable<ModelEvent> {
+    this.requestCount += 1;
+    if (this.requestCount === 1) {
+      yield {
+        type: "tool-call",
+        call: {
+          id: "approval-write-1",
+          name: "write_project_document",
+          argumentsJson: JSON.stringify({
+            path: "manuscript/approval.md",
+            content: "# 授权章节\n",
+          }),
+        },
+      };
+      yield { type: "done", finishReason: "tool_calls" };
+      return;
+    }
+    yield { type: "text-delta", text: "章节已保存。" };
     yield { type: "done", finishReason: "stop" };
   }
 }

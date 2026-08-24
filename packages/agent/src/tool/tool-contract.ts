@@ -38,6 +38,7 @@ export interface Tool<Input, Output> {
   readonly description: string;
   readonly exposure: ToolExposure;
   readonly approval: ApprovalMode;
+  readonly approvalLabel: string;
   readonly errors: readonly ToolErrorDefinition[];
   readonly inputSchema: z.ZodType<Input>;
   readonly outputSchema: z.ZodType<Output>;
@@ -53,9 +54,7 @@ export function asUnknownTool<Input, Output>(tool: Tool<Input, Output>): Unknown
 }
 
 export interface ToolApprovalRequest {
-  toolName: string;
-  toolVersion: number;
-  input: unknown;
+  approvalLabel: string;
 }
 
 export type ToolApprovalHandler = (request: ToolApprovalRequest) => Promise<ApprovalChoice>;

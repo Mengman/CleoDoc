@@ -34,7 +34,7 @@ Tool Result 使用稳定的结构化状态，返回 Agent 继续决策所需的�
 
 ### 1.7 审批规则必须直接明确
 
-每个 Tool 直接声明固定的 `approval`，不通过复杂的副作用分类推导是否审批。用户对某次请求可以拒绝、仅允许本次或允许当前 Conversation 在 CleoDoc 退出前持续执行；临时授权由 Conversation 级 Runtime 管理，不改变 Tool 自身的固定规则。并发、幂等、Revision、超时和取消先使用 Runtime 的统一规则，确有差异时再单独设计。
+每个 Tool 直接声明固定的 `approval`，不通过复杂的副作用分类推导是否审批。用户对某次请求可以拒绝、仅允许本次或允许当前 Conversation 在 CleoDoc 退出前持续执行；临时授权由 Conversation 级 Runtime 管理，不改变 Tool 自身的固定规则。每个 Tool 还应提供简练的 `approvalLabel`，供交互界面明确说明本次正在请求的动作；它不替代面向模型的 `description`。并发、幂等、Revision、超时和取消先使用 Runtime 的统一规则，确有差异时再单独设计。
 
 ### 1.8 Tool Loop 必须有确定的停止条件
 
@@ -214,6 +214,9 @@ interface Tool<Input, Output> {
 
   /** Tool 固定审批规则。 */
   readonly approval: ApprovalMode;
+
+  /** 简练的用户授权请求描述，例如“文件写入”。 */
+  readonly approvalLabel: string;
 
   /** 可预期错误及恢复方式。 */
   readonly errors: readonly ToolErrorDefinition[];
@@ -1170,10 +1173,8 @@ LLM 调用业务 Tool
 
 ```ts
 interface ApprovalRequest {
-  toolName: string;
-  toolVersion: number;
-  /** 已通过 inputSchema 校验，供 CLI/GUI 生成审批预览。 */
-  input: unknown;
+  /** 当前 Tool 面向用户的简练请求描述。 */
+  approvalLabel: string;
 }
 
 type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
@@ -1181,7 +1182,9 @@ type ApprovalHandler = (request: ApprovalRequest) => Promise<ApprovalChoice>;
 
 `allow_until_exit` 由 Conversation 级 Runtime 的 `conversationApprovalsUntilExit` 在内存中保存，只免除当前 Conversation 后续相同版本 Tool 的重复审批，不把 `approval` 改成 `auto`，也不写入项目数据库。同一应用进程中的其他 Conversation 不继承该授权；CleoDoc 退出后所有临时授权自动清空。
 
-`ApprovalRequest` 不需要 `projectId` 或 `conversationId`。审批处理器由当前 Runtime 调用，作用域已经由 Runtime 隔离；CLI/GUI 只需要展示 Tool 身份和已校验 Input。
+`ApprovalRequest` 只包含 `approvalLabel`，不携带 Tool 名称、版本、Input、`projectId` 或 `conversationId`。审批处理器由当前 Runtime 调用，作用域已经由 Runtime 隔离；CLI/GUI 只使用该标签展示授权请求。
+
+后续桌面授权控件使用固定文案“请求”加 `approvalLabel`，并与允许按钮组合展示，例如：`[请求文件写入：允许][⌄][发送]`。默认“允许”对应 `allow_once`；下拉菜单提供“拒绝”和“总是允许”（即 `allow_until_exit`）。`approvalLabel` 必须简练、稳定、面向用户，不包含内部 Tool 名称、路径、正文、项目指令或其他动态输入；需要展示具体目标或内容预览时，另行设计。
 
 ## 11. 压缩投影
 

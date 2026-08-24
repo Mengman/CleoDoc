@@ -2,11 +2,13 @@ import path from "node:path";
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
 
+import { AppError } from "../../../../packages/contracts/src/index.js";
 import {
   desktopChannels,
   desktopConversationHistoryResultSchema,
   desktopConversationCreateResultSchema,
   desktopConversationListResultSchema,
+  desktopToolApprovalResultSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
@@ -23,6 +25,7 @@ import {
   desktopRuntimeInfoSchema,
   getDesktopConversationHistoryInputSchema,
   createDesktopConversationInputSchema,
+  resolveDesktopToolApprovalInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
   showWindowMenuInputSchema,
@@ -511,6 +514,23 @@ export function registerDesktopIpc(
       });
     } catch (error) {
       return sendDesktopChatMessageResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.resolveToolApproval, (event, rawInput: unknown) => {
+    // Resolve only the pending Tool approval correlated to this renderer's chat request.
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const input = resolveDesktopToolApprovalInputSchema.parse(rawInput);
+      if (!chat.resolveToolApproval(input)) {
+        throw new AppError("VALIDATION_ERROR", "当前授权请求已失效。");
+      }
+      return desktopToolApprovalResultSchema.parse({ outcome: "success" });
+    } catch (error) {
+      return desktopToolApprovalResultSchema.parse({
         outcome: "error",
         error: toDesktopOperationError(error),
       });

@@ -22,6 +22,7 @@ export const desktopChannels = {
   createConversation: "desktop:create-conversation",
   getConversationHistory: "desktop:get-conversation-history",
   sendChatMessage: "desktop:send-chat-message",
+  resolveToolApproval: "desktop:resolve-tool-approval",
   chatMessageEvent: "desktop:chat-message-event",
 } as const;
 
@@ -245,6 +246,16 @@ export const sendDesktopChatMessageInputSchema = z
   })
   .strict();
 
+export const desktopToolApprovalChoiceSchema = z.enum(["reject", "allow_once", "allow_until_exit"]);
+
+export const resolveDesktopToolApprovalInputSchema = z
+  .object({
+    requestId: z.uuid(),
+    conversationId: z.uuid(),
+    choice: desktopToolApprovalChoiceSchema,
+  })
+  .strict();
+
 export const desktopChatMessageEventSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -267,6 +278,14 @@ export const desktopChatMessageEventSchema = z.discriminatedUnion("type", [
       requestId: z.uuid(),
       conversationId: z.uuid(),
       text: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("tool-approval-requested"),
+      requestId: z.uuid(),
+      conversationId: z.uuid(),
+      approvalLabel: z.string().trim().min(1).max(100),
     })
     .strict(),
 ]);
@@ -308,6 +327,11 @@ export const sendDesktopChatMessageResultSchema = z.discriminatedUnion("outcome"
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
+export const desktopToolApprovalResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("success") }).strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
@@ -332,6 +356,8 @@ export type GetDesktopConversationHistoryInput = z.infer<
 >;
 export type CreateDesktopConversationInput = z.infer<typeof createDesktopConversationInputSchema>;
 export type SendDesktopChatMessageInput = z.infer<typeof sendDesktopChatMessageInputSchema>;
+export type DesktopToolApprovalChoice = z.infer<typeof desktopToolApprovalChoiceSchema>;
+export type ResolveDesktopToolApprovalInput = z.infer<typeof resolveDesktopToolApprovalInputSchema>;
 export type DesktopChatMessageEvent = z.infer<typeof desktopChatMessageEventSchema>;
 export type DesktopConversationListResult = z.infer<typeof desktopConversationListResultSchema>;
 export type DesktopConversationHistoryResult = z.infer<
@@ -339,6 +365,7 @@ export type DesktopConversationHistoryResult = z.infer<
 >;
 export type DesktopConversationCreateResult = z.infer<typeof desktopConversationCreateResultSchema>;
 export type SendDesktopChatMessageResult = z.infer<typeof sendDesktopChatMessageResultSchema>;
+export type DesktopToolApprovalResult = z.infer<typeof desktopToolApprovalResultSchema>;
 
 export interface CleoDocDesktopApi {
   readonly getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
@@ -372,5 +399,8 @@ export interface CleoDocDesktopApi {
   readonly sendChatMessage: (
     input: SendDesktopChatMessageInput,
   ) => Promise<SendDesktopChatMessageResult>;
+  readonly resolveToolApproval: (
+    input: ResolveDesktopToolApprovalInput,
+  ) => Promise<DesktopToolApprovalResult>;
   readonly onChatMessageEvent: (listener: (event: DesktopChatMessageEvent) => void) => () => void;
 }

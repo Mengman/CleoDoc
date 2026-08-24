@@ -181,7 +181,7 @@ describe("ChatService", () => {
     const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
       provider: senderForProvider(provider, "tool-model"),
     });
-    const approvals: string[] = [];
+    const approvalLabels: string[] = [];
     const reasoningDeltas: string[] = [];
 
     try {
@@ -190,10 +190,7 @@ describe("ChatService", () => {
         prompt: "总结并保存到项目",
         signal: new AbortController().signal,
         approveToolCall: async (request) => {
-          const toolInput = request.input as { path?: unknown };
-          if (request.toolName === "write_project_document" && typeof toolInput.path === "string") {
-            approvals.push(toolInput.path);
-          }
+          approvalLabels.push(request.approvalLabel);
           return "allow_once";
         },
         onEvent: (event) => {
@@ -202,7 +199,7 @@ describe("ChatService", () => {
       });
 
       expect(result.content).toBe("总结已经保存到项目中。");
-      expect(approvals).toEqual(["manuscript/summary.md"]);
+      expect(approvalLabels).toEqual(["文件写入"]);
       expect((await new DocumentService(project.root).read("manuscript/summary.md")).content).toBe(
         "# 会谈总结\n\n确定采用雨夜车站作为开场。\n",
       );
@@ -284,8 +281,7 @@ describe("ChatService", () => {
         projectId: project.manifest.id,
         prompt: "把第三人称限知写入项目指令",
         signal: new AbortController().signal,
-        approveToolCall: async (request) =>
-          request.toolName === "set_project_instructions" ? "allow_once" : "reject",
+        approveToolCall: async () => "allow_once",
       });
       expect(result.content).toBe("项目指令已经更新。");
       expect(chat.getProjectInstructions()).toMatchObject({

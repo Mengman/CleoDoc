@@ -7,6 +7,7 @@ import {
   desktopLlmApiSettingsSchema,
   desktopConversationHistoryResultSchema,
   desktopConversationCreateResultSchema,
+  desktopToolApprovalResultSchema,
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
   manuscriptListResultSchema,
@@ -28,6 +29,7 @@ import {
   renameDesktopMaterialInputSchema,
   getDesktopConversationHistoryInputSchema,
   createDesktopConversationInputSchema,
+  resolveDesktopToolApprovalInputSchema,
   sendDesktopChatMessageInputSchema,
 } from "../shared/desktop-api.js";
 
@@ -136,6 +138,13 @@ const desktopApi: CleoDocDesktopApi = {
       await ipcRenderer.invoke(
         desktopChannels.sendChatMessage,
         sendDesktopChatMessageInputSchema.parse(input),
+      ),
+    ),
+  resolveToolApproval: async (input) =>
+    desktopToolApprovalResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.resolveToolApproval,
+        resolveDesktopToolApprovalInputSchema.parse(input),
       ),
     ),
   onChatMessageEvent: (listener) => {

@@ -9,6 +9,7 @@ import {
   createDesktopConversationInputSchema,
   desktopConversationCreateResultSchema,
   desktopChatMessageEventSchema,
+  desktopToolApprovalResultSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   manuscriptPathSchema,
@@ -19,6 +20,7 @@ import {
   materialRenameResultSchema,
   materialReadResultSchema,
   renameDesktopMaterialInputSchema,
+  resolveDesktopToolApprovalInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
@@ -381,8 +383,8 @@ describe("sendDesktopChatMessageResultSchema", () => {
 });
 
 describe("desktopChatMessageEventSchema", () => {
-  it("accepts only correlated reasoning and content stream events", () => {
-    // Verify streaming IPC cannot expose usage, Tool calls, or other internal model events.
+  it("accepts correlated streaming and pending-approval events", () => {
+    // Verify streaming IPC exposes only the state needed by the chat and authorization controls.
     const identity = {
       requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
       conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
@@ -397,8 +399,38 @@ describe("desktopChatMessageEventSchema", () => {
     expect(
       desktopChatMessageEventSchema.parse({ type: "reasoning-complete", ...identity }),
     ).toMatchObject({ type: "reasoning-complete" });
+    expect(
+      desktopChatMessageEventSchema.parse({
+        type: "tool-approval-requested",
+        ...identity,
+        approvalLabel: "文件写入",
+      }),
+    ).toMatchObject({ type: "tool-approval-requested", approvalLabel: "文件写入" });
     expect(() =>
       desktopChatMessageEventSchema.parse({ type: "tool-call", ...identity, name: "secret" }),
+    ).toThrow();
+  });
+});
+
+describe("resolveDesktopToolApprovalInputSchema", () => {
+  it("accepts only a correlated approval choice", () => {
+    // Verify the renderer can settle only one request and cannot include Tool input or project state.
+    expect(
+      resolveDesktopToolApprovalInputSchema.parse({
+        requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
+        conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
+        choice: "allow_once",
+      }),
+    ).toMatchObject({ choice: "allow_once" });
+    expect(desktopToolApprovalResultSchema.parse({ outcome: "success" })).toEqual({
+      outcome: "success",
+    });
+    expect(() =>
+      resolveDesktopToolApprovalInputSchema.parse({
+        requestId: "8e564f20-70ec-4a3d-b820-54299948635d",
+        conversationId: "7e564f20-70ec-4a3d-b820-54299948635d",
+        choice: "allow_forever",
+      }),
     ).toThrow();
   });
 });
