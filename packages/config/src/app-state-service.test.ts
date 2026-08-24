@@ -26,6 +26,7 @@ describe("AppStateService", () => {
     await service.setCurrentProject(path.join(home, "novel.cleo"));
 
     expect((await service.read()).currentProject).toBe(path.resolve(home, "novel.cleo"));
+    expect((await service.read()).recentDirectory).toBe(home);
     expect(service.statePath).toBe(path.join(home, "state.yaml"));
   });
 
@@ -38,7 +39,7 @@ describe("AppStateService", () => {
     expect((await service.read()).currentProject).toBeNull();
   });
 
-  it("clears the current project without retaining its path", async () => {
+  it("retains the recent directory after closing a project", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "cleodoc-state-"));
     temporaryDirectories.push(home);
     const service = new AppStateService({ CLEODOC_HOME: home });
@@ -47,6 +48,7 @@ describe("AppStateService", () => {
     const cleared = await service.clearCurrentProject();
 
     expect(cleared.currentProject).toBeNull();
+    expect(cleared.recentDirectory).toBe(home);
     await expect(service.read()).resolves.toEqual(cleared);
   });
 });

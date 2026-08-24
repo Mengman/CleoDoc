@@ -151,6 +151,14 @@ export class DesktopProjectRuntime {
     });
   }
 
+  async getRecentDirectory(): Promise<string | null> {
+    return (await this.appStateService.read()).recentDirectory;
+  }
+
+  async setRecentDirectory(directory: string): Promise<void> {
+    await this.appStateService.setRecentDirectory(directory);
+  }
+
   startTask<T>(
     operation: (context: DesktopProjectTaskContext) => Promise<T>,
   ): DesktopProjectTask<T> {

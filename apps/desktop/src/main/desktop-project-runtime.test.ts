@@ -84,6 +84,11 @@ describe("DesktopProjectRuntime", () => {
     ).resolves.toMatchObject({
       manifest: { name: "new-project" },
     });
+    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(fixture.root);
+    await fixture.runtime.setRecentDirectory(path.join(fixture.root, "materials"));
+    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(
+      path.join(fixture.root, "materials"),
+    );
 
     const rejectedDirectory = path.join(fixture.root, "non-empty.cleo");
     await mkdir(rejectedDirectory);

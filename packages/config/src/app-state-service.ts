@@ -11,6 +11,7 @@ const appStateSchema = z
   .object({
     schemaVersion: z.literal(1),
     currentProject: z.string().nullable(),
+    recentDirectory: z.string().nullable().default(null),
     updatedAt: z.iso.datetime(),
   })
   .strict();
@@ -39,17 +40,28 @@ export class AppStateService {
   }
 
   async setCurrentProject(projectRoot: string): Promise<AppState> {
-    return this.writeCurrentProject(path.resolve(projectRoot));
+    const currentProject = path.resolve(projectRoot);
+    return this.writeState(currentProject, path.dirname(currentProject));
+  }
+
+  async setRecentDirectory(directory: string): Promise<AppState> {
+    const state = await this.read();
+    return this.writeState(state.currentProject, path.resolve(directory));
   }
 
   async clearCurrentProject(): Promise<AppState> {
-    return this.writeCurrentProject(null);
+    const state = await this.read();
+    return this.writeState(null, state.recentDirectory);
   }
 
-  private async writeCurrentProject(currentProject: string | null): Promise<AppState> {
+  private async writeState(
+    currentProject: string | null,
+    recentDirectory: string | null,
+  ): Promise<AppState> {
     const state: AppState = {
       schemaVersion: 1,
       currentProject,
+      recentDirectory,
       updatedAt: new Date().toISOString(),
     };
     await writeYamlAtomic(this.statePath, state);
@@ -58,5 +70,10 @@ export class AppStateService {
 }
 
 function emptyState(): AppState {
-  return { schemaVersion: 1, currentProject: null, updatedAt: new Date(0).toISOString() };
+  return {
+    schemaVersion: 1,
+    currentProject: null,
+    recentDirectory: null,
+    updatedAt: new Date(0).toISOString(),
+  };
 }

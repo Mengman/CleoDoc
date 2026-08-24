@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { app, BrowserWindow, dialog, ipcMain, Menu, type IpcMainInvokeEvent } from "electron";
 
 import {
@@ -75,10 +77,12 @@ export async function chooseAndOpenProject(
   // 1. Open the native directory picker and preserve the current state on cancellation.
   // 2. Ask the project runtime to close the old project and open the selected project.
   // 3. Notify only the supplied main window and convert failures into the public contract.
+  const recentDirectory = await runtime.getRecentDirectory();
   const selection = await dialog.showOpenDialog(window, {
     title: "打开 CleoDoc 项目",
     buttonLabel: "打开项目",
     properties: ["openDirectory"],
+    ...(recentDirectory === null ? {} : { defaultPath: recentDirectory }),
   });
   if (selection.canceled || selection.filePaths[0] === undefined) {
     return desktopProjectOperationResultSchema.parse({
@@ -109,10 +113,12 @@ export async function chooseAndCreateProject(
   // 1. Use the system dialog so directory selection and creation remain outside the renderer.
   // 2. Preserve the active project when the selection is cancelled or the directory is rejected.
   // 3. Publish only the new renderer-safe project state after successful creation and opening.
+  const recentDirectory = await runtime.getRecentDirectory();
   const selection = await dialog.showOpenDialog(window, {
     title: "新建 CleoDoc 项目",
     buttonLabel: "在此创建项目",
     properties: ["openDirectory", "createDirectory"],
+    ...(recentDirectory === null ? {} : { defaultPath: recentDirectory }),
   });
   if (selection.canceled || selection.filePaths[0] === undefined) {
     return desktopProjectOperationResultSchema.parse({
@@ -141,17 +147,21 @@ async function chooseAndImportMaterial(window: BrowserWindow, runtime: DesktopPr
   // 1. Let the operating system return one TXT or Markdown file, or preserve state on cancel.
   // 2. Import only through the current project runtime and return its renderer-safe result.
   // 3. Present failures in a native dialog so the existing material list remains visible.
+  const recentDirectory = await runtime.getRecentDirectory();
   const selection = await dialog.showOpenDialog(window, {
     title: "导入创作资料",
     buttonLabel: "导入资料",
     properties: ["openFile"],
     filters: [{ name: "文本与 Markdown", extensions: ["txt", "md", "markdown"] }],
+    ...(recentDirectory === null ? {} : { defaultPath: recentDirectory }),
   });
   if (selection.canceled || selection.filePaths[0] === undefined) {
     return materialImportResultSchema.parse({ outcome: "cancelled" });
   }
   try {
-    const result = await runtime.importMaterial(selection.filePaths[0]);
+    const materialPath = selection.filePaths[0];
+    const result = await runtime.importMaterial(materialPath);
+    await runtime.setRecentDirectory(path.dirname(materialPath));
     if (result.embeddingFailure !== null) {
       await dialog.showMessageBox(window, {
         type: "warning",
