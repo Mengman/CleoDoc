@@ -7,6 +7,7 @@ import {
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
+  materialImportResultSchema,
   materialReadResultSchema,
   materialTitleSchema,
   manuscriptPathSchema,
@@ -93,6 +94,44 @@ export async function chooseAndOpenProject(
       outcome: "error",
       state: runtime.getState(),
       error: toDesktopOperationError(error),
+    });
+  }
+}
+
+async function chooseAndImportMaterial(window: BrowserWindow, runtime: DesktopProjectRuntime) {
+  // Select one supported material file and import it into the current project.
+  // 1. Let the operating system return one TXT or Markdown file, or preserve state on cancel.
+  // 2. Import only through the current project runtime and return its renderer-safe result.
+  // 3. Present failures in a native dialog so the existing material list remains visible.
+  const selection = await dialog.showOpenDialog(window, {
+    title: "导入创作资料",
+    buttonLabel: "导入资料",
+    properties: ["openFile"],
+    filters: [{ name: "文本与 Markdown", extensions: ["txt", "md", "markdown"] }],
+  });
+  if (selection.canceled || selection.filePaths[0] === undefined) {
+    return materialImportResultSchema.parse({ outcome: "cancelled" });
+  }
+  try {
+    const result = await runtime.importMaterial(selection.filePaths[0]);
+    return materialImportResultSchema.parse({
+      outcome: "success",
+      material: {
+        title: result.source.title,
+        inputEncoding: result.inputEncoding,
+        created: result.created,
+      },
+    });
+  } catch (error) {
+    const safeError = toDesktopOperationError(error);
+    await dialog.showMessageBox(window, {
+      type: "error",
+      title: "无法导入资料",
+      message: safeError.message,
+    });
+    return materialImportResultSchema.parse({
+      outcome: "error",
+      error: safeError,
     });
   }
 }
@@ -223,6 +262,11 @@ export function registerDesktopIpc(
         error: toDesktopOperationError(error),
       });
     }
+  });
+
+  ipcMain.handle(desktopChannels.chooseAndImportMaterial, async (event) => {
+    const window = requireMainWindow(event, resolveMainWindow);
+    return await chooseAndImportMaterial(window, runtime);
   });
 
   ipcMain.handle(desktopChannels.getLlmApiSettings, async (event) => {

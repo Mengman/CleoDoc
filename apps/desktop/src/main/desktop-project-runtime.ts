@@ -13,6 +13,7 @@ import {
 } from "../../../../packages/contracts/src/index.js";
 import { ProjectDatabase } from "../../../../packages/database/src/index.js";
 import { MaterialService } from "../../../../packages/knowledge/src/material-service.js";
+import type { MaterialServiceOptions } from "../../../../packages/knowledge/src/material-types.js";
 import {
   DocumentService,
   type OpenProject,
@@ -60,7 +61,7 @@ export interface DesktopProjectRuntimeOptions {
   readonly busyTimeoutMs: number;
   readonly appStateService?: AppStateService;
   readonly chat: Omit<ChatServiceOptions, "database">;
-  readonly maxMaterialImportBytes: number;
+  readonly materials: MaterialServiceOptions;
   readonly provider: ModelMessageSender;
 }
 
@@ -206,7 +207,7 @@ export class DesktopProjectRuntime {
       active.project.root,
       active.project.manifest.id,
       active.database,
-      this.options.maxMaterialImportBytes,
+      this.options.materials.maxImportBytes,
     );
   }
 
@@ -216,9 +217,22 @@ export class DesktopProjectRuntime {
       active.project.root,
       active.project.manifest.id,
       active.database,
-      this.options.maxMaterialImportBytes,
+      this.options.materials.maxImportBytes,
       title,
     );
+  }
+
+  async importMaterial(filePath: string) {
+    // Import one chosen file through the current project's existing material service.
+    const task = this.startTask(async ({ projectRoot }) => {
+      const materials = await MaterialService.open(projectRoot, this.options.materials);
+      try {
+        return await materials.addFile(filePath);
+      } finally {
+        await materials.close();
+      }
+    });
+    return await task.promise;
   }
 
   readManuscriptDocument(relativePath: string) {

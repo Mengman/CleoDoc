@@ -12,6 +12,7 @@ import { ProviderService } from "../../../../packages/model-providers/src/index.
 import { createDesktopChatServiceOptions, DesktopChatService } from "./desktop-chat-service.js";
 import { DesktopLlmSettingsService } from "./desktop-llm-settings.js";
 import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
+import { createDesktopMaterialServiceOptions } from "./desktop-material-service-options.js";
 import { resolveDesktopDefaultConfigPath } from "./desktop-resource-paths.js";
 import { registerDesktopIpc } from "./desktop-ipc.js";
 
@@ -71,13 +72,12 @@ async function startDesktop(): Promise<void> {
   app.setAppUserModelId("org.cleodoc.desktop");
   Menu.setApplicationMenu(null);
 
-  const loadedConfig = await initializeSoftwareConfig({
-    defaultConfigPath: resolveDesktopDefaultConfigPath({
-      appPath: app.getAppPath(),
-      resourcesPath: process.resourcesPath,
-      isPackaged: app.isPackaged,
-    }),
+  const defaultConfigPath = resolveDesktopDefaultConfigPath({
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    isPackaged: app.isPackaged,
   });
+  const loadedConfig = await initializeSoftwareConfig({ defaultConfigPath });
   const credentialStore = new DesktopCredentialStore(
     path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
     {
@@ -97,7 +97,10 @@ async function startDesktop(): Promise<void> {
   const projectRuntime = new DesktopProjectRuntime({
     busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
     chat: createDesktopChatServiceOptions(),
-    maxMaterialImportBytes: loadedConfig.config.materials.maxImportBytes,
+    materials: createDesktopMaterialServiceOptions(
+      loadedConfig.config,
+      path.resolve(path.dirname(defaultConfigPath), ".."),
+    ),
     provider: providerService,
   });
   const llmSettings = new DesktopLlmSettingsService(providerService);

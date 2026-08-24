@@ -12,6 +12,7 @@ import {
   manuscriptPathSchema,
   manuscriptReadResultSchema,
   materialListResultSchema,
+  materialImportResultSchema,
   materialReadResultSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
@@ -174,6 +175,18 @@ describe("desktop material list schema", () => {
         title: "人物名册",
         content: "林默",
         relativePath: "materials/private.txt",
+      }),
+    ).toThrow();
+    expect(
+      materialImportResultSchema.parse({
+        outcome: "success",
+        material: { title: "港口资料", inputEncoding: "gb18030", created: true },
+      }),
+    ).toMatchObject({ outcome: "success", material: { title: "港口资料" } });
+    expect(() =>
+      materialImportResultSchema.parse({
+        outcome: "success",
+        material: { title: "港口资料", inputEncoding: "unknown", created: true },
       }),
     ).toThrow();
   });

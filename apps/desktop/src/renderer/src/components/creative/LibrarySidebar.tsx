@@ -7,6 +7,7 @@ export interface LibrarySidebarProps {
   readonly itemCount: number;
   readonly emptyIcon: ReactNode;
   readonly content?: ReactNode;
+  readonly action?: ReactNode;
 }
 
 export function LibrarySidebar({
@@ -16,6 +17,7 @@ export function LibrarySidebar({
   itemCount,
   emptyIcon,
   content,
+  action,
 }: LibrarySidebarProps): ReactNode {
   // Render the common list shell used by the works and materials sidebars.
   // 1. Show the current feature heading and list summary.
@@ -27,6 +29,7 @@ export function LibrarySidebar({
           <h1>{title}</h1>
           <p>{description}</p>
         </div>
+        {action}
       </div>
 
       <div className="list-heading">

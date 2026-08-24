@@ -1,4 +1,4 @@
-import { Archive as ArchiveIcon } from "lucide-react";
+import { Archive as ArchiveIcon, Upload as UploadIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopProjectState } from "../../../../shared/desktop-api.js";
@@ -21,6 +21,8 @@ export function MaterialsSidebar({
   const [materials, setMaterials] = useState<readonly string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
 
   useEffect(() => {
     // Refresh material titles for the current project without retaining stale responses.
@@ -51,7 +53,25 @@ export function MaterialsSidebar({
     return () => {
       active = false;
     };
-  }, [projectId]);
+  }, [projectId, reloadVersion]);
+
+  async function importMaterial(): Promise<void> {
+    // Open the native file picker and refresh or open the returned material result.
+    if (projectId === null || importing) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const result = await window.cleodoc.chooseAndImportMaterial();
+      if (result.outcome === "success") {
+        setReloadVersion((version) => version + 1);
+        onOpenMaterial(result.material.title);
+      }
+    } catch {
+      // Native IPC failures do not replace the existing material list.
+    } finally {
+      setImporting(false);
+    }
+  }
 
   let content: ReactNode;
   if (projectId === null) content = undefined;
@@ -76,6 +96,19 @@ export function MaterialsSidebar({
       itemCount={materials.length}
       emptyIcon={<ArchiveIcon />}
       content={content}
+      action={
+        projectId === null ? undefined : (
+          <button
+            type="button"
+            className="material-import-button"
+            disabled={importing}
+            onClick={() => void importMaterial()}
+          >
+            <UploadIcon />
+            {importing ? "正在导入…" : "导入资料"}
+          </button>
+        )
+      }
     />
   );
 }

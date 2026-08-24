@@ -638,21 +638,25 @@ describe("MaterialService", () => {
     }
   });
 
-  it("rejects unsupported and non-UTF-8 files", async () => {
+  it("rejects binary content even when its extension claims to be plain text", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
     const service = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
     try {
-      const pdfPath = path.join(directory, "source.pdf");
-      await writeFile(pdfPath, "not a pdf", "utf8");
-      await expect(service.addFile(pdfPath)).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
-
-      const invalidPath = path.join(directory, "invalid.txt");
-      await writeFile(invalidPath, Buffer.from([0xff, 0xfe, 0xfd]));
-      await expect(service.addFile(invalidPath)).rejects.toMatchObject({
+      const renamedBinaryPath = path.join(directory, "source.txt");
+      await writeFile(
+        renamedBinaryPath,
+        Buffer.concat([
+          Buffer.from("%PDF-1.7\nstream"),
+          Buffer.from([0]),
+          Buffer.from("binary-data"),
+        ]),
+      );
+      await expect(service.addFile(renamedBinaryPath)).rejects.toMatchObject({
         code: "VALIDATION_ERROR",
+        message: "该文件不是文本文件，无法导入。",
       });
     } finally {
       await service.close();

@@ -158,6 +158,16 @@ describe("DesktopProjectRuntime", () => {
     await expect(fixture.runtime.readMaterial("不存在的资料")).rejects.toMatchObject({
       code: "MATERIAL_NOT_FOUND",
     });
+    const inputPath = path.join(fixture.root, "harbor-notes.md");
+    await writeFile(inputPath, "# 港口笔记\n\n潮汐在黎明前转向。\n", "utf8");
+    await expect(fixture.runtime.importMaterial(inputPath)).resolves.toMatchObject({
+      created: true,
+      inputEncoding: "utf-8",
+      source: { title: "harbor-notes", format: "markdown" },
+    });
+    await expect(fixture.runtime.readMaterial("harbor-notes")).resolves.toMatchObject({
+      content: "# 港口笔记\n\n潮汐在黎明前转向。\n",
+    });
 
     const second = await fixture.projectService.create(
       path.join(fixture.root, "empty-materials.cleo"),
@@ -282,7 +292,7 @@ async function createRuntimeFixture(): Promise<{
         context: TEST_CHAT_OPTIONS.context,
         compaction: TEST_CHAT_OPTIONS.compaction,
       },
-      maxMaterialImportBytes: TEST_MATERIAL_OPTIONS.maxImportBytes,
+      materials: TEST_MATERIAL_OPTIONS,
       provider: senderForProvider(new FakeModelProvider("ok")),
     }),
   };

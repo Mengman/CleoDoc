@@ -113,7 +113,7 @@ async function createFixture(): Promise<{
     busyTimeoutMs: TEST_DATABASE_OPTIONS.busyTimeoutMs,
     appStateService,
     chat: TEST_CHAT_OPTIONS,
-    maxMaterialImportBytes: TEST_MATERIAL_OPTIONS.maxImportBytes,
+    materials: TEST_MATERIAL_OPTIONS,
     provider,
   });
   const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(

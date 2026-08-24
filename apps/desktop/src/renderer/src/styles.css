@@ -170,6 +170,31 @@ svg {
   color: var(--muted);
   font-size: 11px;
 }
+.material-import-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  color: #d9d4ff;
+  background: #3d307c;
+  cursor: pointer;
+  font-size: 10px;
+}
+.material-import-button:hover:not(:disabled) {
+  background: #51429a;
+}
+.material-import-button:disabled {
+  color: #788398;
+  background: #202a39;
+  cursor: default;
+}
+.material-import-button svg {
+  width: 13px;
+  height: 13px;
+}
 .list-heading {
   display: flex;
   justify-content: space-between;
