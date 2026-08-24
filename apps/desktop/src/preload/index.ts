@@ -12,6 +12,7 @@ import {
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialDeleteResultSchema,
   materialRenameResultSchema,
   materialReadResultSchema,
   materialTitleSchema,
@@ -92,6 +93,10 @@ const desktopApi: CleoDocDesktopApi = {
         desktopChannels.renameMaterial,
         renameDesktopMaterialInputSchema.parse(input),
       ),
+    ),
+  deleteMaterial: async (title) =>
+    materialDeleteResultSchema.parse(
+      await ipcRenderer.invoke(desktopChannels.deleteMaterial, materialTitleSchema.parse(title)),
     ),
   getLlmApiSettings: async () =>
     desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),

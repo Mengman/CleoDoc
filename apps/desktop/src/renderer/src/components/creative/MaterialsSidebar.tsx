@@ -1,4 +1,9 @@
-import { Archive as ArchiveIcon, Pencil as PencilIcon, Upload as UploadIcon } from "lucide-react";
+import {
+  Archive as ArchiveIcon,
+  Pencil as PencilIcon,
+  Trash2 as TrashIcon,
+  Upload as UploadIcon,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopProjectState } from "../../../../shared/desktop-api.js";
@@ -9,16 +14,18 @@ export function MaterialsSidebar({
   activeMaterialTitle,
   onOpenMaterial,
   onRenameMaterial,
+  onDeleteMaterial,
 }: {
   readonly projectState: DesktopProjectState;
   readonly activeMaterialTitle: string | null;
   readonly onOpenMaterial: (title: string) => void;
   readonly onRenameMaterial: (title: string, newTitle: string) => Promise<boolean>;
+  readonly onDeleteMaterial: (title: string) => Promise<boolean>;
 }): ReactNode {
   // Load and display the imported materials owned by the active project.
   // 1. Clear the previous list whenever the active project changes or closes.
   // 2. Load the current material titles through the desktop API.
-  // 3. Import or rename a material, then refresh the list without replacing it on failure.
+  // 3. Import, rename, or delete a material, then refresh the list without replacing it on failure.
   // 4. Show loading, error, empty, or populated content while opening selected materials.
   const projectId = projectState.status === "open" ? projectState.project.id : null;
   const [materials, setMaterials] = useState<readonly string[]>([]);
@@ -82,6 +89,12 @@ export function MaterialsSidebar({
     return renamed;
   }
 
+  async function deleteMaterial(title: string): Promise<boolean> {
+    const deleted = await onDeleteMaterial(title);
+    if (deleted) setReloadVersion((version) => version + 1);
+    return deleted;
+  }
+
   let content: ReactNode;
   if (projectId === null) content = undefined;
   else if (loading) content = <MaterialsListState message="正在加载资料…" />;
@@ -94,6 +107,7 @@ export function MaterialsSidebar({
         activeMaterialTitle={activeMaterialTitle}
         onOpenMaterial={onOpenMaterial}
         onRenameMaterial={renameMaterial}
+        onDeleteMaterial={deleteMaterial}
       />
     );
   }
@@ -128,19 +142,22 @@ export function MaterialList({
   activeMaterialTitle,
   onOpenMaterial,
   onRenameMaterial,
+  onDeleteMaterial,
 }: {
   readonly materials: readonly string[];
   readonly activeMaterialTitle: string | null;
   readonly onOpenMaterial: (title: string) => void;
   readonly onRenameMaterial: (title: string, newTitle: string) => Promise<boolean>;
+  readonly onDeleteMaterial: (title: string) => Promise<boolean>;
 }): ReactNode {
-  // Display imported material titles and provide inline renaming for one selected item.
+  // Display imported material titles and provide inline renaming or confirmed deletion actions.
   // 1. Open a material through its title while it is not being renamed.
   // 2. Replace only the selected item with a title input after its rename action is chosen.
   // 3. Keep the input open when persistence fails and close it after a successful rename.
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [savingRename, setSavingRename] = useState(false);
+  const [deletingTitle, setDeletingTitle] = useState<string | null>(null);
 
   async function submitRename(title: string): Promise<void> {
     // Persist the trimmed title and retain the editor when the rename does not succeed.
@@ -153,6 +170,17 @@ export function MaterialList({
       }
     } finally {
       setSavingRename(false);
+    }
+  }
+
+  async function deleteMaterial(title: string): Promise<void> {
+    // Request deletion once and leave the list unchanged unless the confirmed operation succeeds.
+    if (deletingTitle !== null) return;
+    setDeletingTitle(title);
+    try {
+      await onDeleteMaterial(title);
+    } finally {
+      setDeletingTitle(null);
     }
   }
 
@@ -201,6 +229,16 @@ export function MaterialList({
                 }}
               >
                 <PencilIcon />
+              </button>
+              <button
+                type="button"
+                className="material-delete-button"
+                aria-label={`删除 ${title}`}
+                title="删除资料"
+                disabled={deletingTitle !== null}
+                onClick={() => void deleteMaterial(title)}
+              >
+                <TrashIcon />
               </button>
             </div>
           )}

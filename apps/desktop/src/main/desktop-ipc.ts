@@ -8,6 +8,7 @@ import {
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialDeleteResultSchema,
   materialRenameResultSchema,
   materialReadResultSchema,
   materialTitleSchema,
@@ -294,6 +295,46 @@ export function registerDesktopIpc(
         message: safeError.message,
       });
       return materialRenameResultSchema.parse({ outcome: "error", error: safeError });
+    }
+  });
+
+  ipcMain.handle(desktopChannels.deleteMaterial, async (event, rawInput: unknown) => {
+    // Confirm and delete one material while returning only its safe user-visible title.
+    // 1. Validate the requested title before opening the destructive-action confirmation.
+    // 2. Preserve all current renderer state when the user cancels the system dialog.
+    // 3. Delete through the active project runtime and report errors in a separate native dialog.
+    const window = requireMainWindow(event, resolveMainWindow);
+    const title = materialTitleSchema.safeParse(rawInput);
+    if (!title.success) {
+      return materialDeleteResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(title.error),
+      });
+    }
+    const confirmation = await dialog.showMessageBox(window, {
+      type: "warning",
+      title: "删除资料",
+      message: `确定删除资料“${title.data}”？`,
+      detail: "资料文件、索引和 Embedding 将一并删除。",
+      buttons: ["删除资料", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (confirmation.response !== 0) {
+      return materialDeleteResultSchema.parse({ outcome: "cancelled" });
+    }
+    try {
+      const material = await runtime.deleteMaterial(title.data);
+      return materialDeleteResultSchema.parse({ outcome: "success", title: material.title });
+    } catch (error) {
+      const safeError = toDesktopOperationError(error);
+      await dialog.showMessageBox(window, {
+        type: "error",
+        title: "无法删除资料",
+        message: safeError.message,
+      });
+      return materialDeleteResultSchema.parse({ outcome: "error", error: safeError });
     }
   });
 

@@ -199,6 +199,15 @@ describe("DesktopProjectRuntime", () => {
     await expect(fixture.runtime.readMaterial("人物名册")).rejects.toMatchObject({
       code: "MATERIAL_NOT_FOUND",
     });
+    await expect(fixture.runtime.deleteMaterial("港口资料")).resolves.toMatchObject({
+      title: "港口资料",
+    });
+    await expect(fixture.runtime.listMaterials()).resolves.toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ title: "港口资料" })]),
+    );
+    await expect(fixture.runtime.readMaterial("港口资料")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
 
     const second = await fixture.projectService.create(
       path.join(fixture.root, "empty-materials.cleo"),

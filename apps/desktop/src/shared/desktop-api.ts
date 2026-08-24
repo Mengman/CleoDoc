@@ -13,6 +13,7 @@ export const desktopChannels = {
   readMaterial: "desktop:read-material",
   chooseAndImportMaterial: "desktop:choose-and-import-material",
   renameMaterial: "desktop:rename-material",
+  deleteMaterial: "desktop:delete-material",
   readManuscriptDocument: "desktop:read-manuscript-document",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
@@ -170,6 +171,12 @@ export const materialRenameResultSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
+export const materialDeleteResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("success"), title: materialTitleSchema }).strict(),
+  z.object({ outcome: z.literal("cancelled") }).strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
 export const desktopLlmApiSettingsSchema = z
   .object({
     baseUrl: z.url(),
@@ -300,6 +307,7 @@ export type MaterialReadResult = z.infer<typeof materialReadResultSchema>;
 export type MaterialImportResult = z.infer<typeof materialImportResultSchema>;
 export type RenameDesktopMaterialInput = z.infer<typeof renameDesktopMaterialInputSchema>;
 export type MaterialRenameResult = z.infer<typeof materialRenameResultSchema>;
+export type MaterialDeleteResult = z.infer<typeof materialDeleteResultSchema>;
 export type ShowWindowMenuInput = z.infer<typeof showWindowMenuInputSchema>;
 export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
@@ -334,6 +342,7 @@ export interface CleoDocDesktopApi {
   readonly readMaterial: (title: string) => Promise<MaterialReadResult>;
   readonly chooseAndImportMaterial: () => Promise<MaterialImportResult>;
   readonly renameMaterial: (input: RenameDesktopMaterialInput) => Promise<MaterialRenameResult>;
+  readonly deleteMaterial: (title: string) => Promise<MaterialDeleteResult>;
   readonly getLlmApiSettings: () => Promise<DesktopLlmApiSettings>;
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,

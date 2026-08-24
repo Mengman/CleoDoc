@@ -317,6 +317,31 @@ svg {
   width: 13px;
   height: 13px;
 }
+.material-delete-button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 6px;
+  color: #718096;
+  background: transparent;
+  cursor: pointer;
+}
+.material-delete-button:hover:not(:disabled) {
+  color: #ffd5d9;
+  background: #672b3b;
+}
+.material-delete-button:disabled {
+  color: #4e596a;
+  cursor: default;
+}
+.material-delete-button svg {
+  width: 13px;
+  height: 13px;
+}
 .material-rename-form {
   display: flex;
   margin: 0;

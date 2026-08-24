@@ -13,6 +13,7 @@ import {
   manuscriptReadResultSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialDeleteResultSchema,
   materialRenameResultSchema,
   materialReadResultSchema,
   renameDesktopMaterialInputSchema,
@@ -204,6 +205,13 @@ describe("desktop material list schema", () => {
         materialId: "private",
       }),
     ).toThrow();
+    expect(materialDeleteResultSchema.parse({ outcome: "cancelled" })).toEqual({
+      outcome: "cancelled",
+    });
+    expect(materialDeleteResultSchema.parse({ outcome: "success", title: "人物名册" })).toEqual({
+      outcome: "success",
+      title: "人物名册",
+    });
   });
 });
 

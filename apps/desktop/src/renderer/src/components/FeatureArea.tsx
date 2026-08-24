@@ -69,6 +69,13 @@ export function FeatureArea({
     return true;
   }
 
+  async function deleteMaterial(title: string): Promise<boolean> {
+    const result = await window.cleodoc.deleteMaterial(title);
+    if (result.outcome !== "success") return false;
+    closeDocument({ source: "material", reference: result.title, content: null, error: null });
+    return true;
+  }
+
   function openDocument(source: DocumentTab["source"], reference: string): void {
     // Activate one open tab or load a new manuscript or material tab through Typed IPC.
     // 1. Reuse an existing tab without issuing another file read.
@@ -184,6 +191,7 @@ export function FeatureArea({
           onOpenManuscript={openManuscript}
           onOpenMaterial={openMaterial}
           onRenameMaterial={renameMaterial}
+          onDeleteMaterial={deleteMaterial}
           onActivateDocument={activateDocument}
           onCloseDocument={closeDocument}
         />

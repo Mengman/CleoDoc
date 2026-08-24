@@ -14,6 +14,7 @@ describe("MaterialList", () => {
         activeMaterialTitle: "人物名册",
         onOpenMaterial: () => undefined,
         onRenameMaterial: async () => true,
+        onDeleteMaterial: async () => true,
       }),
     );
 
@@ -22,6 +23,7 @@ describe("MaterialList", () => {
     expect(html).toContain("<button");
     expect(html).toContain("material-list-entry active");
     expect(html).toContain('aria-label="重命名 人物名册"');
+    expect(html).toContain('aria-label="删除 人物名册"');
   });
 
   it("shows the authorized import action only for an open project", () => {
@@ -42,6 +44,7 @@ describe("MaterialList", () => {
         activeMaterialTitle: null,
         onOpenMaterial: () => undefined,
         onRenameMaterial: async () => true,
+        onDeleteMaterial: async () => true,
       }),
     );
 

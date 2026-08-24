@@ -273,6 +273,23 @@ export class DesktopProjectRuntime {
     return await task.promise;
   }
 
+  async deleteMaterial(title: string) {
+    // Delete one current-project material selected by its unique user-visible title.
+    const task = this.startTask(async ({ projectRoot }) => {
+      const materials = await MaterialService.open(projectRoot, this.options.materials);
+      try {
+        const current = (await materials.list()).find((material) => material.title === title);
+        if (current === undefined) {
+          throw new AppError("MATERIAL_NOT_FOUND", `找不到资料：${title}`);
+        }
+        return await materials.remove(current.id);
+      } finally {
+        await materials.close();
+      }
+    });
+    return await task.promise;
+  }
+
   readManuscriptDocument(relativePath: string) {
     return this.requireActiveProject().documents.readReadableDocument(relativePath);
   }
