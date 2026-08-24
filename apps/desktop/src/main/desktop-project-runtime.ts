@@ -104,7 +104,7 @@ export class DesktopProjectRuntime {
       if (state.currentProject === null) return this.getState();
 
       try {
-        await this.openActiveProject(state.currentProject);
+        await this.replaceActiveProject(state.currentProject);
       } catch (error) {
         await this.closeActiveProject();
         throw error;
@@ -114,17 +114,9 @@ export class DesktopProjectRuntime {
   }
 
   async open(directory: string): Promise<DesktopProjectState> {
-    // Replace the active project with the project selected by the user.
+    // Replace the active project only after the selected project has opened successfully.
     return this.enqueue(async () => {
-      // Close the old session before opening the new one and leave no stale session on failure.
-      await this.closeActiveProject();
-      try {
-        await this.openActiveProject(directory);
-        return this.getState();
-      } catch (error) {
-        await this.closeActiveProject();
-        throw error;
-      }
+      return await this.replaceActiveProject(directory);
     });
   }
 
@@ -133,14 +125,7 @@ export class DesktopProjectRuntime {
     return this.enqueue(async () => {
       const projectService = new ProjectService({ busyTimeoutMs: this.options.busyTimeoutMs });
       const project = await projectService.create(directory);
-      await this.closeActiveProject();
-      try {
-        await this.openActiveProject(project.root);
-        return this.getState();
-      } catch (error) {
-        await this.closeActiveProject();
-        throw error;
-      }
+      return await this.replaceActiveProject(project.root);
     });
   }
 
@@ -315,13 +300,30 @@ export class DesktopProjectRuntime {
     return task.promise;
   }
 
-  private async openActiveProject(directory: string): Promise<void> {
+  private async replaceActiveProject(directory: string): Promise<DesktopProjectState> {
+    // Replace the live project only after the candidate session and persisted state are ready.
+    // 1. Open and validate the candidate without changing the current project.
+    // 2. Persist the candidate as current before publishing it as the active session.
+    // 3. Release the previous session only after the replacement can be used.
+    const next = await this.createActiveProject(directory);
+    try {
+      await this.appStateService.setCurrentProject(next.projectService.project.root);
+    } catch (error) {
+      await this.releaseActiveProject(next);
+      throw error;
+    }
+    const previous = this.activeProject;
+    this.activeProject = next;
+    await this.releaseActiveProject(previous);
+    return this.getState();
+  }
+
+  private async createActiveProject(directory: string): Promise<ActiveProject> {
     // Open and validate all resources required by a new active project session.
     // 1. Resolve the project manifest and open its SQLite database.
     // 2. Verify database integrity and load the initial manuscript path snapshot.
-    // 3. Open chat resources and start the project-scoped manuscript watcher.
-    // 4. Persist the selected project before publishing the new in-memory session.
-    // 5. Stop partial resources when any initialization step fails.
+    // 3. Open chat resources, start the project-scoped watcher, and assemble a candidate session.
+    // 4. Stop partial resources when any initialization step fails.
     const projectService = new ProjectService({ busyTimeoutMs: this.options.busyTimeoutMs });
     const project = await projectService.open(directory);
     const controller = new AbortController();
@@ -376,14 +378,13 @@ export class DesktopProjectRuntime {
         chat,
         stopManuscriptWatcher,
       };
-      await this.appStateService.setCurrentProject(project.root);
-      this.activeProject = activeProject;
       if (watcherError !== undefined) {
         this.manuscriptDocumentsChangedListener?.({
           outcome: "error",
           error: toDesktopOperationError(watcherError),
         });
       }
+      return activeProject;
     } catch (error) {
       controller.abort();
       stopManuscriptWatcher();
@@ -398,15 +399,19 @@ export class DesktopProjectRuntime {
     const active = this.activeProject;
     this.activeProject = undefined;
 
-    if (active !== undefined) {
-      active.controller.abort(new AppError("GENERATION_CANCELLED", "项目已关闭。"));
-      active.stopManuscriptWatcher();
-      await Promise.allSettled(active.tasks.values());
-      await active.chat.close();
-      await active.materials.close();
-      await active.projectService.close();
-    }
+    await this.releaseActiveProject(active);
     if (clearRememberedProject) await this.appStateService.clearCurrentProject();
+  }
+
+  private async releaseActiveProject(active: ActiveProject | undefined): Promise<void> {
+    // Cancel project work and release all resources owned by one project session.
+    if (active === undefined) return;
+    active.controller.abort(new AppError("GENERATION_CANCELLED", "项目已关闭。"));
+    active.stopManuscriptWatcher();
+    await Promise.allSettled(active.tasks.values());
+    await active.chat.close();
+    await active.materials.close();
+    await active.projectService.close();
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

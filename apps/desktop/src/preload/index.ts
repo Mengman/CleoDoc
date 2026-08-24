@@ -44,6 +44,10 @@ const desktopApi: CleoDocDesktopApi = {
     desktopProjectOperationResultSchema.parse(
       await ipcRenderer.invoke(desktopChannels.chooseAndOpenProject),
     ),
+  chooseAndCreateProject: async () =>
+    desktopProjectOperationResultSchema.parse(
+      await ipcRenderer.invoke(desktopChannels.chooseAndCreateProject),
+    ),
   closeProject: async () =>
     desktopProjectOperationResultSchema.parse(
       await ipcRenderer.invoke(desktopChannels.closeProject),

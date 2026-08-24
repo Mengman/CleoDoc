@@ -324,8 +324,8 @@ describe("DesktopProjectRuntime", () => {
     await fixture.runtime.dispose();
   });
 
-  it("keeps no project active when a switch target is invalid", async () => {
-    // Verify that a failed switch cannot retain the previous project as an active session.
+  it("keeps the current project active when a switch target is invalid", async () => {
+    // Verify that a failed switch never releases the existing project session.
     const fixture = await createRuntimeFixture();
     const project = await fixture.projectService.create(path.join(fixture.root, "valid.cleo"));
     await fixture.runtime.open(project.root);
@@ -336,8 +336,12 @@ describe("DesktopProjectRuntime", () => {
       code: "PROJECT_NOT_FOUND",
     });
 
-    expect(fixture.runtime.getState()).toEqual({ status: "closed" });
-    expect((await fixture.appStateService.read()).currentProject).toBeNull();
+    expect(fixture.runtime.getState()).toMatchObject({
+      status: "open",
+      project: { id: project.manifest.id },
+    });
+    expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
+    await fixture.runtime.dispose();
   });
 
   it("restores the last project and clears a stale project reference", async () => {

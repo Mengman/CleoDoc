@@ -5,6 +5,7 @@ export const desktopChannels = {
   showWindowMenu: "desktop:show-window-menu",
   getProjectState: "desktop:get-project-state",
   chooseAndOpenProject: "desktop:choose-and-open-project",
+  chooseAndCreateProject: "desktop:choose-and-create-project",
   closeProject: "desktop:close-project",
   projectStateChanged: "desktop:project-state-changed",
   listManuscriptDocuments: "desktop:list-manuscript-documents",
@@ -332,6 +333,7 @@ export interface CleoDocDesktopApi {
   readonly showWindowMenu: (input: ShowWindowMenuInput) => Promise<void>;
   readonly getProjectState: () => Promise<DesktopProjectState>;
   readonly chooseAndOpenProject: () => Promise<DesktopProjectOperationResult>;
+  readonly chooseAndCreateProject: () => Promise<DesktopProjectOperationResult>;
   readonly closeProject: () => Promise<DesktopProjectOperationResult>;
   readonly onProjectStateChanged: (listener: (state: DesktopProjectState) => void) => () => void;
   readonly listManuscriptDocuments: () => Promise<ManuscriptListResult>;

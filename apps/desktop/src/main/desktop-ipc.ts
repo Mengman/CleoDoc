@@ -252,6 +252,11 @@ export function registerDesktopIpc(
     return chooseAndOpenProject(window, runtime);
   });
 
+  ipcMain.handle(desktopChannels.chooseAndCreateProject, async (event) => {
+    const window = requireMainWindow(event, resolveMainWindow);
+    return chooseAndCreateProject(window, runtime);
+  });
+
   ipcMain.handle(desktopChannels.closeProject, async (event) => {
     // Close the active project and return its final state through the public result contract.
     const window = requireMainWindow(event, resolveMainWindow);

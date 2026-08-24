@@ -4,6 +4,7 @@ import type { DesktopProjectState, DesktopRuntimeInfo } from "../../../shared/de
 import type { NavigationId } from "../ui-types.js";
 import { CreativeWorkspace } from "./creative/CreativeWorkspace.js";
 import { documentTabKey, type DocumentTab } from "./creative/DocumentWorkspace.js";
+import { ProjectHome } from "./ProjectHome.js";
 import { SettingsWorkspace } from "./settings/SettingsWorkspace.js";
 
 export interface FeatureAreaProps {
@@ -179,7 +180,9 @@ export function FeatureArea({
 
   return (
     <section className="feature-area">
-      {activeNavigation === "settings" ? (
+      {projectState.status === "closed" ? (
+        <ProjectHome />
+      ) : activeNavigation === "settings" ? (
         <SettingsWorkspace />
       ) : (
         <CreativeWorkspace
