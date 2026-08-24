@@ -5,6 +5,13 @@ import type { WindowMenuId } from "../shared/desktop-api.js";
 export interface WindowMenuActions {
   readonly onCreateProject?: () => void;
   readonly onOpenProject?: () => void;
+  readonly onClearRecentProjects?: () => void;
+  readonly recentProjects?: readonly RecentProjectMenuItem[];
+}
+
+export interface RecentProjectMenuItem {
+  readonly label: string;
+  readonly onOpen: () => void;
 }
 
 export function createWindowMenuTemplate(
@@ -17,7 +24,8 @@ export function createWindowMenuTemplate(
   // 2. Use native Electron roles for editing, window, and application commands.
   // 3. Expose developer tools only when the desktop application runs in development.
   switch (menuId) {
-    case "file":
+    case "file": {
+      const recentProjects = actions.recentProjects ?? [];
       return [
         {
           label: "打开项目…",
@@ -29,9 +37,26 @@ export function createWindowMenuTemplate(
           enabled: actions.onCreateProject !== undefined,
           click: actions.onCreateProject,
         },
+        {
+          label: "打开最近项目",
+          enabled: recentProjects.length > 0,
+          submenu: [
+            ...recentProjects.map((project) => ({
+              label: project.label,
+              click: project.onOpen,
+            })),
+            { type: "separator" },
+            {
+              label: "清空列表",
+              enabled: actions.onClearRecentProjects !== undefined && recentProjects.length > 0,
+              click: actions.onClearRecentProjects,
+            },
+          ],
+        },
         { type: "separator" },
         { label: "退出 CleoDoc", role: "quit" },
       ];
+    }
     case "edit":
       return [
         { label: "撤销", role: "undo" },

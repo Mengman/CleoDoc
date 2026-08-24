@@ -192,6 +192,26 @@ async function chooseAndImportMaterial(window: BrowserWindow, runtime: DesktopPr
   }
 }
 
+async function openRecentProject(
+  window: BrowserWindow,
+  runtime: DesktopProjectRuntime,
+  projectRoot: string,
+): Promise<void> {
+  // Open one remembered project, then remove it and report the error when it is no longer usable.
+  try {
+    const state = await runtime.open(projectRoot);
+    sendProjectState(window, state);
+  } catch (error) {
+    await runtime.removeRecentProject(projectRoot);
+    const safeError = toDesktopOperationError(error);
+    await dialog.showMessageBox(window, {
+      type: "error",
+      title: "无法打开项目",
+      message: safeError.message,
+    });
+  }
+}
+
 export function registerDesktopIpc(
   runtime: DesktopProjectRuntime,
   llmSettings: DesktopLlmSettingsService,
@@ -473,10 +493,11 @@ export function registerDesktopIpc(
     }
   });
 
-  ipcMain.handle(desktopChannels.showWindowMenu, (event, rawInput: unknown) => {
+  ipcMain.handle(desktopChannels.showWindowMenu, async (event, rawInput: unknown) => {
     // Validate a menu request and display the matching native menu for the calling window.
     const input = showWindowMenuInputSchema.parse(rawInput);
     const window = requireMainWindow(event, resolveMainWindow);
+    const recentProjects = await runtime.getRecentProjects();
 
     Menu.buildFromTemplate(
       createWindowMenuTemplate(input.menuId, process.env.ELECTRON_RENDERER_URL !== undefined, {
@@ -502,6 +523,15 @@ export function registerDesktopIpc(
               message: result.error.message,
             });
           });
+        },
+        recentProjects: recentProjects.map((projectRoot) => ({
+          label: path.basename(projectRoot),
+          onOpen: () => {
+            void openRecentProject(window, runtime, projectRoot);
+          },
+        })),
+        onClearRecentProjects: () => {
+          void runtime.clearRecentProjects();
         },
       }),
     ).popup({ window, x: input.x, y: input.y });

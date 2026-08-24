@@ -33,6 +33,31 @@ describe("createWindowMenuTemplate", () => {
     });
   });
 
+  it("lists recent projects and provides the clear command", () => {
+    // Verify the File submenu presents recent entries before its clear-list command.
+    const onOpenRecentProject = (): void => undefined;
+    const onClearRecentProjects = (): void => undefined;
+
+    expect(
+      createWindowMenuTemplate("file", false, {
+        recentProjects: [{ label: "lighthouse-novel", onOpen: onOpenRecentProject }],
+        onClearRecentProjects,
+      })[2],
+    ).toMatchObject({
+      label: "打开最近项目",
+      enabled: true,
+      submenu: [
+        { label: "lighthouse-novel", click: onOpenRecentProject },
+        { type: "separator" },
+        { label: "清空列表", enabled: true, click: onClearRecentProjects },
+      ],
+    });
+    expect(createWindowMenuTemplate("file", false)[2]).toMatchObject({
+      label: "打开最近项目",
+      enabled: false,
+    });
+  });
+
   it("only exposes developer tools in development mode", () => {
     // Verify that production menus omit the developer-tools command.
     expect(createWindowMenuTemplate("view", false)).not.toContainEqual({

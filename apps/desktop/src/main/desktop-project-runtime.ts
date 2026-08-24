@@ -159,6 +159,18 @@ export class DesktopProjectRuntime {
     await this.appStateService.setRecentDirectory(directory);
   }
 
+  async getRecentProjects(): Promise<readonly string[]> {
+    return (await this.appStateService.read()).recentProjects;
+  }
+
+  async removeRecentProject(projectRoot: string): Promise<void> {
+    await this.appStateService.removeRecentProject(projectRoot);
+  }
+
+  async clearRecentProjects(): Promise<void> {
+    await this.appStateService.clearRecentProjects();
+  }
+
   startTask<T>(
     operation: (context: DesktopProjectTaskContext) => Promise<T>,
   ): DesktopProjectTask<T> {
