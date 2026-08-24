@@ -13,7 +13,7 @@ export function App(): ReactNode {
 
   return (
     <div className="app-shell">
-      <WindowTitlebar />
+      <WindowTitlebar projectState={desktopState.projectState} />
       <div className="app-body">
         <PrimaryNavigation activeNavigation={activeNavigation} onSelect={setActiveNavigation} />
         <FeatureArea

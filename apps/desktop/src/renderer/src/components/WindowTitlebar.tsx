@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactNode } from "react";
 
-import type { WindowMenuId } from "../../../shared/desktop-api.js";
+import type { DesktopProjectState, WindowMenuId } from "../../../shared/desktop-api.js";
 
 const windowMenus: ReadonlyArray<{ id: WindowMenuId; label: string }> = [
   { id: "file", label: "File" },
@@ -19,8 +19,12 @@ function showWindowMenu(event: MouseEvent<HTMLButtonElement>, menuId: WindowMenu
   });
 }
 
-export function WindowTitlebar(): ReactNode {
-  // Render the software logo and menus inside the native window title bar.
+export function WindowTitlebar({
+  projectState,
+}: {
+  readonly projectState: DesktopProjectState;
+}): ReactNode {
+  // Render the software logo, menus, and current project folder inside the native title bar.
   // 1. Keep the logo and application menus inside the safe overlay area.
   // 2. Delegate minimize, maximize, and close controls to Electron's native title-bar overlay.
   return (
@@ -38,7 +42,9 @@ export function WindowTitlebar(): ReactNode {
             </button>
           ))}
         </nav>
-        <div className="window-title">CleoDoc</div>
+        <div className="window-title">
+          {projectState.status === "open" ? projectState.project.folderName : "CleoDoc"}
+        </div>
       </div>
     </header>
   );

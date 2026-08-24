@@ -33,6 +33,7 @@ describe("MaterialList", () => {
       project: {
         id: "9e564f20-70ec-4a3d-b820-54299948635d",
         name: "港口小说",
+        folderName: "harbor-novel.cleo",
         language: "zh-CN",
         documentCount: 0,
         database: "ok" as const,

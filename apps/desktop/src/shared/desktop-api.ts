@@ -46,6 +46,7 @@ export const desktopProjectSummarySchema = z
   .object({
     id: z.uuid(),
     name: z.string().trim().min(1),
+    folderName: z.string().trim().min(1),
     language: z.string().trim().min(1),
     documentCount: z.number().int().nonnegative(),
     database: z.literal("ok"),

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 
 import { AppStateService } from "../../../../packages/config/src/index.js";
 import {
@@ -87,6 +88,7 @@ export class DesktopProjectRuntime {
       project: {
         id: active.projectService.project.manifest.id,
         name: active.projectService.project.manifest.name,
+        folderName: path.basename(active.projectService.project.root),
         language: active.projectService.project.manifest.language,
         documentCount: active.documentCount,
         database: "ok",

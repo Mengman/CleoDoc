@@ -69,6 +69,7 @@ describe("desktopProjectStateSchema", () => {
       project: {
         id: "9e564f20-70ec-4a3d-b820-54299948635d",
         name: "灯塔失语者",
+        folderName: "lighthouse-novel.cleo",
         language: "zh-CN",
         documentCount: 12,
         database: "ok",

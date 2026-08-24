@@ -50,6 +50,7 @@ describe("DesktopProjectRuntime", () => {
       project: {
         id: project.manifest.id,
         name: "边界测试",
+        folderName: "novel.cleo",
         language: project.manifest.language,
         documentCount: 0,
         database: "ok",
@@ -71,7 +72,12 @@ describe("DesktopProjectRuntime", () => {
     const created = await fixture.runtime.create(path.join(fixture.root, "new-project.cleo"));
     expect(created).toMatchObject({
       status: "open",
-      project: { name: "new-project", documentCount: 0, database: "ok" },
+      project: {
+        name: "new-project",
+        folderName: "new-project.cleo",
+        documentCount: 0,
+        database: "ok",
+      },
     });
     await expect(
       ProjectService.readProject(path.join(fixture.root, "new-project.cleo")),
