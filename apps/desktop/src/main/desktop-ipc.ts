@@ -8,6 +8,7 @@ import {
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialRenameResultSchema,
   materialReadResultSchema,
   materialTitleSchema,
   manuscriptPathSchema,
@@ -21,6 +22,7 @@ import {
   sendDesktopChatMessageResultSchema,
   showWindowMenuInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
+  renameDesktopMaterialInputSchema,
   type DesktopProjectOperationResult,
   type DesktopProjectState,
 } from "../shared/desktop-api.js";
@@ -267,6 +269,24 @@ export function registerDesktopIpc(
   ipcMain.handle(desktopChannels.chooseAndImportMaterial, async (event) => {
     const window = requireMainWindow(event, resolveMainWindow);
     return await chooseAndImportMaterial(window, runtime);
+  });
+
+  ipcMain.handle(desktopChannels.renameMaterial, async (event, rawInput: unknown) => {
+    // Rename one material and report conflicts through a native dialog without replacing the list.
+    const window = requireMainWindow(event, resolveMainWindow);
+    try {
+      const input = renameDesktopMaterialInputSchema.parse(rawInput);
+      const material = await runtime.renameMaterial(input.title, input.newTitle);
+      return materialRenameResultSchema.parse({ outcome: "success", title: material.title });
+    } catch (error) {
+      const safeError = toDesktopOperationError(error);
+      await dialog.showMessageBox(window, {
+        type: "error",
+        title: "无法重命名资料",
+        message: safeError.message,
+      });
+      return materialRenameResultSchema.parse({ outcome: "error", error: safeError });
+    }
   });
 
   ipcMain.handle(desktopChannels.getLlmApiSettings, async (event) => {

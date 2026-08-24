@@ -12,6 +12,7 @@ import {
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialRenameResultSchema,
   materialReadResultSchema,
   materialTitleSchema,
   manuscriptPathSchema,
@@ -22,6 +23,7 @@ import {
   desktopRuntimeInfoSchema,
   showWindowMenuInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
+  renameDesktopMaterialInputSchema,
   getDesktopConversationHistoryInputSchema,
   sendDesktopChatMessageInputSchema,
 } from "../shared/desktop-api.js";
@@ -83,6 +85,13 @@ const desktopApi: CleoDocDesktopApi = {
   chooseAndImportMaterial: async () =>
     materialImportResultSchema.parse(
       await ipcRenderer.invoke(desktopChannels.chooseAndImportMaterial),
+    ),
+  renameMaterial: async (input) =>
+    materialRenameResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.renameMaterial,
+        renameDesktopMaterialInputSchema.parse(input),
+      ),
     ),
   getLlmApiSettings: async () =>
     desktopLlmApiSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getLlmApiSettings)),

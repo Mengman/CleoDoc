@@ -13,7 +13,9 @@ import {
   manuscriptReadResultSchema,
   materialListResultSchema,
   materialImportResultSchema,
+  materialRenameResultSchema,
   materialReadResultSchema,
+  renameDesktopMaterialInputSchema,
   saveDesktopLlmApiSettingsInputSchema,
   sendDesktopChatMessageInputSchema,
   sendDesktopChatMessageResultSchema,
@@ -187,6 +189,19 @@ describe("desktop material list schema", () => {
       materialImportResultSchema.parse({
         outcome: "success",
         material: { title: "港口资料", inputEncoding: "unknown", created: true },
+      }),
+    ).toThrow();
+    expect(
+      renameDesktopMaterialInputSchema.parse({ title: "人物名册", newTitle: "灯塔人物名册" }),
+    ).toEqual({ title: "人物名册", newTitle: "灯塔人物名册" });
+    expect(materialRenameResultSchema.parse({ outcome: "success", title: "灯塔人物名册" })).toEqual(
+      { outcome: "success", title: "灯塔人物名册" },
+    );
+    expect(() =>
+      materialRenameResultSchema.parse({
+        outcome: "success",
+        title: "灯塔人物名册",
+        materialId: "private",
       }),
     ).toThrow();
   });

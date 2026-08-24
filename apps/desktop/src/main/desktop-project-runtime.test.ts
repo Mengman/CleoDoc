@@ -168,6 +168,17 @@ describe("DesktopProjectRuntime", () => {
     await expect(fixture.runtime.readMaterial("harbor-notes")).resolves.toMatchObject({
       content: "# 港口笔记\n\n潮汐在黎明前转向。\n",
     });
+    await expect(fixture.runtime.renameMaterial("人物名册", "灯塔人物名册")).resolves.toMatchObject(
+      {
+        title: "灯塔人物名册",
+      },
+    );
+    await expect(fixture.runtime.readMaterial("灯塔人物名册")).resolves.toMatchObject({
+      content: "灯塔守卫名册",
+    });
+    await expect(fixture.runtime.readMaterial("人物名册")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
 
     const second = await fixture.projectService.create(
       path.join(fixture.root, "empty-materials.cleo"),

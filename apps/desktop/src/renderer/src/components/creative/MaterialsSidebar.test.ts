@@ -13,13 +13,15 @@ describe("MaterialList", () => {
         materials: ["人物名册", "港口资料"],
         activeMaterialTitle: "人物名册",
         onOpenMaterial: () => undefined,
+        onRenameMaterial: async () => true,
       }),
     );
 
     expect(html).toContain("人物名册");
     expect(html).toContain("港口资料");
     expect(html).toContain("<button");
-    expect(html).toContain("material-list-item active");
+    expect(html).toContain("material-list-entry active");
+    expect(html).toContain('aria-label="重命名 人物名册"');
   });
 
   it("shows the authorized import action only for an open project", () => {
@@ -39,6 +41,7 @@ describe("MaterialList", () => {
         projectState,
         activeMaterialTitle: null,
         onOpenMaterial: () => undefined,
+        onRenameMaterial: async () => true,
       }),
     );
 

@@ -12,6 +12,7 @@ export const desktopChannels = {
   listMaterials: "desktop:list-materials",
   readMaterial: "desktop:read-material",
   chooseAndImportMaterial: "desktop:choose-and-import-material",
+  renameMaterial: "desktop:rename-material",
   readManuscriptDocument: "desktop:read-manuscript-document",
   getLlmApiSettings: "desktop:get-llm-api-settings",
   saveLlmApiSettings: "desktop:save-llm-api-settings",
@@ -157,6 +158,18 @@ export const materialImportResultSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
 ]);
 
+export const renameDesktopMaterialInputSchema = z
+  .object({
+    title: materialTitleSchema,
+    newTitle: materialTitleSchema,
+  })
+  .strict();
+
+export const materialRenameResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("success"), title: materialTitleSchema }).strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
+
 export const desktopLlmApiSettingsSchema = z
   .object({
     baseUrl: z.url(),
@@ -285,6 +298,8 @@ export type ManuscriptReadResult = z.infer<typeof manuscriptReadResultSchema>;
 export type MaterialListResult = z.infer<typeof materialListResultSchema>;
 export type MaterialReadResult = z.infer<typeof materialReadResultSchema>;
 export type MaterialImportResult = z.infer<typeof materialImportResultSchema>;
+export type RenameDesktopMaterialInput = z.infer<typeof renameDesktopMaterialInputSchema>;
+export type MaterialRenameResult = z.infer<typeof materialRenameResultSchema>;
 export type ShowWindowMenuInput = z.infer<typeof showWindowMenuInputSchema>;
 export type WindowMenuId = z.infer<typeof windowMenuIdSchema>;
 export type DesktopLlmApiSettings = z.infer<typeof desktopLlmApiSettingsSchema>;
@@ -318,6 +333,7 @@ export interface CleoDocDesktopApi {
   readonly listMaterials: () => Promise<MaterialListResult>;
   readonly readMaterial: (title: string) => Promise<MaterialReadResult>;
   readonly chooseAndImportMaterial: () => Promise<MaterialImportResult>;
+  readonly renameMaterial: (input: RenameDesktopMaterialInput) => Promise<MaterialRenameResult>;
   readonly getLlmApiSettings: () => Promise<DesktopLlmApiSettings>;
   readonly saveLlmApiSettings: (
     input: SaveDesktopLlmApiSettingsInput,

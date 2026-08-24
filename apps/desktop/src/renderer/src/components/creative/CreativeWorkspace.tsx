@@ -15,6 +15,7 @@ export interface CreativeWorkspaceProps {
   readonly activeDocumentTabKey: string | null;
   readonly onOpenManuscript: (relativePath: string) => void;
   readonly onOpenMaterial: (title: string) => void;
+  readonly onRenameMaterial: (title: string, newTitle: string) => Promise<boolean>;
   readonly onActivateDocument: (tab: DocumentTab) => void;
   readonly onCloseDocument: (tab: DocumentTab) => void;
 }
@@ -27,6 +28,7 @@ export function CreativeWorkspace({
   activeDocumentTabKey,
   onOpenManuscript,
   onOpenMaterial,
+  onRenameMaterial,
   onActivateDocument,
   onCloseDocument,
 }: CreativeWorkspaceProps): ReactNode {
@@ -47,6 +49,7 @@ export function CreativeWorkspace({
           projectState={projectState}
           activeMaterialTitle={activeMaterialTitle(documentTabs, activeDocumentTabKey)}
           onOpenMaterial={onOpenMaterial}
+          onRenameMaterial={onRenameMaterial}
         />
       )}
       <DocumentWorkspace

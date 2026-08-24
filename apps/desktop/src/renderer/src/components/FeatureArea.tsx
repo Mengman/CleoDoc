@@ -49,6 +49,26 @@ export function FeatureArea({
     openDocument("material", title);
   }
 
+  async function renameMaterial(title: string, newTitle: string): Promise<boolean> {
+    // Rename one material and retain its already loaded tab content under the new title.
+    const result = await window.cleodoc.renameMaterial({ title, newTitle });
+    if (result.outcome === "error") return false;
+    const oldKey = documentTabKey({ source: "material", reference: title });
+    const newKey = documentTabKey({ source: "material", reference: result.title });
+    setDocuments((current) =>
+      current.projectId !== projectId
+        ? current
+        : {
+            ...current,
+            activeTabKey: current.activeTabKey === oldKey ? newKey : current.activeTabKey,
+            tabs: current.tabs.map((tab) =>
+              documentTabKey(tab) === oldKey ? { ...tab, reference: result.title } : tab,
+            ),
+          },
+    );
+    return true;
+  }
+
   function openDocument(source: DocumentTab["source"], reference: string): void {
     // Activate one open tab or load a new manuscript or material tab through Typed IPC.
     // 1. Reuse an existing tab without issuing another file read.
@@ -163,6 +183,7 @@ export function FeatureArea({
           activeDocumentTabKey={visibleDocuments.activeTabKey}
           onOpenManuscript={openManuscript}
           onOpenMaterial={openMaterial}
+          onRenameMaterial={renameMaterial}
           onActivateDocument={activateDocument}
           onCloseDocument={closeDocument}
         />

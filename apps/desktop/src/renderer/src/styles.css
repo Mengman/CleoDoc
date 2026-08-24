@@ -257,6 +257,7 @@ svg {
 .material-list-item {
   display: flex;
   align-items: center;
+  flex: 1;
   width: 100%;
   min-width: 0;
   padding: 9px 10px;
@@ -268,11 +269,25 @@ svg {
   font-size: 11px;
   text-align: left;
 }
+.material-list-entry {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #111b29;
+}
+.material-list-entry:hover {
+  background: #172234;
+}
+.material-list-entry.active {
+  background: #272143;
+}
+.material-list-entry:hover .material-list-item,
 .material-list-item:hover {
   color: #d4dae5;
   background: #172234;
 }
-.material-list-item.active {
+.material-list-entry.active .material-list-item {
   color: #ded9ff;
   background: #272143;
 }
@@ -280,6 +295,41 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.material-rename-button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 6px;
+  color: #718096;
+  background: transparent;
+  cursor: pointer;
+}
+.material-rename-button:hover {
+  color: #d9d4ff;
+  background: #3d307c;
+}
+.material-rename-button svg {
+  width: 13px;
+  height: 13px;
+}
+.material-rename-form {
+  display: flex;
+  margin: 0;
+}
+.material-rename-form input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #7157ed;
+  border-radius: 8px;
+  outline: 0;
+  color: #e8edf5;
+  background: #111b29;
+  font: inherit;
 }
 .manuscript-list-item {
   display: flex;
