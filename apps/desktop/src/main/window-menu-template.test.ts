@@ -69,4 +69,33 @@ describe("createWindowMenuTemplate", () => {
       role: "toggleDevTools",
     });
   });
+
+  it("marks the selected theme and updates the preference", () => {
+    // Verify that the Appearance menu shows one selected theme and sends the chosen preference.
+    let selectedPreference: string | undefined;
+    const template = createWindowMenuTemplate("appearance", false, {
+      themePreference: "dark",
+      onSetThemePreference: (preference) => {
+        selectedPreference = preference;
+      },
+    });
+    const themeMenu = template[0]?.submenu;
+
+    expect(themeMenu).toMatchObject([
+      { label: "跟随系统", type: "checkbox", checked: false },
+      { label: "浅色", type: "checkbox", checked: false },
+      { label: "深色", type: "checkbox", checked: true },
+    ]);
+
+    const lightThemeItem = Array.isArray(themeMenu)
+      ? themeMenu.find((item) => item.label === "浅色")
+      : undefined;
+    lightThemeItem?.click?.(
+      {} as Electron.MenuItem,
+      {} as Electron.BrowserWindow,
+      {} as Electron.KeyboardEvent,
+    );
+
+    expect(selectedPreference).toBe("light");
+  });
 });

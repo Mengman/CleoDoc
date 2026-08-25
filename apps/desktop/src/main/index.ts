@@ -91,7 +91,8 @@ async function startDesktop(): Promise<void> {
   const loadedConfig = await initializeSoftwareConfig({ defaultConfigPath });
   const appStateService = new AppStateService();
   const appState = await appStateService.read();
-  let currentTheme = resolveDesktopTheme(appState.themePreference);
+  let themePreference = appState.themePreference;
+  let currentTheme = resolveDesktopTheme(themePreference);
   const credentialStore = new DesktopCredentialStore(
     path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
     {
@@ -128,6 +129,17 @@ async function startDesktop(): Promise<void> {
   }
 
   let mainWindow: BrowserWindow | null = null;
+  const getThemeSettings = () => ({ preference: themePreference, theme: currentTheme });
+  const applyThemePreference = async (preference: AppThemePreference) => {
+    // Persist the preference, then update the active native window and Renderer theme.
+    themePreference = (await appStateService.setThemePreference(preference)).themePreference;
+    currentTheme = resolveDesktopTheme(themePreference);
+    if (mainWindow !== null && !mainWindow.isDestroyed()) {
+      mainWindow.setBackgroundColor(currentTheme === "dark" ? "#0b111a" : "#f5f7fb");
+      mainWindow.webContents.send(desktopChannels.themeChanged, { theme: currentTheme });
+    }
+    return getThemeSettings();
+  };
   const openMainWindow = (): BrowserWindow => {
     // Create the only main window and clear its reference after native destruction.
     const window = createMainWindow(currentTheme);
@@ -144,12 +156,14 @@ async function startDesktop(): Promise<void> {
     desktopChat,
     () => mainWindow,
     () => currentTheme,
+    getThemeSettings,
+    applyThemePreference,
   );
   const window = openMainWindow();
   nativeTheme.on("updated", () => {
     // Follow operating-system changes while the saved preference remains System.
-    if (appState.themePreference !== "system") return;
-    currentTheme = resolveDesktopTheme(appState.themePreference);
+    if (themePreference !== "system") return;
+    currentTheme = resolveDesktopTheme(themePreference);
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     mainWindow.setBackgroundColor(currentTheme === "dark" ? "#0b111a" : "#f5f7fb");
     mainWindow.webContents.send(desktopChannels.themeChanged, { theme: currentTheme });

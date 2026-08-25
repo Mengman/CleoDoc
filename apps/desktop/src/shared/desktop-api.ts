@@ -3,6 +3,8 @@ import { z } from "zod";
 export const desktopChannels = {
   getRuntimeInfo: "desktop:get-runtime-info",
   getThemeBootstrap: "desktop:get-theme-bootstrap",
+  getThemeSettings: "desktop:get-theme-settings",
+  saveThemeSettings: "desktop:save-theme-settings",
   themeChanged: "desktop:theme-changed",
   showWindowMenu: "desktop:show-window-menu",
   getProjectState: "desktop:get-project-state",
@@ -28,7 +30,7 @@ export const desktopChannels = {
   chatMessageEvent: "desktop:chat-message-event",
 } as const;
 
-export const windowMenuIdSchema = z.enum(["file", "edit", "view", "window"]);
+export const windowMenuIdSchema = z.enum(["file", "edit", "view", "appearance", "window"]);
 
 export const showWindowMenuInputSchema = z
   .object({
@@ -48,10 +50,15 @@ export const desktopRuntimeInfoSchema = z
   .strict();
 
 export const desktopThemeSchema = z.enum(["light", "dark"]);
+export const desktopThemePreferenceSchema = z.enum(["light", "dark", "system"]);
 
 export const desktopThemeBootstrapSchema = z.object({ theme: desktopThemeSchema }).strict();
 
 export const desktopThemeChangedEventSchema = desktopThemeBootstrapSchema;
+
+export const desktopThemeSettingsSchema = z
+  .object({ preference: desktopThemePreferenceSchema, theme: desktopThemeSchema })
+  .strict();
 
 export const desktopProjectSummarySchema = z
   .object({
@@ -80,6 +87,11 @@ export const desktopOperationErrorSchema = z
     message: z.string().min(1),
   })
   .strict();
+
+export const desktopThemeSettingsResultSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("success"), settings: desktopThemeSettingsSchema }).strict(),
+  z.object({ outcome: z.literal("error"), error: desktopOperationErrorSchema }).strict(),
+]);
 
 export const desktopProjectOperationResultSchema = z.discriminatedUnion("outcome", [
   z
@@ -342,7 +354,10 @@ export const desktopToolApprovalResultSchema = z.discriminatedUnion("outcome", [
 
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
 export type DesktopTheme = z.infer<typeof desktopThemeSchema>;
+export type DesktopThemePreference = z.infer<typeof desktopThemePreferenceSchema>;
 export type DesktopThemeBootstrap = z.infer<typeof desktopThemeBootstrapSchema>;
+export type DesktopThemeSettings = z.infer<typeof desktopThemeSettingsSchema>;
+export type DesktopThemeSettingsResult = z.infer<typeof desktopThemeSettingsResultSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
 export type ManuscriptListResult = z.infer<typeof manuscriptListResultSchema>;
@@ -380,6 +395,10 @@ export type DesktopToolApprovalResult = z.infer<typeof desktopToolApprovalResult
 export interface CleoDocDesktopApi {
   readonly getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
   readonly getThemeBootstrap: () => Promise<DesktopThemeBootstrap>;
+  readonly getThemeSettings: () => Promise<DesktopThemeSettings>;
+  readonly saveThemeSettings: (
+    preference: DesktopThemePreference,
+  ) => Promise<DesktopThemeSettingsResult>;
   readonly onThemeChanged: (listener: (theme: DesktopThemeBootstrap) => void) => () => void;
   readonly showWindowMenu: (input: ShowWindowMenuInput) => Promise<void>;
   readonly getProjectState: () => Promise<DesktopProjectState>;

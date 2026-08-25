@@ -89,7 +89,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 
 ### 4.1 UI 框架基线
 
-**状态：阶段一至阶段三已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置、主题 token、启动初始化和最小基础组件集；页面迁移尚未开始。
+**状态：阶段一至阶段四已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置、主题 token、启动初始化、最小基础组件集和主题设置入口；除已获授权的设置页主题下拉菜单外，页面迁移尚未开始。
 
 技术方案固定为 **Tailwind CSS + shadcn/ui + Radix UI**：
 
@@ -112,24 +112,24 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - Main 在创建窗口前解析主题并设置窗口背景；Preload 只暴露经过 Schema 校验的主题启动信息与系统主题变化事件。
 - Renderer 在首次 React 渲染前设置 `data-theme`，避免未来消费 token 的页面出现错误主题首屏。
 - Tailwind CSS 已定义 Light/Dark 语义颜色、字体、字号、行高、圆角、间距、阴影、层级与动效 token；视觉 token 不依赖透明背景或 `backdrop-filter`。
+- 窗口菜单新增“外观 → 主题”，设置页新增“外观 → 主题”下拉菜单；两处都使用同一应用状态，保存后立即更新窗口与 Renderer，System 模式继续响应操作系统主题变化。
 
 已完成的基础组件：
 
 - 已按需生成 Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 与 Toast（Sonner）源码，并集中放在 `components/ui/`。
 - 已引入 Radix UI、`class-variance-authority`、`tailwind-merge`、`clsx`、Sonner 与 `tw-animate-css`；不导入组件库模板、页面或示例数据。
 - Toast 监听 CleoDoc 已有的 `data-theme`，不使用 `next-themes` 或浏览器存储建立第二套主题状态。
-- 组件尚未导入现有业务页面，因此不产生新的可见 UI；现有手写页面继续保持原状。
+- 除已获授权的设置页主题下拉菜单外，组件尚未导入现有业务页面；现有手写页面继续保持原状。
 
 仍需实现：
 
-- 在获得明确 UI 授权后，将主题选择控件放入设置界面。
 - 为组件增加键盘导航、焦点管理、屏幕阅读器语义和高对比度验证。
 
 当前手写页面将在 4.2 的页面迁移时开始消费 token；本阶段不为旧页面重复替换颜色或布局。
 
 检查点：
 
-- 主题偏好可持久化，System 模式在启动和操作系统主题变化时解析为 Light 或 Dark；主题选择控件在获得授权后补充。
+- 主题偏好可持久化；窗口菜单与设置页可切换 System、Light、Dark，System 模式在启动和操作系统主题变化时解析为 Light 或 Dark。
 - 组件仅从 Renderer 使用，不向 Main 或 Core 引入 DOM、Tailwind 或 UI 依赖。
 - 弹窗、菜单、焦点陷阱和快捷键不破坏 Electron 窗口菜单与 TipTap 未来的编辑器焦点。
 - 产物不包含未使用的整套视觉组件库或页面模板。

@@ -12,6 +12,9 @@ import {
   desktopChatMessageEventSchema,
   desktopThemeBootstrapSchema,
   desktopThemeChangedEventSchema,
+  desktopThemePreferenceSchema,
+  desktopThemeSettingsResultSchema,
+  desktopThemeSettingsSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
@@ -40,6 +43,15 @@ const desktopApi: CleoDocDesktopApi = {
     desktopRuntimeInfoSchema.parse(await ipcRenderer.invoke(desktopChannels.getRuntimeInfo)),
   getThemeBootstrap: async () =>
     desktopThemeBootstrapSchema.parse(await ipcRenderer.invoke(desktopChannels.getThemeBootstrap)),
+  getThemeSettings: async () =>
+    desktopThemeSettingsSchema.parse(await ipcRenderer.invoke(desktopChannels.getThemeSettings)),
+  saveThemeSettings: async (preference) =>
+    desktopThemeSettingsResultSchema.parse(
+      await ipcRenderer.invoke(
+        desktopChannels.saveThemeSettings,
+        desktopThemePreferenceSchema.parse(preference),
+      ),
+    ),
   onThemeChanged: (listener) => {
     const handleThemeChanged = (_event: Electron.IpcRendererEvent, rawTheme: unknown): void => {
       listener(desktopThemeChangedEventSchema.parse(rawTheme));

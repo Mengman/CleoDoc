@@ -1,12 +1,14 @@
 import type { MenuItemConstructorOptions } from "electron";
 
-import type { WindowMenuId } from "../shared/desktop-api.js";
+import type { DesktopThemePreference, WindowMenuId } from "../shared/desktop-api.js";
 
 export interface WindowMenuActions {
   readonly onCreateProject?: () => void;
   readonly onOpenProject?: () => void;
   readonly onClearRecentProjects?: () => void;
   readonly recentProjects?: readonly RecentProjectMenuItem[];
+  readonly themePreference?: DesktopThemePreference;
+  readonly onSetThemePreference?: (preference: DesktopThemePreference) => void;
 }
 
 export interface RecentProjectMenuItem {
@@ -78,6 +80,25 @@ export function createWindowMenuTemplate(
         { type: "separator" },
         { label: "切换全屏", role: "togglefullscreen" },
       ];
+    case "appearance": {
+      const themePreference = actions.themePreference ?? "system";
+      const themeOptions: readonly (readonly [string, DesktopThemePreference])[] = [
+        ["跟随系统", "system"],
+        ["浅色", "light"],
+        ["深色", "dark"],
+      ];
+      return [
+        {
+          label: "主题",
+          submenu: themeOptions.map(([label, preference]) => ({
+            label,
+            type: "checkbox" as const,
+            checked: themePreference === preference,
+            click: () => actions.onSetThemePreference?.(preference),
+          })),
+        },
+      ];
+    }
     case "window":
       return [
         { label: "最小化", role: "minimize" },

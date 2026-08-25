@@ -6,6 +6,7 @@ const windowMenus: ReadonlyArray<{ id: WindowMenuId; label: string }> = [
   { id: "file", label: "File" },
   { id: "edit", label: "Edit" },
   { id: "view", label: "View" },
+  { id: "appearance", label: "外观" },
   { id: "window", label: "Window" },
 ];
 

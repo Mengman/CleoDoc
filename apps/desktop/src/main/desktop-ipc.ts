@@ -24,6 +24,9 @@ import {
   desktopProjectOperationResultSchema,
   desktopRuntimeInfoSchema,
   desktopThemeBootstrapSchema,
+  desktopThemePreferenceSchema,
+  desktopThemeSettingsResultSchema,
+  desktopThemeSettingsSchema,
   getDesktopConversationHistoryInputSchema,
   createDesktopConversationInputSchema,
   resolveDesktopToolApprovalInputSchema,
@@ -35,6 +38,7 @@ import {
   type DesktopProjectOperationResult,
   type DesktopProjectState,
   type DesktopTheme,
+  type DesktopThemeSettings,
 } from "../shared/desktop-api.js";
 import { toDesktopOperationError } from "./desktop-project-runtime.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
@@ -225,6 +229,8 @@ export function registerDesktopIpc(
   chat: DesktopChatService,
   resolveMainWindow: MainWindowResolver,
   resolveTheme: () => DesktopTheme,
+  getThemeSettings: () => DesktopThemeSettings,
+  setThemePreference: (preference: "light" | "dark" | "system") => Promise<DesktopThemeSettings>,
 ): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
   // 1. Register targeted project and manuscript events plus read-only state queries.
@@ -253,6 +259,27 @@ export function registerDesktopIpc(
   ipcMain.handle(desktopChannels.getThemeBootstrap, (event) => {
     requireMainWindow(event, resolveMainWindow);
     return desktopThemeBootstrapSchema.parse({ theme: resolveTheme() });
+  });
+
+  ipcMain.handle(desktopChannels.getThemeSettings, (event) => {
+    requireMainWindow(event, resolveMainWindow);
+    return desktopThemeSettingsSchema.parse(getThemeSettings());
+  });
+
+  ipcMain.handle(desktopChannels.saveThemeSettings, async (event, rawInput: unknown) => {
+    requireMainWindow(event, resolveMainWindow);
+    try {
+      const preference = desktopThemePreferenceSchema.parse(rawInput);
+      return desktopThemeSettingsResultSchema.parse({
+        outcome: "success",
+        settings: await setThemePreference(preference),
+      });
+    } catch (error) {
+      return desktopThemeSettingsResultSchema.parse({
+        outcome: "error",
+        error: toDesktopOperationError(error),
+      });
+    }
   });
 
   ipcMain.handle(desktopChannels.getProjectState, (event) => {
@@ -584,6 +611,17 @@ export function registerDesktopIpc(
         })),
         onClearRecentProjects: () => {
           void runtime.clearRecentProjects();
+        },
+        themePreference: getThemeSettings().preference,
+        onSetThemePreference: (preference) => {
+          void setThemePreference(preference).catch((error: unknown) => {
+            const safeError = toDesktopOperationError(error);
+            void dialog.showMessageBox(window, {
+              type: "error",
+              title: "无法保存主题设置",
+              message: safeError.message,
+            });
+          });
         },
       }),
     ).popup({ window, x: input.x, y: input.y });
