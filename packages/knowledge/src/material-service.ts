@@ -14,9 +14,9 @@ import { AppError, KNOWLEDGE_SOURCE_SCHEMA_VERSION } from "../../contracts/src/i
 import {
   KnowledgeContextRepository,
   MaterialRepository,
-  ProjectDatabase,
   type KnowledgeChunkContext,
 } from "../../database/src/index.js";
+import type { ProjectDatabase } from "../../database/src/index.js";
 import { detectDocumentLanguages, parseDocument } from "@cleodoc/document-ingestion";
 import {
   ProjectService,
@@ -68,6 +68,7 @@ export class MaterialService {
     embeddingModels: MaterialServiceOptions["embeddingModels"],
     embeddingChunkBatchSize: number,
     retrieval: MaterialServiceOptions["retrieval"],
+    private readonly projectServiceToClose: ProjectService | undefined,
   ) {
     this.repository = new MaterialRepository(database);
     this.contextRepository = new KnowledgeContextRepository(database);
@@ -83,15 +84,45 @@ export class MaterialService {
   }
 
   static async open(
-    projectRoot: string,
+    projectServiceOrRoot: ProjectService | string,
     options: MaterialServiceOptions,
   ): Promise<MaterialService> {
-    const project = await new ProjectService(options.database).open(projectRoot);
-    await ensureMaterialDirectories(project.root);
-    const database = await ProjectDatabase.open(project.root, options.database);
+    // Open material behavior against an existing project session or a compatibility project scope.
+    // 1. Reuse the supplied ProjectService, or create and open one for the legacy path input.
+    // 2. Prepare material directories and initialize projections through the project database.
+    // 3. Close only a compatibility ProjectService if initialization cannot complete.
+    const ownsProjectService = typeof projectServiceOrRoot === "string";
+    const projectService = ownsProjectService
+      ? new ProjectService(options.database)
+      : projectServiceOrRoot;
+    if (ownsProjectService) await projectService.open(projectServiceOrRoot);
+    const project = projectService.project;
+    try {
+      await ensureMaterialDirectories(project.root);
+      return await MaterialService.create(
+        project.root,
+        project.manifest.id,
+        projectService.database,
+        options,
+        ownsProjectService ? projectService : undefined,
+      );
+    } catch (error) {
+      if (ownsProjectService) await projectService.close();
+      throw error;
+    }
+  }
+
+  private static async create(
+    projectRoot: string,
+    projectId: string,
+    database: ProjectDatabase,
+    options: MaterialServiceOptions,
+    projectServiceToClose: ProjectService | undefined,
+  ): Promise<MaterialService> {
+    // Initialize one material service without taking ownership of the project database.
     const service = new MaterialService(
-      project.root,
-      project.manifest.id,
+      projectRoot,
+      projectId,
       database,
       options.maxImportBytes,
       options.languageDetection,
@@ -99,13 +130,14 @@ export class MaterialService {
       options.embeddingModels,
       options.embeddingChunkBatchSize,
       options.retrieval,
+      projectServiceToClose,
     );
     try {
       await service.synchronizeProjection();
       await service.indexer.markOutdated(service.repository.list());
       return service;
     } catch (error) {
-      await database.close();
+      await service.indexer.close().catch(() => undefined);
       throw error;
     }
   }
@@ -156,6 +188,12 @@ export class MaterialService {
   async list(): Promise<KnowledgeSource[]> {
     await this.synchronizeProjection();
     return this.repository.list();
+  }
+
+  async readByTitle(title: string): Promise<MaterialWithContent> {
+    const source = (await this.list()).find((item) => item.title === title);
+    if (source === undefined) throw materialNotFound(title);
+    return { source, content: await this.readSourceContent(source) };
   }
 
   async get(id: string): Promise<MaterialWithContent> {
@@ -300,7 +338,7 @@ export class MaterialService {
     try {
       await this.indexer.close();
     } finally {
-      await this.database.close();
+      await this.projectServiceToClose?.close();
     }
   }
 
@@ -385,69 +423,17 @@ export class MaterialService {
   }
 
   private async synchronizeProjection(): Promise<void> {
-    const sources = await this.readMetadataSources();
+    // Refresh the database projection from validated portable material sources.
+    const sources = await readMaterialMetadataSources(
+      this.projectRoot,
+      this.projectId,
+      this.maxImportBytes,
+    );
     await this.repository.synchronize(sources);
   }
 
-  private async readMetadataSources(): Promise<KnowledgeSource[]> {
-    const metadataDirectory = await resolveInsideProject(this.projectRoot, "sources/metadata");
-    const entries = await readdir(metadataDirectory.absolutePath, { withFileTypes: true });
-    const sources: KnowledgeSource[] = [];
-    const hashes = new Set<string>();
-    const titles = new Set<string>();
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) {
-        continue;
-      }
-      const metadataPath = await resolveInsideProject(
-        this.projectRoot,
-        `sources/metadata/${entry.name}`,
-      );
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(await readFile(metadataPath.absolutePath, "utf8")) as unknown;
-      } catch (error) {
-        throw new AppError("VALIDATION_ERROR", `资料元数据文件无效：${entry.name}`, {
-          cause: error,
-        });
-      }
-      const source = parseKnowledgeSource(parsed, `资料元数据文件无效：${entry.name}`);
-      if (source.projectId !== this.projectId || `${source.id}.json` !== entry.name) {
-        throw new AppError("VALIDATION_ERROR", `资料元数据与当前项目不匹配：${entry.name}`);
-      }
-      const content = await this.readSourceContent(source);
-      if (
-        hashContent(content) !== source.contentHash ||
-        Buffer.byteLength(content, "utf8") !== source.size
-      ) {
-        throw new AppError("VALIDATION_ERROR", `资料内容与元数据哈希不一致：${source.title}`);
-      }
-      if (hashes.has(source.contentHash)) {
-        throw new AppError("MATERIAL_ALREADY_EXISTS", `存在重复的资料元数据：${source.title}`);
-      }
-      if (titles.has(source.title)) {
-        throw new AppError("MATERIAL_ALREADY_EXISTS", `存在同名的资料元数据：${source.title}`);
-      }
-      hashes.add(source.contentHash);
-      titles.add(source.title);
-      sources.push(source);
-    }
-    return sources;
-  }
-
-  private async readSourceContent(source: KnowledgeSource): Promise<string> {
-    const resolved = await resolveInsideProject(this.projectRoot, source.relativePath);
-    try {
-      return await readStoredUtf8Text(resolved.absolutePath, this.maxImportBytes);
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-      throw new AppError("VALIDATION_ERROR", `资料原始文件不存在：${source.title}`, {
-        cause: error,
-      });
-    }
+  private readSourceContent(source: KnowledgeSource): Promise<string> {
+    return readMaterialSourceContent(this.projectRoot, source, this.maxImportBytes);
   }
 
   private async resolveMetadataPath(id: string) {
@@ -460,5 +446,71 @@ export class MaterialService {
 
   private async resolveDerivedChunksPath(id: string) {
     return await resolveInsideProject(this.projectRoot, `.cleo/derived/chunks/${id}.chunks.json`);
+  }
+}
+
+async function readMaterialMetadataSources(
+  projectRoot: string,
+  projectId: string,
+  maxImportBytes: number,
+): Promise<KnowledgeSource[]> {
+  // Read and validate every portable material manifest in the current project.
+  // 1. Parse only JSON files from the project metadata directory.
+  // 2. Verify project ownership, source content hashes, and stored byte sizes.
+  // 3. Reject duplicate content or titles before returning the valid sources.
+  const metadataDirectory = await resolveInsideProject(projectRoot, "sources/metadata");
+  const entries = await readdir(metadataDirectory.absolutePath, { withFileTypes: true });
+  const sources: KnowledgeSource[] = [];
+  const hashes = new Set<string>();
+  const titles = new Set<string>();
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
+    const metadataPath = await resolveInsideProject(projectRoot, `sources/metadata/${entry.name}`);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(metadataPath.absolutePath, "utf8")) as unknown;
+    } catch (error) {
+      throw new AppError("VALIDATION_ERROR", `资料元数据文件无效：${entry.name}`, {
+        cause: error,
+      });
+    }
+    const source = parseKnowledgeSource(parsed, `资料元数据文件无效：${entry.name}`);
+    if (source.projectId !== projectId || `${source.id}.json` !== entry.name) {
+      throw new AppError("VALIDATION_ERROR", `资料元数据与当前项目不匹配：${entry.name}`);
+    }
+    const content = await readMaterialSourceContent(projectRoot, source, maxImportBytes);
+    if (
+      hashContent(content) !== source.contentHash ||
+      Buffer.byteLength(content, "utf8") !== source.size
+    ) {
+      throw new AppError("VALIDATION_ERROR", `资料内容与元数据哈希不一致：${source.title}`);
+    }
+    if (hashes.has(source.contentHash)) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `存在重复的资料元数据：${source.title}`);
+    }
+    if (titles.has(source.title)) {
+      throw new AppError("MATERIAL_ALREADY_EXISTS", `存在同名的资料元数据：${source.title}`);
+    }
+    hashes.add(source.contentHash);
+    titles.add(source.title);
+    sources.push(source);
+  }
+  return sources;
+}
+async function readMaterialSourceContent(
+  projectRoot: string,
+  source: KnowledgeSource,
+  maxImportBytes: number,
+): Promise<string> {
+  // Read one material fact source and normalize file failures into application errors.
+  const resolved = await resolveInsideProject(projectRoot, source.relativePath);
+  try {
+    return await readStoredUtf8Text(resolved.absolutePath, maxImportBytes);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("VALIDATION_ERROR", `资料原始文件不存在：${source.title}`, {
+      cause: error,
+    });
   }
 }

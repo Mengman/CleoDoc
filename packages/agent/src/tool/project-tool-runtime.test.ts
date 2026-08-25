@@ -254,8 +254,6 @@ describe("ProjectToolRuntime", () => {
     const sessions = new SessionRepository(database);
     const conversation = await conversations.createConversation({
       projectId: project.manifest.id,
-      providerId: "fake",
-      model: "fake-model",
     });
     const session = await sessions.createInitialSession({
       conversationId: conversation.id,

@@ -10,7 +10,8 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 
 - 软件默认配置：随 CleoDoc 一起发行，作为唯一的代码外默认值来源。
 - 用户软件配置：位于操作系统的 CleoDoc 配置目录，按字段覆盖默认配置。
-- 应用状态：单独保存在 `state.yaml`，当前只记录最近打开的项目，不属于用户配置。
+- 应用状态：单独保存在 `state.yaml`，记录最近打开的项目、最近项目列表和最近打开目录，不属于用户配置。项目打开或创建成功时，项目根目录移到最多 10 项的最近项目列表首位，最近打开目录更新为项目所在目录；资料导入成功时，更新为资料文件所在目录。桌面端所有打开文件或文件夹的系统选择器共用该目录作为默认位置，包括“打开项目”“新建项目”和“导入资料”。
+- Desktop 在没有活动或可恢复项目时显示独立项目首页。首页始终提供新建项目和打开项目；仅当进入页面时当前系统没有已配置 Provider 时，额外提供 DeepSeek API Key 初始配置。该配置区在本次页面停留期间保持显示，重启后若已配置 Provider 则不再显示。
 - 项目配置：未来保存在项目目录的 `.cleo/config.yaml`，只承载项目体验和个性化设置；当前尚未实现。
 
 软件默认配置位于仓库的 `resources/config/software-default.yaml`。用户配置路径为：
@@ -39,7 +40,7 @@ CleoDoc 把“配置”和“运行状态”分开保存：
 
 应用启动层只加载一次 YAML，并通过 `initializeSoftwareConfig()` 发布进程级配置快照。CLI 命令和 CleoDoc 组合模块在需要配置时直接调用 `getSoftwareConfig()`，不再把完整 `SoftwareConfig` 作为参数逐层传递。配置不会自动热更新；只有再次显式初始化才会替换当前快照。
 
-这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和 Provider 等可独立模块不自行读取 YAML，也不直接导入全局配置；组合层从快照读取值后，只把子系统真正需要的窄参数或运行对象交给它们。这样既减少上层接口泄漏，又保留模块测试、复用和未来独立拆分 RAG 的能力。
+这个全局入口只属于 CleoDoc 应用配置，不应成为所有领域包的隐式依赖。Project、Database、RAG、Document Ingestion、Agent 和具体 Provider 适配器不自行读取 YAML。`packages/model-providers` 中的 `ProviderService` 作为 Provider 配置和运行时的统一应用服务，可以消费进程级配置快照；它向 CLI、Desktop 暴露当前 Provider/模型信息和配置修改，向 `ChatService` 暴露当前执行快照及其 `send` 边界，不暴露具体 Provider 实例和密钥。
 
 ## 3. 当前默认配置
 
@@ -49,20 +50,21 @@ gpuAcceleration: true
 
 llm:
   selectedProvider: openai-compatible
-  selectedModel: null
+  selectedModel: deepseek-v4-flash
+  modelParameters:
+    reasoningEnabled: true
+    reasoningEffort: medium
   providers:
     openai-compatible:
       displayName: OpenAI-compatible
-      baseUrl: https://api.openai.com/v1
+      baseUrl: https://api.deepseek.com
       models:
         deepseek-v4-flash:
           displayName: DeepSeek V4 Flash
           contextWindowTokens: 1000000
           maxOutputTokens: 384000
-    ollama:
-      displayName: Ollama
-      baseUrl: http://127.0.0.1:11434
-      models: {}
+          reasoningSupported: true
+          reasoningEfforts: [low, medium, high]
   timeouts:
     connectionMs: 60000
     streamIdleMs: 120000
@@ -130,15 +132,19 @@ debug:
 
 顶层 `gpuAcceleration` 是用户可覆盖的 CleoDoc 全局 GPU 加速开关。启用后，所有支持 GPU 的功能都应消费这个统一开关，不能在 RAG、Embedding 或其他子系统中再定义同义配置。当前完整 Embedding Runtime 与 `vocabOnly` Tokenizer 会向 `node-llama-cpp` 传入 `gpu: "auto"` 和 `gpuLayers: "auto"`，由运行库按当前平台、可用预编译绑定和硬件自动选择。关闭时保持 CPU Baseline；Apple Silicon 仍加载发行包可用的 Metal 绑定，但以 `gpuLayers: 0` 禁止模型层卸载。
 
-`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程或 llama.cpp Token Batch 等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。`rag.retrieval` 保存召回候选数、RRF 常数、证据字符预算和单一来源占比。用户配置首版允许选择 `selectedProvider`、`selectedModel`，以及覆盖全局 GPU 加速、超时、上下文策略、Agent、检索、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等公开参数；不允许用用户 YAML 改写 Provider/模型能力目录或 Embedding 模型目录。
+`llm.providers`、LLM 模型能力表和 `rag.embedding.models` 由 CleoDoc 适配和发行，不要求普通用户维护。Provider 正式适配模块完成前，Desktop 只允许覆盖 `llm.providers.openai-compatible.baseUrl`，并固定选择发行目录中的 `deepseek-v4-flash`，不得通过用户 YAML 改写其他 Provider 字段或模型能力。Embedding 模型条目保存模型身份、发行资源相对路径、最大输入 Token 和 Query 指令；不保存线程或 llama.cpp Token Batch 等模型运行参数。`rag.embedding.worker.chunkBatchSize` 只控制主线程与 Worker 之间每次投递和回传的 Chunk 数，默认 `16`，不表示多输入模型 Batch。资料切片硬上限直接使用主语言模型的 `maxInputTokens`，用户只可调整 `rag.chunking.splitSearchWindowRatio`。`rag.languageDetection.minBlockUnits` 是可由用户覆盖的资料语言检测下限，按“汉字字符数 + 英文单词数”计算，默认 `50`。`rag.retrieval` 保存召回候选数、RRF 常数、证据字符预算和单一来源占比。其他公开用户配置继续允许覆盖全局 GPU 加速、超时、上下文策略、Agent、检索、语言检测、Worker 任务批次、切片比例、资料大小、数据库等待和 Debug 等参数。
 
 ## 4. Provider、模型与密钥
 
+- `ProviderService` 是 CLI 和 Desktop 的统一 Provider 入口：读取和修改当前 Provider、模型及模型参数，并通过一次操作内不可变的执行快照向 `ChatService` 提供流式模型调用。Conversation 和压缩任务不保存当前选择。
+- 具体 Provider 和 API Key 仅在 `ProviderService` 内部组合；同一有效配置复用同一 Provider 实例，配置或密钥修改后使缓存失效。
 - `contextWindowTokens` 和 `maxOutputTokens` 属于准确的 Provider + Model 能力条目，不是公共模型参数。
 - CLI 的 `--context-window-tokens`、`--max-output-tokens` 及对应环境变量只用于未知模型调试和临时覆盖，不是普通用户的常规配置方式。
-- Provider API Key 统一从 `CLEODOC_API_KEY` 读取，不把环境变量名称或密钥写入 YAML。
-- OpenAI-compatible 与 Ollama 的 Base URL 可以由 CLI 或现有环境变量临时覆盖；默认地址来自发行配置。
-- Thinking、Reasoning Effort、Temperature、单次生成 `maxTokens` 等参数暂不进入软件 YAML，因为不同 Provider 的接口语义尚未统一。
+- CLI 继续从 `CLEODOC_API_KEY` 读取 API Key；Desktop 将 API Key 交给 Electron Main，通过 `safeStorage` 使用 Windows DPAPI、macOS Keychain 或 Linux 系统密钥服务保护后持久化。
+- 加密结果保存在 CleoDoc 用户配置目录的独立凭据文件中，不进入软件 YAML、项目、数据库、日志或 Git。Renderer 只能读取“已配置”状态和密钥字符长度，用等长掩码表达保存状态，不能读取密钥内容。
+- Linux 选中 `basic_text` 或系统安全凭据能力不可用时，Desktop 必须拒绝持久化 API Key，不得自动退化为明文保护。
+- 当前 Desktop 调试入口固定为 `openai-compatible` 和 `deepseek-v4-flash`；Base URL 由用户填写并写入用户 YAML。CLI 的 Base URL 仍可由参数或现有环境变量临时覆盖。
+- 当前统一模型参数包括 `reasoningEnabled` 和 `reasoningEffort`；`ProviderService` 在切换模型或修改参数时依据模型能力表校验。Temperature、单次生成 `maxTokens` 等业务请求参数暂不进入用户模型配置。
 - Provider 适配层不得根据模型名称猜测上下文窗口，也不得静默切换 Provider 或模型。
 
 ## 5. 暂不配置的内容

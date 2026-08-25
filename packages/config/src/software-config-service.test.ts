@@ -49,7 +49,7 @@ describe("SoftwareConfigService", () => {
       path.join(home, "config.yaml"),
       `gpuAcceleration: false
 llm:
-  selectedProvider: ollama
+  selectedProvider: missing-provider
   timeouts:
     connectionMs: 90000
 context:
@@ -72,7 +72,7 @@ unknownSetting: true
 
     const result = await createService(home).load();
 
-    expect(result.config.llm.selectedProvider).toBe("ollama");
+    expect(result.config.llm.selectedProvider).toBe("openai-compatible");
     expect(result.config.llm.timeouts.connectionMs).toBe(90_000);
     expect(result.config.context.softCompactionRatio).toBe(0.75);
     expect(result.config.debug.enabled).toBe(true);
@@ -83,6 +83,7 @@ unknownSetting: true
     expect(result.warnings.map((warning) => warning.path)).toEqual(
       expect.arrayContaining([
         "context.softCompactionRatio",
+        "llm.selectedProvider",
         "rag.embedding.models",
         "unknownSetting",
       ]),
@@ -124,6 +125,27 @@ agent:
     expect(result.config.gpuAcceleration).toBe(true);
     expect(result.warnings).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: "gpuAcceleration" })]),
+    );
+  });
+
+  it("persists the desktop OpenAI-compatible selection without removing other overrides", async () => {
+    // Verify the desktop connection writer changes only its authorized configuration fields.
+    const home = await createHome();
+    const service = createService(home);
+    await writeFile(
+      path.join(home, "config.yaml"),
+      "schemaVersion: 1\ngpuAcceleration: false\n",
+      "utf8",
+    );
+
+    await service.saveOpenAiCompatibleSelection("https://api.deepseek.com/v1", "deepseek-v4-flash");
+    const result = await service.load();
+
+    expect(result.config.gpuAcceleration).toBe(false);
+    expect(result.config.llm.selectedProvider).toBe("openai-compatible");
+    expect(result.config.llm.selectedModel).toBe("deepseek-v4-flash");
+    expect(result.config.llm.providers["openai-compatible"]?.baseUrl).toBe(
+      "https://api.deepseek.com/v1",
     );
   });
 });

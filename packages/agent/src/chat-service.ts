@@ -1,18 +1,18 @@
 import type {
-  ChatGenerationResult,
+  ChatTurnResult,
   ConversationRecord,
   ConversationSummary,
   ConversationSession,
   ContextBudgetStatus,
   ContextBudgetPolicy,
   CompactionEvent,
-  ModelProvider,
+  ModelExecution,
+  ModelMessageSender,
   ModelRequest,
   ModelToolCall,
   ModelToolDefinition,
   ModelUsage,
   ProjectInstructionRevision,
-  SavedDocument,
   StoredMessage,
 } from "../../contracts/src/index.js";
 import { AppError, asAppError } from "../../contracts/src/index.js";
@@ -20,10 +20,10 @@ import {
   ConversationRepository,
   ModelCallRepository,
   ProjectInstructionRepository,
-  ProjectDatabase,
   SessionRepository,
 } from "../../database/src/index.js";
-import { DocumentService } from "../../project/src/index.js";
+import type { ProjectDatabase } from "../../database/src/index.js";
+import { DocumentService, ProjectService } from "../../project/src/index.js";
 import type { KnowledgeToolService } from "../../knowledge/src/index.js";
 import { ProjectToolCatalog, ProjectToolRuntime } from "./tool/index.js";
 import {
@@ -35,7 +35,12 @@ import {
   type SendMessageInput,
 } from "./chat-request.js";
 import { CompactionService } from "./compaction-service.js";
-import { ContextBudgetService, estimateTokens } from "./context-budget.js";
+import {
+  createContextBudgetPolicy,
+  ContextBudgetService,
+  estimateTokens,
+  type ContextBudgetSettings,
+} from "./context-budget.js";
 import { ContextBuilder } from "./context-builder.js";
 import { emitLlmDebugEvent, type LlmDebugHandler } from "./debug-events.js";
 
@@ -45,12 +50,28 @@ export type { SendMessageInput } from "./chat-request.js";
 export interface ChatServiceOptions {
   database: { busyTimeoutMs: number };
   maxToolRounds: number;
-  defaultContextBudgetPolicy?: ContextBudgetPolicy;
+  context: ContextBudgetSettings;
   compaction: ConstructorParameters<typeof CompactionService>[2];
+}
+
+function describeModelRequestWithExecution(
+  request: ModelRequest,
+  execution: ModelExecution,
+): Readonly<Record<string, unknown>> {
+  // Add the resolved execution parameters to the auditable request description.
+  return {
+    ...describeModelRequest(request),
+    thinking: execution.parameters.reasoningEnabled ? "enabled" : "disabled",
+    reasoningEffort:
+      execution.parameters.reasoningEnabled && execution.parameters.reasoningEffort !== undefined
+        ? execution.parameters.reasoningEffort
+        : "provider_default",
+  };
 }
 
 export interface ChatServiceDependencies {
   readonly knowledge?: KnowledgeToolService;
+  readonly provider?: ModelMessageSender;
 }
 
 export class ChatService {
@@ -68,7 +89,8 @@ export class ChatService {
     private readonly projectRoot: string,
     private readonly database: ProjectDatabase,
     private readonly options: ChatServiceOptions,
-    dependencies: ChatServiceDependencies,
+    private readonly dependencies: ChatServiceDependencies,
+    private readonly projectServiceToClose: ProjectService | undefined,
   ) {
     this.repository = new ConversationRepository(database);
     this.sessions = new SessionRepository(database);
@@ -84,36 +106,51 @@ export class ChatService {
   }
 
   static async open(
-    projectRoot: string,
+    projectServiceOrRoot: ProjectService | string,
     options: ChatServiceOptions,
     dependencies: ChatServiceDependencies = {},
   ): Promise<ChatService> {
-    const service = new ChatService(
-      projectRoot,
-      await ProjectDatabase.open(projectRoot, options.database),
-      options,
-      dependencies,
-    );
-    await service.sessions.recoverInterruptedJobs();
-    await service.modelCalls.recoverInterruptedCalls();
-    return service;
+    // Open chat behavior against an existing project session or a compatibility project scope.
+    // 1. Reuse the supplied ProjectService, or create and open one for the legacy path input.
+    // 2. Build chat repositories and recover interrupted session and model-call work.
+    // 3. Close only a compatibility ProjectService if recovery cannot complete.
+    const ownsProjectService = typeof projectServiceOrRoot === "string";
+    const projectService = ownsProjectService
+      ? new ProjectService(options.database)
+      : projectServiceOrRoot;
+    if (ownsProjectService) await projectService.open(projectServiceOrRoot);
+    try {
+      const service = new ChatService(
+        projectService.project.root,
+        projectService.database,
+        options,
+        dependencies,
+        ownsProjectService ? projectService : undefined,
+      );
+      await service.sessions.recoverInterruptedJobs();
+      await service.modelCalls.recoverInterruptedCalls();
+      return service;
+    } catch (error) {
+      if (ownsProjectService) await projectService.close();
+      throw error;
+    }
   }
 
-  async send(input: SendMessageInput): Promise<ChatGenerationResult> {
+  async send(input: SendMessageInput): Promise<ChatTurnResult> {
+    // Execute one persisted user turn against the current provider and Tool runtime.
+    // 1. Resolve the conversation, Session, provider execution, and context budget.
+    // 2. Persist the user message before starting any remote model request.
+    // 3. Record each model request independently and persist complete Tool protocol messages.
+    // 4. Persist the final Assistant message and update the active Session budget.
+    // 5. Return the completed visible turn or rethrow a scoped application error.
+    const execution = await this.requireProvider().createExecution();
+    const contextBudgetPolicy = this.contextBudgetPolicyFor(execution);
     const conversation =
       input.conversationId === undefined
-        ? await this.repository.createConversation({
-            projectId: input.projectId,
-            providerId: input.provider.id,
-            model: input.model,
-            title: input.prompt.slice(0, 80),
-          })
+        ? await this.createConversation(input.projectId, input.prompt)
         : this.repository.getConversation(input.conversationId);
     if (conversation === null) {
       throw new AppError("VALIDATION_ERROR", "指定的对话不存在。");
-    }
-    if (conversation.providerId !== input.provider.id || conversation.model !== input.model) {
-      throw new AppError("VALIDATION_ERROR", "恢复对话时不能静默切换 Provider 或模型。");
     }
     if (conversation.projectId !== input.projectId) {
       throw new AppError("VALIDATION_ERROR", "对话不属于当前项目。");
@@ -127,17 +164,11 @@ export class ChatService {
       throw new AppError("VALIDATION_ERROR", "正在进行上下文压缩，完成后再提交消息。");
     }
 
-    await this.repository.addMessage(
+    const userMessage = await this.repository.addMessage(
       conversation.id,
       { role: "user", content: input.prompt },
       session.id,
     );
-    const generation = await this.repository.beginGeneration({
-      conversationId: conversation.id,
-      providerId: input.provider.id,
-      model: input.model,
-    });
-    let streamedContent = "";
     let usage: ModelUsage | undefined;
     const tools = this.getToolRuntime(conversation);
 
@@ -156,7 +187,6 @@ export class ChatService {
         let roundUsage: ModelUsage | undefined;
         let finishReason: string | null = null;
         const modelRequest: ModelRequest = {
-          model: input.model,
           messages,
           tools: toolInfo.definitions,
           ...(input.onDebugEvent === undefined
@@ -167,8 +197,8 @@ export class ChatService {
                     type: "llm-protocol",
                     operation: "agent",
                     round: round + 1,
-                    providerId: input.provider.id,
-                    model: input.model,
+                    providerId: execution.providerId,
+                    model: execution.model,
                     protocol,
                   }),
               }),
@@ -176,21 +206,18 @@ export class ChatService {
         const estimatedContextTokens = estimateTokens(
           JSON.stringify(modelRequestForBudget(modelRequest)),
         );
-        const modelCall = await this.modelCalls.beginGenerationCall({
-          generationId: generation.id,
-          ordinal: round + 1,
-          providerId: input.provider.id,
-          model: input.model,
-          requestOptions: describeModelRequest(modelRequest),
+        const modelCall = await this.modelCalls.beginCall({
+          providerId: execution.providerId,
+          model: execution.model,
+          requestOptions: describeModelRequestWithExecution(modelRequest, execution),
         });
 
         try {
-          for await (const event of input.provider.stream(modelRequest, input.signal)) {
+          for await (const event of execution.send(modelRequest, input.signal)) {
             if (event.type === "reasoning-delta") {
               roundReasoning += event.text;
             } else if (event.type === "text-delta") {
               roundContent += event.text;
-              streamedContent += event.text;
             } else if (event.type === "usage") {
               usage = mergeUsage(usage, event.usage);
               roundUsage = mergeUsage(roundUsage, event.usage);
@@ -213,8 +240,8 @@ export class ChatService {
             type: "llm-response-error",
             operation: "agent",
             round: round + 1,
-            providerId: input.provider.id,
-            model: input.model,
+            providerId: execution.providerId,
+            model: execution.model,
             errorCode: appError.code,
             message: appError.message,
             details: appError.details ?? null,
@@ -231,8 +258,8 @@ export class ChatService {
           type: "llm-response",
           operation: "agent",
           round: round + 1,
-          providerId: input.provider.id,
-          model: input.model,
+          providerId: execution.providerId,
+          model: execution.model,
           contextTokens: roundUsage?.inputTokens ?? estimatedContextTokens,
           contextSource: roundUsage?.inputTokens === undefined ? "estimated" : "provider",
           estimatedContextTokens,
@@ -252,8 +279,8 @@ export class ChatService {
             type: "llm-response-error",
             operation: "agent",
             round: round + 1,
-            providerId: input.provider.id,
-            model: input.model,
+            providerId: execution.providerId,
+            model: execution.model,
             errorCode: emptyResponseError.code,
             message: emptyResponseError.message,
             details: emptyResponseError.details ?? null,
@@ -283,8 +310,8 @@ export class ChatService {
                 type: "llm-response-error",
                 operation: "agent",
                 round: round + 1,
-                providerId: input.provider.id,
-                model: input.model,
+                providerId: execution.providerId,
+                model: execution.model,
                 errorCode: toolResponseError.code,
                 message: toolResponseError.message,
                 details: {
@@ -303,21 +330,20 @@ export class ChatService {
           continue;
         }
 
-        await this.repository.finishGeneration({
-          generationId: generation.id,
-          status: "completed",
-          content: roundContent,
-          ...(usage === undefined ? {} : { usage }),
-          addAssistantMessage: true,
-          sessionId: session.id,
-          ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
-          modelCallId: modelCall.id,
-        });
-        const status = this.getContextStatus(
+        const assistantMessage = await this.repository.addMessage(
           conversation.id,
-          this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
+          {
+            role: "assistant",
+            content: roundContent,
+            ...(roundReasoning === "" ? {} : { reasoningContent: roundReasoning }),
+          },
+          session.id,
+          modelCall.id,
+        );
+        const status = this.getContextStatusWithPolicy(
+          conversation,
+          contextBudgetPolicy,
           tools.toolInfo.definitions,
-          "",
         );
         await this.sessions.updateBudget(
           session.id,
@@ -327,9 +353,10 @@ export class ChatService {
         );
         return {
           conversationId: conversation.id,
-          generationId: generation.id,
           content: roundContent,
           usage: usage ?? null,
+          userMessage,
+          assistantMessage,
         };
       }
       throw new AppError(
@@ -338,30 +365,22 @@ export class ChatService {
       );
     } catch (error) {
       const appError = asAppError(error);
-      await this.repository.finishGeneration({
-        generationId: generation.id,
-        status: appError.code === "GENERATION_CANCELLED" ? "cancelled" : "failed",
-        content: streamedContent,
-        ...(usage === undefined ? {} : { usage }),
-        errorCode: appError.code,
-      });
       throw new AppError(appError.code, appError.message, {
         cause: appError,
         details: {
           ...appError.details,
           conversationId: conversation.id,
-          generationId: generation.id,
         },
       });
     }
   }
 
-  getLatestConversation(
-    projectId: string,
-    providerId: string,
-    model: string,
-  ): ConversationSummary | null {
-    return this.repository.getLatestConversation({ projectId, providerId, model });
+  createConversation(projectId: string, prompt: string): Promise<ConversationRecord> {
+    return this.repository.createConversation({ projectId, title: prompt.slice(0, 80) });
+  }
+
+  getLatestConversation(projectId: string): ConversationSummary | null {
+    return this.repository.getLatestConversation(projectId);
   }
 
   listConversations(projectId: string): ConversationSummary[] {
@@ -413,14 +432,29 @@ export class ChatService {
     return this.projectInstructions.restore(revision, expectedRevision);
   }
 
-  getContextStatus(
+  async getContextStatus(
     conversationId: string,
-    contextBudgetPolicy?: ContextBudgetPolicy,
+    toolDefinitions?: readonly ModelToolDefinition[],
+    draft = "",
+  ): Promise<ContextBudgetStatus> {
+    // Estimate context usage with the capabilities of the currently selected model.
+    const conversation = this.assertConversation(conversationId);
+    return this.getContextStatusWithPolicy(
+      conversation,
+      this.contextBudgetPolicyFor(await this.requireProvider().createExecution()),
+      toolDefinitions,
+      draft,
+    );
+  }
+
+  private getContextStatusWithPolicy(
+    conversation: ConversationRecord,
+    policy: ContextBudgetPolicy,
     toolDefinitions?: readonly ModelToolDefinition[],
     draft = "",
   ): ContextBudgetStatus {
-    const conversation = this.assertConversation(conversationId);
-    const session = this.sessions.getCurrentSession(conversationId);
+    // Build the current Session context and estimate it against a resolved policy.
+    const session = this.sessions.getCurrentSession(conversation.id);
     if (session === null) throw new AppError("VALIDATION_ERROR", "当前对话没有可用 Session。");
     const defaultTools =
       toolDefinitions === undefined ? this.getToolRuntime(conversation).toolInfo : undefined;
@@ -433,25 +467,20 @@ export class ChatService {
     return this.budgetService.estimate(
       messages,
       toolDefinitions ?? defaultTools?.definitions ?? [],
-      this.resolveContextBudgetPolicy(contextBudgetPolicy),
+      policy,
       draft,
     );
   }
 
   async compactConversation(input: {
     conversationId: string;
-    provider: ModelProvider;
-    model: string;
-    contextBudgetPolicy?: ContextBudgetPolicy;
     trigger?: "automatic" | "manual";
     signal: AbortSignal;
     onEvent?: (event: CompactionEvent) => void;
     onDebugEvent?: LlmDebugHandler;
   }): Promise<CompactionEvent & { type: "compaction-completed" }> {
     const conversation = this.assertConversation(input.conversationId);
-    if (conversation.providerId !== input.provider.id || conversation.model !== input.model) {
-      throw new AppError("VALIDATION_ERROR", "压缩不能静默切换 Provider 或模型。");
-    }
+    const execution = await this.requireProvider().createExecution();
     const session = this.sessions.getCurrentSession(input.conversationId);
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可压缩或压缩已在进行中。");
@@ -465,9 +494,8 @@ export class ChatService {
     ).compact({
       conversationId: input.conversationId,
       session,
-      provider: input.provider,
-      model: input.model,
-      contextBudgetPolicy: this.resolveContextBudgetPolicy(input.contextBudgetPolicy),
+      execution,
+      contextBudgetPolicy: this.contextBudgetPolicyFor(execution),
       trigger: input.trigger ?? "manual",
       signal: input.signal,
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
@@ -475,24 +503,8 @@ export class ChatService {
     });
   }
 
-  async saveGeneration(
-    relativePath: string,
-    options: { generationId?: string; overwrite?: boolean } = {},
-  ): Promise<SavedDocument> {
-    const generation =
-      options.generationId === undefined
-        ? this.repository.getLastCompletedGeneration()
-        : this.repository.getGeneration(options.generationId);
-    if (generation === null || generation.status !== "completed") {
-      throw new AppError("GENERATION_NOT_FOUND", "没有可保存的完整生成结果。");
-    }
-    const saved = await this.documents.save(relativePath, generation.content, options.overwrite);
-    await this.repository.markGenerationSaved(generation.id, saved.relativePath, saved.contentHash);
-    return saved;
-  }
-
-  async readDocumentIntoConversation(conversationId: string, idOrPath: string): Promise<void> {
-    const document = await this.documents.read(idOrPath);
+  async readDocumentIntoConversation(conversationId: string, relativePath: string): Promise<void> {
+    const document = await this.documents.read(relativePath);
     const session = this.sessions.getCurrentSession(conversationId);
     if (session === null || session.status !== "active") {
       throw new AppError("VALIDATION_ERROR", "当前 Session 不可写入上下文。");
@@ -509,7 +521,7 @@ export class ChatService {
 
   async close(): Promise<void> {
     this.toolRuntimes.clear();
-    await this.database.close();
+    await this.projectServiceToClose?.close();
   }
 
   private getToolRuntime(conversation: ConversationRecord): ProjectToolRuntime {
@@ -526,12 +538,16 @@ export class ChatService {
     return runtime;
   }
 
-  private resolveContextBudgetPolicy(policy: ContextBudgetPolicy | undefined): ContextBudgetPolicy {
-    const resolved = policy ?? this.options.defaultContextBudgetPolicy;
-    if (resolved === undefined) {
-      throw new AppError("VALIDATION_ERROR", "当前模型缺少上下文能力配置。");
+  private contextBudgetPolicyFor(execution: ModelExecution): ContextBudgetPolicy {
+    return createContextBudgetPolicy(execution.capabilities, this.options.context);
+  }
+
+  private requireProvider(): ModelMessageSender {
+    const provider = this.dependencies.provider;
+    if (provider === undefined) {
+      throw new AppError("CONFIG_ERROR", "The current Provider service is unavailable.");
     }
-    return resolved;
+    return provider;
   }
 
   private assertConversation(conversationId: string) {

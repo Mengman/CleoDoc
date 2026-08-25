@@ -4,5 +4,6 @@ coverage/
 dist/
 docs/**/*.md
 node_modules/
+out/
 package-lock.json
 release/

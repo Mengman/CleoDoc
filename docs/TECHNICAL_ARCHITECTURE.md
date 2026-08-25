@@ -8,7 +8,7 @@
 
 ## 1. 架构目标
 
-CleoDoc 使用 TypeScript 构建本地优先的模块化单体。v0.1 用 CLI 验证领域 Core；v0.2 在同一套 Application Service 上增加 Electron + React，不重写项目、数据库、RAG 或 Agent 逻辑。
+CleoDoc 使用 TypeScript 构建本地优先的模块化单体。v0.1 已用 CLI 验证领域 Core；v0.2 在同一套 Application Service 上增加 Electron + React，只把已有能力 UI 化，不重写项目、数据库、RAG 或 Agent 逻辑。
 
 架构必须保证：
 
@@ -38,7 +38,9 @@ flowchart TB
     APP --> KNOWLEDGE["packages/knowledge"]
     APP --> AGENT["packages/agent"]
     APP --> CONFIG["packages/config"]
-    AGENT --> PROVIDERS["packages/model-providers"]
+    CLI --> PROVIDER_SERVICE["ProviderService"]
+    AGENT --> PROVIDER_SERVICE
+    PROVIDER_SERVICE --> PROVIDERS["OpenAI-compatible"]
     KNOWLEDGE --> INGEST["packages/document-ingestion"]
     KNOWLEDGE --> RAG["packages/rag"]
     INGEST --> CDM["packages/cdm"]
@@ -58,12 +60,12 @@ flowchart TB
 | `packages/contracts` | 跨模块公共类型、Schema 和稳定错误码 |
 | `packages/config` | 默认 YAML、用户覆盖、应用状态和进程内配置快照 |
 | `packages/project` | 项目创建、路径边界、正文 CRUD 和原子文件写入 |
-| `packages/database` | Schema v10、连接、事务、Repository、FTS 和 Vector Adapter |
+| `packages/database` | Schema v12、连接、事务、Repository、FTS 和 Vector Adapter |
 | `packages/cdm` | 严格 XML、draft Schema、Node/Mark、Node ID、序列化和遍历 |
 | `packages/document-ingestion` | TXT/Markdown 到临时 CDM、来源范围、语言检测和 ChunkDraft |
 | `packages/knowledge` | 资料 CRUD、恢复、索引编排以及面向 Tool 的知识服务 |
 | `packages/rag` | GGUF 模型定义、Tokenizer、Embedding Worker、混合召回和证据组装 |
-| `packages/model-providers` | OpenAI-compatible、Ollama、流协议、超时、Reasoning 和 Debug 事件 |
+| `packages/model-providers` | `ProviderService`、Provider 配置与密钥边界、实例缓存和 OpenAI-compatible 协议适配 |
 | `packages/agent` | Context、Tool Catalog/Runtime、Tool Loop、Session 压缩和历史回查 |
 
 `packages/cdm` 是叶子协议包；Document Ingestion 可以依赖 CDM，但不访问 Project 或 SQLite。RAG 从纯文本 Chunk 开始，不解析或持久化 CDM。CleoDoc 业务通过 Knowledge/Application Service 使用 RAG，不把 Repository 直接暴露给 Agent。
@@ -73,6 +75,8 @@ flowchart TB
 v0.1 CLI 在一个 Node.js 主进程中运行，Embedding 在 Worker Thread 中执行：
 
 - 软件配置在命令启动时加载一次，形成进程内只读快照；当前修改配置后需要重启命令才生效。
+- CLI 和 Desktop Main 只持有 `ProviderService`；具体 Provider 实例、API Key 读取和构造细节都留在 `packages/model-providers` 内。
+- `ProviderService` 按当前生效配置复用一个 Provider 实例；配置修改后使缓存失效，下一次发送再构造新实例。
 - 项目打开时建立项目服务、数据库连接和知识服务。
 - `ProjectToolCatalog` 在应用/项目组合阶段创建一次，持有无执行状态的 Tool 实例与 Schema。
 - `ProjectToolRuntime` 按 Conversation 创建并缓存，持有 `projectId + conversationId`、已加载 Tool 版本和“退出前允许”审批；不持有 Session ID。
@@ -129,11 +133,11 @@ Project 1 ── N Conversation 1 ── N Session 1 ── N Message
 
 1. ContextBuilder 组装 System Prompt、数据库当前项目指令、当前 Session 的累计摘要和当前消息。
 2. Runtime 每轮从 Catalog 获取最新 `full` Tool 定义，并加入已通过 Catalog 加载的 Tool。
-3. Provider 流式返回 Reasoning、Content 和 Tool Call；Reasoning 与 Content 分流显示和保存。
+3. `ChatService` 通过统一 `send` 边界调用 `ProviderService`；内部 Provider 流式返回 Reasoning、Content 和 Tool Call，Reasoning 与 Content 分流显示和保存。
 4. Tool 参数完整拼接后进行 Schema 校验、审批和执行；Runtime 注入可信的 Project/Conversation 范围。
 5. Tool Result 使用统一 `{ tool, status, data | error }` 结构返回模型并写入 Message。
 6. 模型继续调用 Tool，或返回有效 Assistant Content 结束回合；默认最多 8 轮。
-7. 每次 Provider 请求独立记录 ModelCall；Generation 通过映射表关联多次调用。
+7. 每次 Provider 请求独立记录业务无关的 ModelCall；完整聊天内容与 Tool 协议只写入 Message，Assistant Message 可单向引用产生它的 ModelCall。
 
 当前 Tool 清单和 JSON 契约以 [Tool Call 设计](./TOOL_CALL_DESIGN.md)为准。
 
@@ -172,7 +176,7 @@ v0.1 在 Project、`material`、可选唯一 title 和当前 Source Revision 范
 
 - 每个 Project 一个数据库，不建立跨项目共享连接或默认检索。
 - 使用 Node.js `node:sqlite`、WAL、外键、`busy_timeout` 和单写入队列。
-- Schema v10 是新项目基线；支持完整 v8→v9→v10 与 v9→v10 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v10 的数据库。
+- Schema v12 是新项目基线；支持完整 v8→v9→v10→v11→v12、v9→v10→v11→v12、v10→v11→v12 与 v11→v12 前向升级，拒绝 v7 及更早、无可信版本但已有业务表和高于 v12 的数据库。
 - Conversation Message 与资料 Chunk 分别使用 External Content FTS；Content 只保存在对应普通表中。
 - Message 不可修改；`message_rowid` 只供 SQLite/FTS 关联。
 - Embedding 模型以 `(model_name, revision)` 唯一；Chunk 向量以模型行和 Chunk 行联合主键保存。
@@ -196,19 +200,16 @@ v0.1 在 Project、`material`、可选唯一 title 和当前 Source Revision 范
 
 配置优先级为：发行默认 YAML < 用户配置 YAML < 环境变量/CLI 临时覆盖。默认文件位于 `resources/config/software-default.yaml`，用户文件位于操作系统配置目录。错误用户字段单项回退并产生警告，不覆盖用户文件。
 
-Provider/模型能力目录维护 `contextWindowTokens`、`maxOutputTokens` 和端点；API Key 统一读取 `CLEODOC_API_KEY`。Thinking、Temperature 和生成 `maxTokens` 不作为通用配置。详细规则见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
+Provider/模型能力目录维护 `contextWindowTokens`、`maxOutputTokens` 和端点。CLI 从 `CLEODOC_API_KEY` 读取 API Key；Desktop 通过 Main 进程和操作系统安全凭据能力加密持久化，Renderer 不接触密钥。Thinking、Temperature 和生成 `maxTokens` 不作为通用配置。详细规则见[软件配置设计](./SOFTWARE_CONFIGURATION_DESIGN.md)。
 
 ## 8. v0.2 目标架构
 
 ```mermaid
 flowchart TB
-    RENDERER["Electron Renderer · React · TipTap"] -->|"Typed IPC"| PRELOAD["Sandboxed Preload"]
+    RENDERER["Electron Renderer · React · Markdown/TXT Reader"] -->|"Typed IPC"| PRELOAD["Sandboxed Preload"]
     PRELOAD --> MAIN["Electron Main"]
-    MAIN --> CORE["Core Utility Process"]
-    CORE --> SERVICES["v0.1 Application Services"]
-    CORE --> VERSION["VersionService · isomorphic-git"]
-    CORE --> DIFF["CDM DiffService"]
-    CORE --> WORKFLOW["Persistent Agent Workflow"]
+    MAIN --> RUNTIME["Single-Project Desktop Runtime"]
+    RUNTIME --> SERVICES["v0.1 Application Services"]
     SERVICES --> DB["Project SQLite"]
     SERVICES --> FILES["Project Files"]
     SERVICES --> EMBED["Embedding Worker"]
@@ -217,31 +218,48 @@ flowchart TB
 ### 8.1 Desktop 边界
 
 - Renderer 启用 sandbox、context isolation 和严格 CSP，关闭 Node integration。
-- Renderer 不直接访问文件系统、SQLite、Git、模型密钥或原始 `ipcRenderer`。
+- Renderer 不直接访问文件系统、SQLite、模型密钥或原始 `ipcRenderer`。
 - Preload 暴露最小白名单 IPC；请求和响应均使用公共 Schema 校验。
-- Main 负责窗口、生命周期、系统对话框和凭据；领域操作在 Core Utility Process。
-- 是否允许一个应用进程同时打开多个 Project 仍待产品决定；决定前不得让审批或 Runtime 状态跨 Project 共享。
+- LLM 配置 IPC 只返回 Base URL、固定模型、密钥配置状态和用于等长掩码的字符长度；API Key 内容只在 Main 中加密、解密和消费。
+- Main 负责窗口、应用生命周期和系统对话框；领域操作通过单项目 Desktop Runtime 调用现有 Application Service。
+- Renderer 中的桌面聊天客户端把一次发送与其流式事件订阅绑定；`ChatPanel` 只管理当前 Conversation、草稿和界面状态，`ChatComposer` 只负责输入与提交交互。
+- Main 中的 `DesktopChatService` 是桌面聊天用例入口：它校验 Conversation 属于当前项目后调用 `ChatService`，并将模型事件投影为 Renderer 可见的 Reasoning/Content 流。IPC Handler 只负责请求校验、窗口绑定和响应契约。
+- Conversation 首次打开时读取最近 20 条可见消息；发送时 `ChatService` 直接返回本轮落库的 User/Assistant 消息，Desktop 不再重新查询历史。Renderer 按 Conversation 保存已加载列表，用本轮真实消息替换临时消息，因此连续发送后列表可以超过 20 条，切换 Conversation 也不会丢失本次运行中已加载的消息。
+- `DesktopProjectRuntime` 负责构造并校验 Renderer-safe 的 `DesktopProjectState`；项目摘要只包含 ID、项目显示名、项目目录末级名称、语言、文档数和数据库状态，不暴露绝对路径。Main IPC 直接传递该可信投影，不重复解析。Preload 仍对跨进程收到的状态执行 Schema 校验，Renderer 输入和 Main 新构造的其他公共响应也继续在各自边界校验。
+- Desktop 组合层只维护一个当前主窗口引用，IPC 仅接受该窗口主 Frame 的请求。项目打开、切换或关闭后的状态只定向发送给这个窗口，窗口销毁后停止发送；不遍历全部窗口，也不维护多窗口路由或 Project/Window 映射。
+- Desktop Runtime 在项目打开期间将 `ChatService` 绑定到同一个项目数据库连接，只向桌面聊天用例提供当前项目的 ID、取消信号、`ChatService` 和 Conversation 查询边界；Provider、模型和上下文预算不再作为 Runtime 调用参数。
+- `ProjectService` 是项目数据库的唯一生命周期所有者：打开项目时创建 `ProjectDatabase`，项目结束时关闭它，并将其提供给同一项目的其他 package 服务。`MaterialService`、`ChatService` 等服务只释放自身的 Worker、Tokenizer 或内存状态，不能直接关闭数据库。Desktop Runtime 自身只保存桌面编排状态；活动项目内部持有这些 package 服务并共用该连接。保留的 `MaterialService.open(projectRoot, options)` 与 `ChatService.open(projectRoot, options)` 兼容入口会先创建一个内部 `ProjectService`，再由该项目服务完成数据库关闭；CLI 与 Desktop 必须显式创建、最后关闭 `ProjectService`。
+- Renderer 只提交 Conversation ID 和文本，`ChatService` 从共享 `ProviderService` 获取本次操作的当前 Provider、模型、模型参数和能力快照。`ProviderService` 读取安全凭据并复用内部 Provider 实例；Conversation 不保存或恢复 Provider/模型选择。
+- 一个应用实例只保持一个活动 Project。切换项目前必须关闭旧 Project，并释放数据库、Conversation Runtime、Worker、审批和任务状态。
+- Electron 兼容性阶段验证 `node:sqlite`、sqlite-vec、`node-llama-cpp` 和 Worker 的实际承载位置；无论最终位于 Main 还是 Utility Process，都不得改变 Renderer 的产品契约。
 
-### 8.2 CDM 与编辑器
+### 8.2 作品与资料阅读
 
-CDM 是用户、LLM、解析器和展示层共用的目标协议。除纯样式 Mark 外的结构 Node 使用稳定 ID；TipTap 只作为 Editor/View Model。视觉行号不进入文档协议。正式 CDM v1、当前 Markdown 正文迁移、Revision 和节点编辑契约仍需在实现前确定。
+- v0.2 继续以当前 Markdown/JSON 作品和 TXT/Markdown 资料作为事实源，不执行 CDM 迁移。
+- Desktop 当前对 Markdown 和 TXT 都提供保留换行的纯文本只读展示，不解析 Markdown 标记；后续如引入 Markdown 渲染，仍必须沿用不可信内容安全边界。
+- 作品服务补充 `.txt` 列出与读取，但不增加 TXT 编辑、富文本编辑、自动保存、Draft 或版本语义。
+- Desktop Runtime 只从当前活动项目列出和读取作品；Renderer 通过 Typed IPC 使用列表返回的项目内相对路径读取正文，不创建额外文档 ID，也不暴露绝对路径、内容哈希或文件系统访问能力。
+- Desktop Runtime 在项目打开期间通过操作系统文件监听机制监视 `manuscript`：首次加载建立完整路径快照，后续按事件文件名增量更新单个文件，目录事件只扫描对应目录；仅当操作系统未提供有效文件名时回退扫描整个 `manuscript`。监听结果通过定向 Typed IPC 事件发送给当前主窗口，项目切换或关闭时必须立即停止旧监听器。
+- Desktop Runtime 通过 `MaterialService` 加载当前项目资料，并按唯一资料标题读取内容；资料导入由 Main Process 的系统文件选择器选取单个 TXT/Markdown 文件后交给同一服务处理。Typed IPC 只向 Renderer 返回资料标题、阅读文本、输入编码和导入结果，不暴露资料路径、内部 ID、索引元数据或文件系统访问能力。
+- Renderer 以“作品相对路径”或“资料标题”加来源类型标识已打开的阅读标签页；标签页在作品、资料和设置界面切换期间保留，但活动项目变化时必须整体清空，异步读取旧项目返回的结果不得写入新项目界面。
+- Markdown 原文是不可信内容，不能执行其中的脚本、获得 Node 权限或绕过外部链接策略。
 
-### 8.3 Git、Diff 与恢复
+### 8.3 v0.1 能力 UI 化
 
-- Git 由 VersionService 管理，用户不看到 commit、tag、branch 或 checkout。
-- 恢复旧版本通过写入目标文件树并创建新的恢复记录完成，不改写历史。
-- Diff 基于 CDM Node ID 和结构，节点内使用中文句子/字符级算法。
-- Git 写入、事实文件切换、SQLite 投影更新和恢复日志组成可恢复事务边界。
+- 项目、资料、对话、Session、Reasoning、Tool、RAG、项目指令、Provider 和软件配置继续由已有 Application Service 拥有。
+- UI 只保存界面状态和未发送输入，不创建第二套项目、消息、资料或索引事实源。
+- 长任务通过同一桌面边界报告运行、完成、失败和取消状态；必要状态显示在所属页面，不建设独立监控中心。
+- ModelCall 审计和 Debug 日志保留现有存储与 CLI 行为，v0.2 不增加调用记录或诊断页面。
 
-### 8.4 知识图与阶段 Agent
+### 8.4 v0.3 演进边界
 
-v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状态、伏笔和证据；不引入独立图数据库。Graph Retriever 与现有 Exact/FTS/Vector 并列。AgentJob、ChangeSet 和 Checkpoint 持久化阶段目标、基准 Revision、证据、输出、审批和恢复状态。
+CDM/TipTap、Draft、Git/语义 Diff、知识图、设定审批、阶段 Agent、新 Provider 和新格式导入导出统一顺延到 v0.3。v0.2 不为这些能力增加入口、占位模块、数据库表或平行领域模型。v0.3 开始前必须重新确认这些能力的范围和顺序。
 
 ## 9. 安全、故障与性能
 
 ### 9.1 安全
 
-- API Key 不进入项目、配置、日志或 Git。
+- API Key 不明文进入项目、软件 YAML、数据库、日志或 Git；Desktop 加密凭据文件位于用户配置目录，操作系统保护不可用时拒绝保存。
 - 所有项目路径解析后必须位于允许根目录内，并拒绝符号链接逃逸。
 - 远程调用前可以还原 Provider、模型、请求选项、Tool 版本和实际证据。
 - Debug 默认关闭；显式开启后写项目本地文件，鉴权 Header 必须脱敏。
@@ -254,7 +272,7 @@ v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状�
 - 索引或向量失败只更新索引状态，不修改原始资料。
 - Source 删除通过外键级联清理 Chunk 和向量，FTS Trigger 同步清理索引。
 - Worker 返回结果写回前校验 Source/Chunk Hash，陈旧结果丢弃。
-- v0.2 版本应用和恢复必须使用恢复日志，避免文件与索引处于半提交状态。
+- v0.2 项目关闭和切换必须有序取消或结束长任务，避免数据库、消息和索引处于不一致状态。
 
 ### 9.3 性能与测试
 
@@ -266,12 +284,11 @@ v0.2 使用 SQLite 关系表与递归查询保存实体、事件、关系、状�
 
 ## 10. 当前未决架构问题
 
-1. v0.2 是单项目进程还是一个应用内多项目切换。
-2. CDM v1 Schema、作品正文迁移和 Document Revision 的最终协议。
-3. 跨 Conversation 历史查询的范围、权限和权威等级。
-4. 多语言 Source 何时生成多套 Embedding，以及不同语言结果如何融合。
-5. 资料更新后 Chunk ID 的继承和既有引用迁移。
-6. Generation 与 Message 的模型正文是否长期同时保留。
-7. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
+1. Electron 中 `node:sqlite`、sqlite-vec、`node-llama-cpp` 与现有 Worker 的最终进程承载和打包方式。
+2. 跨 Conversation 历史查询的范围、权限和权威等级。
+3. 多语言 Source 何时生成多套 Embedding，以及不同语言结果如何融合。
+4. 资料更新后 Chunk ID 的继承和既有引用迁移。
+5. 何种规模和指标能够证明需要从精确向量检索升级到 ANN。
+6. v0.3 的 CDM v1、作品迁移、Draft、版本和阶段 Agent 最终边界。
 
 这些问题保留在对应领域文档中；本文件只记录它们对系统边界的影响，不提前给出实现。

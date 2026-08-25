@@ -5,5 +5,14 @@
     "declaration": true,
     "declarationMap": true
   },
-  "exclude": ["**/*.test.ts", "**/*.spec.ts", "dist", "node_modules", "vitest.config.ts"]
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "apps/desktop/**",
+    "dist",
+    "node_modules",
+    "out",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

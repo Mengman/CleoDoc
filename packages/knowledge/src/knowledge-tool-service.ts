@@ -4,6 +4,7 @@ import type {
   KnowledgeSourceLanguage,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
+import type { ProjectService } from "../../project/src/index.js";
 import { MaterialService } from "./material-service.js";
 import type { MaterialServiceOptions } from "./material-types.js";
 
@@ -60,10 +61,10 @@ export class KnowledgeToolService {
   private constructor(private readonly materials: MaterialService) {}
 
   static async open(
-    projectRoot: string,
+    projectServiceOrRoot: ProjectService | string,
     options: MaterialServiceOptions,
   ): Promise<KnowledgeToolService> {
-    return new KnowledgeToolService(await MaterialService.open(projectRoot, options));
+    return new KnowledgeToolService(await MaterialService.open(projectServiceOrRoot, options));
   }
 
   async searchKnowledge(input: SearchKnowledgeRequest): Promise<SearchKnowledgeResult> {

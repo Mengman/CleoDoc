@@ -101,6 +101,7 @@ export class SearchKnowledgeTool implements Tool<SearchKnowledgeInput, SearchKno
     "在当前项目已建立索引的资料中执行混合检索。可选 title 必须原样使用 list_materials 返回的唯一资料名称；query 必须使用目标资料的语言。";
   readonly exposure = "full";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = KNOWLEDGE_ERRORS;
   readonly inputSchema = searchKnowledgeInputSchema;
   readonly outputSchema = searchKnowledgeOutputSchema;
@@ -140,6 +141,7 @@ export class ListMaterialsTool implements Tool<ListMaterialsInput, ListMaterials
     "列出当前项目导入资料。title 是供 search_knowledge 使用的项目内唯一资料名称；不读取资料正文。";
   readonly exposure = "full";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = [] as const;
   readonly inputSchema = listMaterialsInputSchema;
   readonly outputSchema = listMaterialsOutputSchema;
@@ -181,6 +183,7 @@ export class ReadMaterialContextTool implements Tool<
     "根据 search_knowledge 同一结果中的 title 和 chunkId 读取目标 Chunk 及有限相邻 Chunk，两者都必须原样传递。";
   readonly exposure = "catalog";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = KNOWLEDGE_ERRORS;
   readonly inputSchema = readMaterialContextInputSchema;
   readonly outputSchema = readMaterialContextOutputSchema;

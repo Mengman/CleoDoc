@@ -1,0 +1,31 @@
+appId: org.cleodoc.desktop
+productName: CleoDoc
+directories:
+  output: release/desktop
+files:
+  - out/**/*
+  - package.json
+  - node_modules/node-llama-cpp/**/*
+  - node_modules/@node-llama-cpp/**/*
+  - node_modules/sqlite-vec/**/*
+  - node_modules/sqlite-vec-*/**/*
+extraResources:
+  - from: resources/config
+    to: config
+  - from: resources/models
+    to: models
+asar: true
+asarUnpack:
+  - node_modules/node-llama-cpp/**/*
+  - node_modules/@node-llama-cpp/**/*
+  - node_modules/sqlite-vec/**/*
+  - node_modules/sqlite-vec-*/**/*
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: dmg
+linux:
+  target: AppImage

@@ -24,15 +24,21 @@ export function decodeMaterialText(
   bytes: Uint8Array,
   requestedEncoding?: MaterialInputEncoding,
 ): DecodedMaterialText {
-  if (requestedEncoding !== undefined) {
-    return decodedResult(decodeOrThrow(bytes, requestedEncoding), requestedEncoding);
-  }
-
+  // Decode a supported plain-text input while rejecting binary files before encoding fallback.
+  // 1. Preserve the existing UTF-16 validation before treating NUL bytes as binary content.
+  // 2. Reject binary control bytes that cannot belong to an imported plain-text document.
+  // 3. Prefer UTF-8, then use GB18030 only when UTF-8 decoding fails.
   if (hasUtf16Bom(bytes)) {
     throw new AppError(
       "VALIDATION_ERROR",
       "资料使用 UTF-16 编码；当前只支持 UTF-8 和 GB2312/GBK/GB18030。",
     );
+  }
+
+  assertPlainTextBytes(bytes);
+
+  if (requestedEncoding !== undefined) {
+    return decodedResult(decodeOrThrow(bytes, requestedEncoding), requestedEncoding);
   }
 
   const utf8 = tryDecode(bytes, "utf-8");
@@ -49,12 +55,30 @@ export function decodeMaterialText(
 }
 
 function decodedResult(content: string, inputEncoding: MaterialInputEncoding): DecodedMaterialText {
+  // Reject decoded control characters that are unsuitable for plain-text material import.
   for (const character of content) {
     if (isUnexpectedControlCharacter(character)) {
-      throw new AppError("VALIDATION_ERROR", "资料包含不适用于文本导入的控制字符。");
+      throw new AppError("VALIDATION_ERROR", "该文件不是文本文件，无法导入。");
     }
   }
   return { content, inputEncoding };
+}
+
+function assertPlainTextBytes(bytes: Uint8Array): void {
+  // Reject binary control bytes before decoding can mistake an arbitrary file for text.
+  for (const byte of bytes) {
+    if (isUnexpectedControlByte(byte)) {
+      throw new AppError("VALIDATION_ERROR", "该文件不是文本文件，无法导入。");
+    }
+  }
+}
+
+function isUnexpectedControlByte(byte: number): boolean {
+  return (byte < 0x20 && !isTextWhitespace(byte)) || byte === 0x7f;
+}
+
+function isTextWhitespace(byte: number): boolean {
+  return byte === 0x09 || byte === 0x0a || byte === 0x0d;
 }
 
 function isUnexpectedControlCharacter(character: string): boolean {
@@ -76,6 +100,7 @@ function decodeOrThrow(bytes: Uint8Array, encoding: MaterialInputEncoding): stri
 }
 
 function tryDecode(bytes: Uint8Array, encoding: MaterialInputEncoding): string | null {
+  // Decode bytes with a fatal decoder so invalid byte sequences cannot be silently replaced.
   let decoder: TextDecoder;
   try {
     decoder = new TextDecoder(encoding, { fatal: true });
@@ -96,8 +121,5 @@ function hasUtf16Bom(bytes: Uint8Array): boolean {
 }
 
 function unsupportedTextEncoding(): AppError {
-  return new AppError(
-    "VALIDATION_ERROR",
-    "无法识别资料编码；请使用 --encoding utf-8、gb2312、gbk 或 gb18030 明确指定。",
-  );
+  return new AppError("VALIDATION_ERROR", "该文件不是文本文件，无法导入。");
 }

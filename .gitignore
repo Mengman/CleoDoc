@@ -6,6 +6,7 @@ coverage/
 dist/
 release/
 node_modules/
+out/
 .npm-cache/
 *.log
 .DS_Store

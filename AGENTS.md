@@ -10,6 +10,7 @@
 - [资料解析与切片设计](./docs/DOCUMENT_PARSING_AND_CHUNKING_DESIGN.md)
 - [本地 RAG 与索引设计](./docs/LOCAL_RAG_INGESTION_DESIGN.md)
 - [软件配置设计](./docs/SOFTWARE_CONFIGURATION_DESIGN.md)
+- [桌面 UI 结构设计](./docs/DESKTOP_UI_STRUCTURE_DESIGN.md)
 - [文档索引与职责](./docs/README.md)
 
 修改架构、版本范围或数据语义时，必须同步更新相关文档，不能只修改代码或本文件。发现文档冲突时，不要自行扩大范围；先遵循已经明确的版本边界，并向用户说明冲突。
@@ -29,7 +30,7 @@ CleoDoc 是 AGPLv3、免费、本地优先的中文小说 AI 主笔，不是通�
 
 ### v0.1：CLI 核心 MVP
 
-当前优先实现 v0.1。在 CLI 验收通过前，不主动开发 Electron、React、TipTap 或其他 GUI 能力。
+v0.1 已完成开发和发布闭环验收，是后续桌面产品复用的 Core 基线。
 
 v0.1 按重要性排序只有三个核心目标：
 
@@ -48,11 +49,19 @@ v0.1 按重要性排序只有三个核心目标：
 
 v0.1 明确不做：Electron、React、TipTap、Git 版本界面、语义 Diff、关系图、自动事实抽取、完整阶段审批、多人协作、云同步、OCR、ANN 向量索引和自动长篇生成。接口可以为后续能力预留，但不得因此阻塞核心闭环。
 
-### v0.2：Electron 桌面产品
+### v0.2：Electron 桌面产品收尾（已完成）
 
-v0.2 在同一套 Core 上增加 Electron + React 工作室、TipTap 编辑器、Git 版本管理、文档语义 Diff、知识图、设定审批和可恢复的 Agent 工作流。
+v0.2 已在同一套 Core 上完成现有 Electron + React 桌面界面的稳定、安全与 Windows 安装包验证。v0.2 不再使用当前手写 UI 体系新增复杂页面或交互；长任务、上下文、Tool 状态、索引和检索等未完成桌面界面统一迁移到 v0.3。
 
 GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中复制项目、数据库、RAG 或模型调用逻辑。
+
+### v0.3：UI 框架接入与能力迁移
+
+v0.3 接入 Tailwind CSS、shadcn/ui 和 Radix UI，建立 Light、Dark 与 System 主题及统一的无障碍基础组件，并迁移已有 v0.2 页面。原 v0.2 未完成的长任务、上下文、Tool 状态、索引和检索界面在此版本完成。
+
+### v0.4：创作工作室
+
+v0.4 才进入正式 CDM v1、TipTap/ProseMirror、Draft、文本统计、Git 版本控制、版本历史、安全恢复和语义 Diff。知识图、阶段 Agent、新 Provider 和新格式导入导出仍需在进入版本范围前重新规划。
 
 ## 3. 架构不变量
 
@@ -80,10 +89,10 @@ packages/project     项目格式和安全文件读写
 packages/database    SQLite、当前 Schema 基线和 Repository
 packages/knowledge   资料与知识模型
 packages/rag         Chunk/Source、FTS、Embedding、检索、融合和上下文组装
-packages/agent       LLM Tool Loop；v0.2 扩展持久化工作流
+packages/agent       LLM Tool Loop；后续版本再评估持久化工作流
 packages/model-providers
-packages/versioning  v0.2
-packages/diff        v0.2
+packages/versioning  v0.4
+packages/diff        v0.4
 ```
 
 底层 package 不得反向依赖 `apps/cli`、`apps/desktop` 或 UI。
@@ -121,13 +130,13 @@ v0.1 检索路径为：
 
 ## 6. LLM 与 Agent 规则
 
-- v0.1 首先支持 OpenAI-compatible 和 Ollama Provider。
-- API Key 只从环境变量或当前进程的交互输入读取，默认不明文持久化，不进入日志、项目或 Git。
+- 当前只支持 OpenAI-compatible Provider；未经版本规划不得增加新的 Provider 适配。
+- CLI 的 API Key 从环境变量或当前进程交互输入读取；Desktop 允许通过操作系统安全凭据能力加密持久化。密钥不得明文写入软件配置、项目、数据库、日志或 Git，也不得返回 Renderer 回显。
 - 统一处理流式文本、取消、Tool Call、Token 用量，以及鉴权、限流、超时和上下文超限错误。
 - Tool 参数必须经过 Schema 校验；Tool 只能读取当前任务被授权的项目范围。
 - Tool Loop 必须设置最大轮数、上下文预算、超时和取消信号，避免无限循环。
 - 自动批准的 Tool 在 CLI 中静默执行；只有需要用户授权的 Tool 才显示审批界面。原始 Tool Result 返回 LLM 并按既有 Message 协议持久化，不直接作为普通 CLI 输出展示给用户。
-- LLM 生成内容不能直接覆盖正式文档。v0.1 需要用户明确执行保存或确认覆盖；v0.2 通过 ChangeSet 和审批应用。
+- LLM 生成内容不能直接覆盖正式文档。v0.1 至 v0.3 都需要用户明确执行保存或确认覆盖；ChangeSet 留到 v0.4 重新规划。
 - RAG Tool 的版本化 Tool Result Message 用于还原实际发送的检索证据；普通 CLI 检索的 Query、候选和结果不写入数据库。
 - 日志默认不记录正文、资料原文、完整 Prompt、模型响应或密钥。
 
@@ -135,26 +144,34 @@ v0.1 检索路径为：
 
 以下约束在开发 v0.2 时生效：
 
-- 使用 Electron、React、TypeScript、TipTap/ProseMirror。
+- 使用 Electron、React 和 TypeScript；作品与资料只提供 Markdown/TXT 阅读，不接入 TipTap/ProseMirror。
 - Renderer 启用 sandbox、context isolation 和严格 CSP；关闭 Node integration。
-- Renderer 不直接访问文件系统、SQLite、Git、模型密钥或原始 `ipcRenderer`。
+- Renderer 不直接访问文件系统、SQLite、模型密钥或原始 `ipcRenderer`。
 - Preload 只暴露经过 Schema 校验的白名单 Typed IPC。
-- Git 使用 isomorphic-git，对用户隐藏 Git 概念；用户只看到修改历史、命名版本、比较和恢复。
-- 恢复历史通过创建新的恢复记录完成，不改写既有历史。
-- 文档 Diff 以稳定 CDM Node ID、CDM 结构和中文句子/字符级差异为基础，不依赖视觉行号。
-- 用户直接修改的正文具有较高权威，Agent 不得静默改回。
+- 同一应用实例只保持一个活动 Project；切换项目前必须关闭当前 Project，审批、Conversation Runtime 和后台任务不得跨 Project 共享。
+- v0.2 继续使用当前 Markdown/JSON 作品事实源，不静默迁移为 CDM，也不增加正文编辑、Draft、Git 或 Diff。
+- 当前 UI 仍处于频繁调整阶段，任何传入或引用的 UI 设计图都只作为阶段性参考，不视为终稿或冻结规范；用户可以随时手动调整、增删或重新组织现有 UI 元素，AI 必须保留并尊重这些调整，不得擅自还原。
+- AI 在添加任何新的 UI 元素之前，必须先取得用户的明确授权；没有获得授权时，只能修改用户已经明确指定的现有元素，不得依据设计图、开发计划或自身判断主动增加按钮、入口、面板、菜单、占位内容或其他可见元素。
+- 参考 UI 中未进入 v0.2 的功能必须隐藏，不创建不可用按钮、占位页面、平行数据模型或预留数据库表。
+- ModelCall 审计和 Debug 日志保留现有 Core/CLI 能力，但 v0.2 不开发模型调用记录或独立问题诊断界面。
 
 ## 8. 编码与测试要求
 
 - 按照当前已经确认的需求选择最简单、直接的设计；不要为尚未进入范围的假设需求过度设计，也不要增加不必要的抽象和封装。
 - 防御性检查应针对真实的外部输入、已知失败路径或确实可能出现的业务状态；不要为业务上不可能发生的情况增加限制、分支和恢复逻辑。
-- 单个源代码文件原则上不应超过 500 行。文件过长时应按照明确的功能职责拆分；确有必要的特殊情况可以例外，但应能说明不能合理拆分的原因。
+- 单个源代码文件原则上不应超过 1000 行。文件过长时应按照明确的功能职责拆分；确有必要的特殊情况可以例外，但应能说明不能合理拆分的原因。
 - 先阅读现有实现、测试和 package scripts，再选择修改位置；不要创建重复服务或平行数据模型。
+- 代码注释统一使用英文。
+- 函数注释按照函数体的代码行数编写：
+  - 函数体不超过 5 行时，不写函数注释。
+  - 函数体为 6～20 行时，在函数开始处使用精炼、简单的英文注释，清楚描述函数的功能。
+  - 函数体超过 20 行时，在函数开始处先使用精炼的英文注释描述函数功能，再以 `1.`、`2.`、`3.` 等编号步骤说明函数的具体执行流程；每一步都应简短、清楚。
 - 保持 TypeScript 类型严格，领域对象使用明确 ID、时间、作用域和版本字段，避免无约束的 `any`。
 - 错误使用稳定的应用错误类型；面向用户的信息不得泄露密钥、任意绝对路径或底层堆栈。
 - 文件路径和行为必须兼容 Windows、macOS、Linux，不硬编码路径分隔符或平台专属目录。
-- 当前数据库基线是完整 Schema v10；全新数据库直接创建当前结构，保留 v8→v9 和 v9→v10 顺序前向迁移，v7 及更旧或高于 v10 的数据库必须拒绝且不得自动改写或删除。正式发布后的数据库 Schema 变化必须继续提供前向 migration。
+- 当前数据库基线是完整 Schema v12；全新数据库直接创建当前结构，保留 v8→v9、v9→v10、v10→v11 和 v11→v12 顺序前向迁移，v7 及更旧或高于 v12 的数据库必须拒绝且不得自动改写或删除。正式发布后的数据库 Schema 变化必须继续提供前向 migration。
 - 新增功能需要相应单元或集成测试。修复缺陷时，优先添加能复现问题的回归测试。
+- 只允许为功能点添加单元测试，不允许仅因为代码改动而添加单元测试。单元测试必须验证用户可观察的功能行为、明确的业务规则或缺陷回归；内部重构、函数拆分、类型调整、调用链变化或实现细节变化本身不能作为新增单元测试的理由。
 - RAG 排序、去重、预算和隔离必须使用固定样例做确定性测试；远程模型调用在自动测试中应使用 fake Provider。
 - 不为了通过测试降低数据隔离、路径检查、Schema 校验或内容保存安全性。
 - 完成修改后，运行仓库已有的 format、lint、typecheck 和相关测试；如果脚本尚不存在，应明确说明，不能声称已经验证。

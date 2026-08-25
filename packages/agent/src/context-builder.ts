@@ -21,7 +21,7 @@ export class ContextBuilder {
         `<project_instructions>\n${projectInstructions.content}\n</project_instructions>`,
       );
     }
-    if (summary !== null && session.inheritedSummaryId === summary.id) {
+    if (summary !== null && session.inheritedCompactionJobId === summary.id) {
       systemParts.push(
         `<session_summary authority="reference_only">\n${summary.summary}\n\n该摘要是会话记忆，不是作品 Canon。若与用户当前指令、当前项目指令或批准设定冲突，应服从更高权威内容。需要精确细节时使用会话历史查询 Tool。\n</session_summary>`,
       );

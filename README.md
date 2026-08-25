@@ -1,14 +1,31 @@
 # CleoDoc
 
-CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 先以 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环。
+## 启动桌面界面
 
-v0.1 已形成 CLI 基线：OpenAI-compatible/Ollama 对话、生成内容保存、资料管理、Session 压缩与历史回查、Reasoning 展示与 ModelCall 审计、数据库项目指令、受控 Tool Loop，以及 `node-llama-cpp` GGUF Embedding、Tokenizer 切片、sqlite-vec 精确检索和 Exact/FTS/Vector 混合 RAG。跨平台 CLI 打包已经建立；正文索引不属于 v0.1 发布门，发布前只剩人工垂直闭环验收。文档入口见[文档索引](./docs/README.md)，唯一实施状态来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
+安装依赖后，可直接启动 Electron + React 桌面开发环境：
+
+```powershell
+npm run desktop:dev
+```
+
+构建桌面端并以预览模式启动：
+
+```powershell
+npm run desktop:build
+npm run desktop:preview
+```
+
+当前桌面入口提供 v0.2 主界面骨架，并通过受限的 Typed IPC 获取运行环境信息；项目打开和 v0.1 Application Service 接线将在后续阶段逐步接入。
+
+CleoDoc 是本地优先的中文小说 AI 主笔。v0.1 已通过 CLI 验证 LLM 创作、资料管理和本地 RAG 核心闭环；v0.2 将这些已完成能力迁移到 Electron + React 桌面界面。
+
+v0.1 CLI 基线包括：OpenAI-compatible 对话、生成内容保存、资料管理、Session 压缩与历史回查、Reasoning 展示与 ModelCall 审计、数据库项目指令、受控 Tool Loop，以及 `node-llama-cpp` GGUF Embedding、Tokenizer 切片、sqlite-vec 精确检索和 Exact/FTS/Vector 混合 RAG。跨平台 CLI 打包和人工垂直闭环验收均已完成。v0.2 只做现有能力 UI 化，并补充 Markdown/TXT 作品与资料阅读；CDM/TipTap、Draft、Git/Diff、知识图和阶段 Agent 顺延到 v0.3。文档入口见[文档索引](./docs/README.md)，唯一实施状态来源是[开发计划](./docs/DEVELOPMENT_PLAN.md)。
 
 ## 环境要求
 
 - Node.js 22.13–26（推荐 Node.js 24 LTS）
 - npm 10 或更高版本
-- OpenAI-compatible API Key，或者本机 Ollama
+- OpenAI-compatible API Key
 
 ## 安装与验证
 
@@ -70,7 +87,7 @@ my-novel.cleo/
    └─ backups/
 ```
 
-当前 CLI 以 Markdown/JSON 保存作品事实；CDM 是 v0.2 的目标统一文档协议，正文迁移方式尚未确定。`.cleo/project.sqlite` 保存对话、资料索引和运行状态。
+当前 CLI 和 v0.2 Desktop 继续以 Markdown/JSON 保存作品事实，并只读展示 Markdown/TXT 作品与资料；CDM 统一文档协议及正文迁移顺延到 v0.3。`.cleo/project.sqlite` 保存对话、资料索引和运行状态。
 
 ## 使用 OpenAI-compatible Provider
 
@@ -116,13 +133,7 @@ npm run cleo -- provider test openai-compatible
 npm run cleo -- chat
 ```
 
-对话完成后输入：
-
-```text
-/save manuscript/chapter-001.md
-```
-
-也可以直接委托主笔整理并保存，例如：
+需要将内容写入作品时，可以直接委托主笔整理并保存，例如：
 
 ```text
 请总结我们刚才确定的人物设定，并保存到 manuscript/character-notes.md
@@ -149,21 +160,10 @@ npm run cleo -- conversation list
 npm run cleo -- conversation show <conversation-id>
 ```
 
-也可以执行可脚本化的单轮生成和显式保存：
+也可以执行可脚本化的单轮生成：
 
 ```powershell
-npm run cleo -- chat --prompt "写一个约 800 字的悬疑小说开场" --save manuscript/chapter-001.md
-```
-
-若目标文档已经存在，单轮模式必须显式增加 `--overwrite`；交互模式会再次询问确认。
-
-## 使用 Ollama
-
-先在 Ollama 中准备模型，然后运行：
-
-```powershell
-npm run cleo -- provider test ollama
-npm run cleo -- chat --provider ollama --model qwen3:8b
+npm run cleo -- chat --prompt "写一个约 800 字的悬疑小说开场"
 ```
 
 ## 文档命令
@@ -172,7 +172,6 @@ npm run cleo -- chat --provider ollama --model qwen3:8b
 npm run cleo -- document list
 npm run cleo -- document show manuscript/chapter-001.md
 npm run cleo -- document create manuscript/notes.md --content "# 章节笔记"
-npm run cleo -- document save-last manuscript/chapter-002.md
 npm run cleo -- document delete manuscript/notes.md
 ```
 
@@ -219,7 +218,7 @@ Provider 和模型能力由 CleoDoc 的默认配置维护。用户通常只需�
 ## 安全约束
 
 - API Key 仅从环境变量读取，不写入配置、项目、日志或 Git。
-- 生成结果只有在用户执行保存命令，或在交互模式明确批准 LLM 的 `write_project_document` Tool Call 后，才写入正文。
+- 模型生成结果只有在交互模式明确批准 LLM 的 `write_project_document` Tool Call 后，才写入正文。
 - 所有正文路径限定在项目的 `manuscript/` 内，并拒绝路径穿越和符号链接。
 - LLM 只能通过受控工具列出、分段读取和写入当前项目文档；工具参数经过 Schema 校验，循环轮数使用软件配置。
 - 文档使用临时文件、同步和原子替换保存；SQLite 失败不会覆盖已保存 Markdown。

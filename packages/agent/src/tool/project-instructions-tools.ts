@@ -48,6 +48,7 @@ export class ReadProjectInstructionsTool implements Tool<
     "读取当前项目的完整项目指令。仅在需要检查或准备修改项目指令时使用；普通对话已经由系统上下文提供当前项目指令。";
   readonly exposure = "catalog";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = [] as const;
   readonly inputSchema = emptyInputSchema;
   readonly outputSchema = readProjectInstructionsOutputSchema;
@@ -83,6 +84,7 @@ export class AppendProjectInstructionsTool implements Tool<
     "在执行时的最新项目指令末尾追加文本。仅在用户要求保留已有指令并增加新规则时使用，执行前需要用户批准。";
   readonly exposure = "catalog";
   readonly approval = "ask";
+  readonly approvalLabel = "追加项目指令";
   readonly errors = APPROVAL_ERRORS;
   readonly inputSchema = appendProjectInstructionsInputSchema;
   readonly outputSchema = projectInstructionsMutationOutputSchema;
@@ -139,6 +141,7 @@ export class SetProjectInstructionsTool implements Tool<
     "使用给出的完整内容替换执行时的最新项目指令，空字符串表示清空。仅在用户明确要求整体替换或清空时使用，执行前需要用户批准。";
   readonly exposure = "catalog";
   readonly approval = "ask";
+  readonly approvalLabel = "替换项目指令";
   readonly errors = APPROVAL_ERRORS;
   readonly inputSchema = setProjectInstructionsInputSchema;
   readonly outputSchema = projectInstructionsMutationOutputSchema;

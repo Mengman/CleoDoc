@@ -9,6 +9,7 @@ interface SoftwareConfigRuntimeState {
   readonly config: SoftwareConfig;
   readonly defaultConfigPath: string;
   readonly userConfigPath: string;
+  readonly service: SoftwareConfigService;
 }
 
 let state: SoftwareConfigRuntimeState | undefined;
@@ -23,8 +24,40 @@ export async function initializeSoftwareConfig(
     config,
     defaultConfigPath: service.defaultConfigPath,
     userConfigPath: service.userConfigPath,
+    service,
   };
   return { config, warnings: result.warnings };
+}
+
+export async function saveOpenAiCompatibleSoftwareConfig(
+  baseUrl: string,
+  modelName: string,
+): Promise<SoftwareConfigLoadResult> {
+  // Persist the desktop LLM selection and publish a fresh immutable runtime snapshot.
+  const current = getState();
+  await current.service.saveOpenAiCompatibleSelection(baseUrl, modelName);
+  const result = await current.service.load();
+  const config = deepFreeze(result.config);
+  state = { ...current, config };
+  return { config, warnings: result.warnings };
+}
+
+export async function saveCurrentModelSelection(
+  providerId: string,
+  modelId: string,
+): Promise<SoftwareConfigLoadResult> {
+  const current = getState();
+  await current.service.saveModelSelection(providerId, modelId);
+  return reloadRuntimeConfig(current);
+}
+
+export async function saveCurrentModelParameters(input: {
+  reasoningEnabled: boolean;
+  reasoningEffort?: "low" | "medium" | "high";
+}): Promise<SoftwareConfigLoadResult> {
+  const current = getState();
+  await current.service.saveModelParameters(input);
+  return reloadRuntimeConfig(current);
 }
 
 export function getSoftwareConfig(): SoftwareConfig {
@@ -44,6 +77,15 @@ function getState(): SoftwareConfigRuntimeState {
     throw new AppError("CONFIG_ERROR", "软件配置尚未初始化。");
   }
   return state;
+}
+
+async function reloadRuntimeConfig(
+  current: SoftwareConfigRuntimeState,
+): Promise<SoftwareConfigLoadResult> {
+  const result = await current.service.load();
+  const config = deepFreeze(result.config);
+  state = { ...current, config };
+  return { config, warnings: result.warnings };
 }
 
 function deepFreeze<T>(value: T): T {

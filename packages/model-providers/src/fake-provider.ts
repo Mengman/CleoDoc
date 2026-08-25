@@ -1,7 +1,7 @@
 import type {
   ModelEvent,
   ModelProvider,
-  ModelRequest,
+  ProviderModelRequest,
   ProviderHealth,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
@@ -16,7 +16,7 @@ export class FakeModelProvider implements ModelProvider {
     return { ok: true, message: "Fake Provider ready.", models: ["fake-model"] };
   }
 
-  async *stream(request: ModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent> {
+  async *stream(request: ProviderModelRequest, signal: AbortSignal): AsyncIterable<ModelEvent> {
     if (signal.aborted) {
       throw new AppError("GENERATION_CANCELLED", "生成已取消。");
     }

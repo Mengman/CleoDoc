@@ -16,6 +16,7 @@ import { FakeModelProvider } from "../../model-providers/src/index.js";
 import { DocumentService, ProjectService } from "../../project/src/index.js";
 import { ChatService } from "./chat-service.js";
 import { TEST_CHAT_OPTIONS, TEST_DATABASE_OPTIONS } from "../../../test/runtime-options.js";
+import { MutableModelMessageSender, senderForProvider } from "../../../test/model-sender.js";
 import type { LlmDebugEvent } from "./debug-events.js";
 
 const temporaryDirectories: string[] = [];
@@ -29,22 +30,22 @@ afterEach(async () => {
 });
 
 describe("ChatService", () => {
-  it("persists a streamed generation and only saves it after an explicit call", async () => {
+  it("persists a streamed chat turn and supports continuing the conversation", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
       "雨夜",
     );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new FakeModelProvider("# 第一章\n\n雨落在没有灯的车站。\n");
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+      provider: senderForProvider(provider),
+    });
     const streamed: string[] = [];
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "fake-model",
         prompt: "写一个悬疑开场",
         signal: new AbortController().signal,
         onEvent: (event) => {
@@ -56,6 +57,16 @@ describe("ChatService", () => {
       });
 
       expect(streamed.join("")).toBe(result.content);
+      expect(result.userMessage).toMatchObject({
+        role: "user",
+        content: "写一个悬疑开场",
+        conversationId: result.conversationId,
+      });
+      expect(result.assistantMessage).toMatchObject({
+        role: "assistant",
+        content: result.content,
+        conversationId: result.conversationId,
+      });
       expect(debugEvents).toContainEqual(
         expect.objectContaining({
           type: "llm-response",
@@ -65,38 +76,13 @@ describe("ChatService", () => {
           contextSource: "provider",
         }),
       );
-      expect(await new DocumentService(project.root).list()).toHaveLength(0);
-
-      const saved = await chat.saveGeneration("manuscript/chapter-001.md", {
-        generationId: result.generationId,
-      });
-      expect(saved.relativePath).toBe("manuscript/chapter-001.md");
-      expect((await new DocumentService(project.root).read(saved.id)).content).toBe(result.content);
-
       const continuation = await chat.send({
         conversationId: result.conversationId,
         projectId: project.manifest.id,
-        provider,
-        model: "fake-model",
         prompt: "继续",
         signal: new AbortController().signal,
       });
       expect(continuation.conversationId).toBe(result.conversationId);
-    } finally {
-      await chat.close();
-    }
-  });
-
-  it("does not save cancelled or failed generations", async () => {
-    const directory = await createTemporaryDirectory();
-    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
-      path.join(directory, "novel.cleo"),
-    );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
-    try {
-      await expect(chat.saveGeneration("manuscript/empty.md")).rejects.toMatchObject({
-        code: "GENERATION_NOT_FOUND",
-      });
     } finally {
       await chat.close();
     }
@@ -107,24 +93,25 @@ describe("ChatService", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+    const provider = new MutableModelMessageSender(
+      new FakeModelProvider("第一次回答"),
+      "stable-model",
+    );
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
     let conversationId: string;
     try {
       const successful = await chat.send({
         projectId: project.manifest.id,
-        provider: new FakeModelProvider("第一次回答"),
-        model: "stable-model",
         prompt: "第一次提问",
         signal: new AbortController().signal,
       });
       conversationId = successful.conversationId;
+      provider.use(new TimeoutModelProvider(), "stable-model");
 
       await expect(
         chat.send({
           conversationId,
           projectId: project.manifest.id,
-          provider: new TimeoutModelProvider(),
-          model: "stable-model",
           prompt: "超时的提问",
           signal: new AbortController().signal,
         }),
@@ -136,9 +123,9 @@ describe("ChatService", () => {
       await chat.close();
     }
 
-    const reopened = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+    const reopened = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
     try {
-      const latest = reopened.getLatestConversation(project.manifest.id, "fake", "stable-model");
+      const latest = reopened.getLatestConversation(project.manifest.id);
       expect(latest?.id).toBe(conversationId!);
       expect(
         reopened.getConversationHistory(conversationId!).map((message) => message.content),
@@ -148,28 +135,62 @@ describe("ChatService", () => {
     }
   });
 
+  it("uses the current model for each turn without binding it to the conversation", async () => {
+    const directory = await createTemporaryDirectory();
+    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
+      path.join(directory, "novel.cleo"),
+    );
+    const provider = new MutableModelMessageSender(new FakeModelProvider("模型 A"), "model-a");
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
+    try {
+      const first = await chat.send({
+        projectId: project.manifest.id,
+        prompt: "第一轮",
+        signal: new AbortController().signal,
+      });
+      provider.use(new FakeModelProvider("模型 B"), "model-b");
+      await chat.send({
+        projectId: project.manifest.id,
+        conversationId: first.conversationId,
+        prompt: "第二轮",
+        signal: new AbortController().signal,
+      });
+
+      const raw = new DatabaseSync(path.join(project.root, ".cleo", "project.sqlite"));
+      try {
+        expect(
+          raw.prepare("SELECT model FROM model_calls ORDER BY created_at, rowid").all(),
+        ).toEqual([{ model: "model-a" }, { model: "model-b" }]);
+        expect(raw.prepare("PRAGMA table_info(conversations)").all()).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ name: "model" })]),
+        );
+      } finally {
+        raw.close();
+      }
+    } finally {
+      await chat.close();
+    }
+  });
+
   it("executes an approved write tool call and returns the model's final response", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new ToolCallingModelProvider();
-    const approvals: string[] = [];
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+      provider: senderForProvider(provider, "tool-model"),
+    });
+    const approvalLabels: string[] = [];
     const reasoningDeltas: string[] = [];
 
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "tool-model",
         prompt: "总结并保存到项目",
         signal: new AbortController().signal,
         approveToolCall: async (request) => {
-          const toolInput = request.input as { path?: unknown };
-          if (request.toolName === "write_project_document" && typeof toolInput.path === "string") {
-            approvals.push(toolInput.path);
-          }
+          approvalLabels.push(request.approvalLabel);
           return "allow_once";
         },
         onEvent: (event) => {
@@ -178,11 +199,10 @@ describe("ChatService", () => {
       });
 
       expect(result.content).toBe("总结已经保存到项目中。");
-      expect(approvals).toEqual(["manuscript/summary.md"]);
+      expect(approvalLabels).toEqual(["文件写入"]);
       expect((await new DocumentService(project.root).read("manuscript/summary.md")).content).toBe(
         "# 会谈总结\n\n确定采用雨夜车站作为开场。\n",
       );
-      expect(provider.requests).toHaveLength(2);
       for (const request of provider.requests) {
         expect(request.tools).toEqual(
           expect.arrayContaining([
@@ -235,7 +255,9 @@ describe("ChatService", () => {
           raw.prepare("SELECT COUNT(*) AS count FROM model_calls WHERE status = 'completed'").get(),
         ).toEqual({ count: 2 });
         expect(
-          raw.prepare("SELECT COUNT(*) AS count FROM generation_model_call_mapping").get(),
+          raw
+            .prepare("SELECT COUNT(*) AS count FROM messages WHERE model_call_id IS NOT NULL")
+            .get(),
         ).toEqual({ count: 2 });
       } finally {
         raw.close();
@@ -250,17 +272,16 @@ describe("ChatService", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new ProjectInstructionToolProvider();
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+      provider: senderForProvider(provider, "instruction-tool-model"),
+    });
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "instruction-tool-model",
         prompt: "把第三人称限知写入项目指令",
         signal: new AbortController().signal,
-        approveToolCall: async (request) =>
-          request.toolName === "set_project_instructions" ? "allow_once" : "reject",
+        approveToolCall: async () => "allow_once",
       });
       expect(result.content).toBe("项目指令已经更新。");
       expect(chat.getProjectInstructions()).toMatchObject({
@@ -280,26 +301,23 @@ describe("ChatService", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    let chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
     const provider = new PersistentToolProvider();
+    const sender = senderForProvider(provider, "persistent-tool-model");
+    let chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider: sender });
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "persistent-tool-model",
         prompt: "加载历史搜索工具",
         signal: new AbortController().signal,
       });
       expect(first.content).toBe("历史搜索工具已经加载。");
 
       await chat.close();
-      chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+      chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider: sender });
 
       const second = await chat.send({
         conversationId: first.conversationId,
         projectId: project.manifest.id,
-        provider,
-        model: "persistent-tool-model",
         prompt: "现在搜索旧对话",
         signal: new AbortController().signal,
       });

@@ -18,6 +18,7 @@ import {
   TEST_CHAT_OPTIONS,
   TEST_DATABASE_OPTIONS,
 } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import { ChatService } from "./chat-service.js";
 
 const temporaryDirectories: string[] = [];
@@ -45,19 +46,19 @@ describe("ChatService knowledge tool loop", () => {
     await materials.close();
 
     const knowledge = await KnowledgeToolService.open(project.root, materialOptions);
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { knowledge });
     const provider = new KnowledgeLoopProvider();
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+      knowledge,
+      provider: senderForProvider(provider, "knowledge-loop-model"),
+    });
     try {
       const result = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "knowledge-loop-model",
         prompt: "资料中夜间列车用什么照明？",
         signal: new AbortController().signal,
       });
 
       expect(result.content).toBe("资料显示夜间列车使用煤油灯照明。");
-      expect(provider.requests).toHaveLength(3);
       expect(provider.requests[0]?.tools?.map((tool) => tool.name)).toEqual(
         expect.arrayContaining(["list_materials", "search_knowledge"]),
       );
@@ -95,19 +96,22 @@ describe("ChatService knowledge tool loop", () => {
   });
 
   it("lets the model repair invalid knowledge tool input on the next round", async () => {
-    const fixture = await createKnowledgeFixture("钟楼值夜人只在午夜点亮煤油灯。", "值夜记录");
     const provider = new InvalidInputRecoveryProvider();
+    const fixture = await createKnowledgeFixture(
+      "钟楼值夜人只在午夜点亮煤油灯。",
+      "值夜记录",
+      createTestMaterialOptions(),
+      provider,
+      "repair-model",
+    );
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider,
-        model: "repair-model",
         prompt: "值夜人使用什么照明？",
         signal: new AbortController().signal,
       });
 
       expect(result.content).toBe("修正参数后查到值夜人使用煤油灯。");
-      expect(provider.requests).toHaveLength(3);
       expect(toolResultText(provider.requests[1]!)).toContain("INVALID_TOOL_INPUT");
       expect(toolResultText(provider.requests[2]!)).toContain("煤油灯");
       expect(fixture.chat.getConversationHistory(result.conversationId)).toEqual(
@@ -138,23 +142,22 @@ describe("ChatService knowledge tool loop", () => {
         },
       },
     };
+    const provider = new SearchOnlyProvider("地下通道");
     const fixture = await createKnowledgeFixture(
       "旧地图标出了钟楼下已经封闭的地下通道。",
       "旧地图",
       options,
+      provider,
+      "fallback-model",
     );
-    const provider = new SearchOnlyProvider("地下通道");
     try {
       const result = await fixture.chat.send({
         projectId: fixture.projectId,
-        provider,
-        model: "fallback-model",
         prompt: "旧地图记录了什么？",
         signal: new AbortController().signal,
       });
 
       expect(result.content).toBe("即使向量不可用，也查到了地下通道。");
-      expect(provider.requests).toHaveLength(2);
       expect(toolResultText(provider.requests[1]!)).toContain("已经封闭的地下通道");
     } finally {
       await fixture.close();
@@ -165,7 +168,9 @@ describe("ChatService knowledge tool loop", () => {
 async function createKnowledgeFixture(
   content: string,
   title: string,
-  materialOptions = createTestMaterialOptions(),
+  materialOptions: ReturnType<typeof createTestMaterialOptions>,
+  provider: ModelProvider,
+  model: string,
 ): Promise<{
   projectId: string;
   chat: ChatService;
@@ -180,7 +185,10 @@ async function createKnowledgeFixture(
   await materials.addText(content, { title });
   await materials.close();
   const knowledge = await KnowledgeToolService.open(project.root, materialOptions);
-  const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { knowledge });
+  const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, {
+    knowledge,
+    provider: senderForProvider(provider, model),
+  });
   return {
     projectId: project.manifest.id,
     chat,

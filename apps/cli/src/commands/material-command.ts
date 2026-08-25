@@ -33,13 +33,20 @@ export async function runMaterialCommand(
   parsed: ParsedArguments,
   context: CliCommandContext,
 ): Promise<void> {
+  // Run one material command inside a project session and release it in reverse order.
   const config = getSoftwareConfig();
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
-  const materials = await MaterialService.open(root, createMaterialServiceOptions());
+  await context.projectService.open(root);
+  let materials: MaterialService | undefined;
   try {
+    materials = await MaterialService.open(context.projectService, createMaterialServiceOptions());
     await executeMaterialCommand(parsed, context, materials, config.materials.maxImportBytes);
   } finally {
-    await materials.close();
+    try {
+      await materials?.close();
+    } finally {
+      await context.projectService.close();
+    }
   }
 }
 

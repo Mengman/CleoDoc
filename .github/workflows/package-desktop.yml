@@ -1,0 +1,30 @@
+name: Package Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run package:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cleodoc-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: release/desktop/*
+          if-no-files-found: error

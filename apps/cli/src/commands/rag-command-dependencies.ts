@@ -10,7 +10,16 @@ export function createRagCommandDependencies(context: CliCommandContext): RagCom
     defaultDebug: getSoftwareConfig().debug.enabled,
     resolveProjectRoot: async (explicitProject) =>
       await resolveProjectRoot(context, explicitProject),
-    openMaterials: async (projectRoot) =>
-      await MaterialService.open(projectRoot, createMaterialServiceOptions()),
+    openMaterials: async (projectRoot) => {
+      await context.projectService.open(projectRoot);
+      return await MaterialService.open(
+        context.projectService,
+        createMaterialServiceOptions(),
+      ).catch(async (error: unknown) => {
+        await context.projectService.close();
+        throw error;
+      });
+    },
+    closeProject: async () => await context.projectService.close(),
   };
 }

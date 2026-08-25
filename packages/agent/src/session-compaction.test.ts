@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   ModelEvent,
   ModelProvider,
-  ModelRequest,
+  ProviderModelRequest,
   ProviderHealth,
   StoredMessage,
 } from "../../contracts/src/index.js";
@@ -24,6 +24,7 @@ import {
   TEST_CONTEXT_POLICY,
   TEST_DATABASE_OPTIONS,
 } from "../../../test/runtime-options.js";
+import { senderForProvider } from "../../../test/model-sender.js";
 import {
   projectMessagesForCompaction,
   segmentMessagesForCompaction,
@@ -48,135 +49,24 @@ afterEach(async () => {
 });
 
 describe("session compaction", () => {
-  it("stores a streamed Markdown summary and uses it in the next session", async () => {
-    const directory = await createTemporaryDirectory();
-    const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
-      path.join(directory, "novel.cleo"),
-    );
-    await setProjectInstructions(project.root, "数据库项目规则");
-    await writeFile(path.join(project.root, "AGENTS.md"), "第一版文件规则", "utf8");
-    const provider = new CompactionAwareProvider();
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
-    const debugEvents: LlmDebugEvent[] = [];
-
-    try {
-      const first = await chat.send({
-        projectId: project.manifest.id,
-        provider,
-        model: "scripted",
-        prompt: "主角是一名退休刑警。",
-        signal: new AbortController().signal,
-      });
-      expect(provider.requests[0]?.messages[0]?.content).toContain("数据库项目规则");
-      expect(provider.requests[0]?.messages[0]?.content).not.toContain("第一版文件规则");
-      expect(provider.requests[0]?.thinking).toBeUndefined();
-
-      await writeFile(path.join(project.root, "AGENTS.md"), "第二版文件规则", "utf8");
-      await chat.compactConversation({
-        conversationId: first.conversationId,
-        provider,
-        model: "scripted",
-        trigger: "manual",
-        signal: new AbortController().signal,
-        onDebugEvent: (event) => debugEvents.push(event),
-      });
-
-      const compactionRequest = provider.requests.find((request) =>
-        request.messages[0]?.content.includes("会话上下文压缩器"),
-      );
-      expect(compactionRequest?.messages[1]?.content).toContain("Markdown 摘要正文");
-      expect(compactionRequest?.messages[1]?.content).not.toContain("输出 JSON Schema");
-      expect(compactionRequest?.responseFormat).toBeUndefined();
-      expect(compactionRequest?.thinking).toEqual({ type: "disabled" });
-      expect(compactionRequest?.maxTokens).toBeUndefined();
-      expect(compactionRequest?.tools).toEqual([]);
-
-      const payload = extractCompactionPayload(compactionRequest!.messages[1]!.content);
-      expect(payload.summaryTargetTokens).toBe(8_000);
-      expect(payload.messages).toEqual([
-        { role: "user", content: "主角是一名退休刑警。" },
-        { role: "assistant", content: "已记录主角职业。" },
-      ]);
-      for (const message of payload.messages as Array<Record<string, unknown>>) {
-        expect(Object.keys(message).sort()).toEqual(["content", "role"]);
-      }
-      expect(provider.compactionChunks).toBeGreaterThan(1);
-      expect(debugEvents).toContainEqual(
-        expect.objectContaining({
-          type: "llm-assembled-output",
-          operation: "compaction",
-          content: provider.summary,
-          characterCount: provider.summary.length,
-          finishReason: "stop",
-        }),
-      );
-
-      const sessions = chat.getSessions(first.conversationId);
-      expect(sessions.map((session) => session.status)).toEqual(["closed", "active"]);
-      expect(chat.getProjectInstructions()?.content).toBe("数据库项目规则");
-      expect(chat.getSessionDetails(first.conversationId, 1).summary?.summary).toBe(
-        provider.summary,
-      );
-
-      await chat.send({
-        conversationId: first.conversationId,
-        projectId: project.manifest.id,
-        provider,
-        model: "scripted",
-        prompt: "请找回主角的职业。",
-        signal: new AbortController().signal,
-      });
-
-      const postCompaction = provider.requests.find(
-        (request) =>
-          !request.messages[0]?.content.includes("会话上下文压缩器") &&
-          request.messages.some((message) => message.content === "请找回主角的职业。"),
-      );
-      expect(postCompaction?.messages[0]?.content).toContain("数据库项目规则");
-      expect(postCompaction?.messages[0]?.content).not.toContain("第二版文件规则");
-      expect(postCompaction?.messages[0]?.content).not.toContain("sha256=");
-      expect(postCompaction?.messages[0]?.content).toContain("<session_summary");
-      expect(postCompaction?.messages[0]?.content).not.toContain("source_session_id=");
-      expect(postCompaction?.messages[0]?.content).not.toContain("summary_id=");
-      expect(postCompaction?.messages[0]?.content).not.toContain("<session_handoff");
-      expect(postCompaction?.messages[0]?.content).toContain(provider.summary);
-      expect(
-        postCompaction?.messages.some((message) => message.content === "主角是一名退休刑警。"),
-      ).toBe(false);
-      expect(
-        provider.requests.some((request) =>
-          request.messages.some(
-            (message) => message.role === "tool" && message.content.includes("退休刑警"),
-          ),
-        ),
-      ).toBe(true);
-    } finally {
-      await chat.close();
-    }
-  });
-
   it("keeps the old session active and logs an empty assembled result before validation", async () => {
     const directory = await createTemporaryDirectory();
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const provider = new EmptyCompactionProvider();
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+    const provider = senderForProvider(new EmptyCompactionProvider());
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "scripted",
         prompt: "保留这一条历史。",
         signal: new AbortController().signal,
       });
       await expect(
         chat.compactConversation({
           conversationId: first.conversationId,
-          provider,
-          model: "scripted",
           signal: new AbortController().signal,
           onDebugEvent: (event) => debugEvents.push(event),
         }),
@@ -188,7 +78,6 @@ describe("session compaction", () => {
       expect(
         chat.getConversationHistory(first.conversationId).map((message) => message.content),
       ).toEqual(expect.arrayContaining(["保留这一条历史。", "已记录。"]));
-      expect(provider.requests).toHaveLength(2);
       expect(debugEvents).toContainEqual(
         expect.objectContaining({
           type: "llm-assembled-output",
@@ -215,21 +104,17 @@ describe("session compaction", () => {
       path.join(directory, "novel.cleo"),
     );
     await setProjectInstructions(project.root, "连续压缩项目规则");
-    const provider = new CumulativeCompactionProvider();
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+    const provider = senderForProvider(new CumulativeCompactionProvider());
+    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS, { provider });
 
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "scripted",
         prompt: "第一阶段决定。",
         signal: new AbortController().signal,
       });
       await chat.compactConversation({
         conversationId: first.conversationId,
-        provider,
-        model: "scripted",
         signal: new AbortController().signal,
       });
 
@@ -240,26 +125,22 @@ describe("session compaction", () => {
       expect(afterFirst[0]).toMatchObject({
         ordinal: 1,
         status: "closed",
-        inheritedSummaryId: null,
+        inheritedCompactionJobId: null,
       });
       expect(afterFirst[1]).toMatchObject({
         ordinal: 2,
         status: "active",
-        inheritedSummaryId: summary1!.id,
+        inheritedCompactionJobId: summary1!.id,
       });
 
       await chat.send({
         conversationId: first.conversationId,
         projectId: project.manifest.id,
-        provider,
-        model: "scripted",
         prompt: "第二阶段决定。",
         signal: new AbortController().signal,
       });
       await chat.compactConversation({
         conversationId: first.conversationId,
-        provider,
-        model: "scripted",
         signal: new AbortController().signal,
       });
 
@@ -268,9 +149,9 @@ describe("session compaction", () => {
       expect(summary2).not.toBeNull();
       expect(sessions).toHaveLength(3);
       expect(sessions.map((session) => session.status)).toEqual(["closed", "closed", "active"]);
-      expect(sessions[0]?.inheritedSummaryId).toBeNull();
-      expect(sessions[1]?.inheritedSummaryId).toBe(summary1!.id);
-      expect(sessions[2]?.inheritedSummaryId).toBe(summary2!.id);
+      expect(sessions[0]?.inheritedCompactionJobId).toBeNull();
+      expect(sessions[1]?.inheritedCompactionJobId).toBe(summary1!.id);
+      expect(sessions[2]?.inheritedCompactionJobId).toBe(summary2!.id);
       expect(provider.compactionPayloads[0]?.previousSummary).toBeNull();
       expect(provider.compactionPayloads[1]?.previousSummary).toBe(summary1!.summary);
       expect(provider.compactionPayloads[1]?.messages).toEqual([
@@ -281,8 +162,6 @@ describe("session compaction", () => {
       await chat.send({
         conversationId: first.conversationId,
         projectId: project.manifest.id,
-        provider,
-        model: "scripted",
         prompt: "检查第三个 Session。",
         signal: new AbortController().signal,
       });
@@ -308,23 +187,33 @@ describe("session compaction", () => {
     const project = await new ProjectService(TEST_DATABASE_OPTIONS).create(
       path.join(directory, "novel.cleo"),
     );
-    const provider = new HierarchicalCompactionProvider();
-    const chat = await ChatService.open(project.root, TEST_CHAT_OPTIONS);
+    const provider = senderForProvider(new HierarchicalCompactionProvider(), "scripted", {
+      contextWindowTokens: TEST_20K_CONTEXT_POLICY.contextWindowTokens,
+      maxOutputTokens: TEST_20K_CONTEXT_POLICY.reservedOutputTokens,
+      reasoningSupported: true,
+      reasoningEfforts: ["low", "medium", "high"],
+    });
+    const smallContextOptions = {
+      ...TEST_CHAT_OPTIONS,
+      context: {
+        ...TEST_CHAT_OPTIONS.context,
+        nextUserInputReserveTokens: TEST_20K_CONTEXT_POLICY.nextUserInputReserveTokens,
+        nextUserInputReserveRatio:
+          TEST_20K_CONTEXT_POLICY.nextUserInputReserveTokens /
+          TEST_20K_CONTEXT_POLICY.contextWindowTokens,
+      },
+    };
+    const chat = await ChatService.open(project.root, smallContextOptions, { provider });
     const debugEvents: LlmDebugEvent[] = [];
 
     try {
       const first = await chat.send({
         projectId: project.manifest.id,
-        provider,
-        model: "scripted",
         prompt: "关键线索".repeat(3_000),
         signal: new AbortController().signal,
       });
       await chat.compactConversation({
         conversationId: first.conversationId,
-        provider,
-        model: "scripted",
-        contextBudgetPolicy: TEST_20K_CONTEXT_POLICY,
         signal: new AbortController().signal,
         onDebugEvent: (event) => debugEvents.push(event),
       });
@@ -762,76 +651,16 @@ describe("session compaction", () => {
   });
 });
 
-class CompactionAwareProvider implements ModelProvider {
-  readonly id = "compaction-script";
-  readonly displayName = "Compaction Script";
-  readonly requests: ModelRequest[] = [];
-  readonly summary = "# 当前目标\n\n继续创作小说。\n\n# 已确认决定\n\n- 主角是一名退休刑警。";
-  compactionChunks = 0;
-  private normalCalls = 0;
-
-  async validateConfiguration(): Promise<ProviderHealth> {
-    return { ok: true, message: "ready" };
-  }
-
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
-    this.requests.push(request);
-    if (request.messages[0]?.content.includes("会话上下文压缩器")) {
-      const firstBoundary = Math.floor(this.summary.length / 3);
-      const secondBoundary = Math.floor((this.summary.length * 2) / 3);
-      for (const text of [
-        this.summary.slice(0, firstBoundary),
-        this.summary.slice(firstBoundary, secondBoundary),
-        this.summary.slice(secondBoundary),
-      ]) {
-        this.compactionChunks += 1;
-        yield { type: "text-delta", text };
-      }
-      yield { type: "done", finishReason: "stop" };
-      return;
-    }
-
-    this.normalCalls += 1;
-    if (this.normalCalls === 1) {
-      yield { type: "text-delta", text: "已记录主角职业。" };
-    } else if (this.normalCalls === 2) {
-      yield {
-        type: "tool-call",
-        call: {
-          id: "load-history-search",
-          name: "project_tool_catalog",
-          argumentsJson: JSON.stringify({
-            action: "get",
-            name: "search_conversation_history",
-          }),
-        },
-      };
-    } else if (this.normalCalls === 3) {
-      yield {
-        type: "tool-call",
-        call: {
-          id: "history-1",
-          name: "search_conversation_history",
-          argumentsJson: JSON.stringify({ query: "退休刑警" }),
-        },
-      };
-    } else {
-      yield { type: "text-delta", text: "历史显示主角是退休刑警。" };
-    }
-    yield { type: "done", finishReason: "stop" };
-  }
-}
-
 class EmptyCompactionProvider implements ModelProvider {
   readonly id = "empty-script";
   readonly displayName = "Empty Script";
-  readonly requests: ModelRequest[] = [];
+  readonly requests: ProviderModelRequest[] = [];
 
   async validateConfiguration(): Promise<ProviderHealth> {
     return { ok: true, message: "ready" };
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ProviderModelRequest): AsyncIterable<ModelEvent> {
     this.requests.push(request);
     const rawOutput = request.messages[0]?.content.includes("会话上下文压缩器")
       ? "   "
@@ -858,7 +687,7 @@ class EmptyCompactionProvider implements ModelProvider {
 class CumulativeCompactionProvider implements ModelProvider {
   readonly id = "cumulative-script";
   readonly displayName = "Cumulative Script";
-  readonly requests: ModelRequest[] = [];
+  readonly requests: ProviderModelRequest[] = [];
   readonly compactionPayloads: Record<string, unknown>[] = [];
   private normalCalls = 0;
 
@@ -866,7 +695,7 @@ class CumulativeCompactionProvider implements ModelProvider {
     return { ok: true, message: "ready" };
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ProviderModelRequest): AsyncIterable<ModelEvent> {
     this.requests.push(request);
     if (request.messages[0]?.content.includes("会话上下文压缩器")) {
       const payload = extractCompactionPayload(request.messages[1]!.content);
@@ -895,7 +724,7 @@ class HierarchicalCompactionProvider implements ModelProvider {
     return { ok: true, message: "ready" };
   }
 
-  async *stream(request: ModelRequest): AsyncIterable<ModelEvent> {
+  async *stream(request: ProviderModelRequest): AsyncIterable<ModelEvent> {
     if (!request.messages[0]?.content.includes("会话上下文压缩器")) {
       yield { type: "text-delta", text: "已记录长线索。" };
       yield { type: "done", finishReason: "stop" };

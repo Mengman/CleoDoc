@@ -10,13 +10,8 @@ import {
   type ParsedArguments,
 } from "../arguments.js";
 import { LlmDebugFileLogger } from "../debug-log.js";
-import {
-  chatServiceOptions,
-  providerFromArguments,
-  resolveContextBudgetPolicy,
-} from "./chat-settings.js";
+import { chatServiceOptions, providerServiceFromArguments } from "./chat-settings.js";
 import { resolveProjectRoot, type CliCommandContext } from "./command-context.js";
-import { printSaved } from "./command-utils.js";
 import { runInteractiveChat } from "./interactive-chat.js";
 import { createMaterialServiceOptions } from "./material-command.js";
 import { generateOnce } from "./send-chat-message.js";
@@ -25,6 +20,11 @@ export async function runChatCommand(
   parsed: ParsedArguments,
   context: CliCommandContext,
 ): Promise<void> {
+  // Run single-turn or interactive chat with the selected project and provider configuration.
+  // 1. Validate CLI arguments and resolve the active project and model.
+  // 2. Open the knowledge, chat, and optional debug services.
+  // 3. Select a new, explicit, or interactive conversation flow.
+  // 4. Close every opened service in reverse ownership order.
   assertOnlyOptions(parsed, [
     "project",
     "provider",
@@ -39,18 +39,14 @@ export async function runChatCommand(
     "conversation",
     "new",
     "prompt",
-    "save",
-    "overwrite",
   ]);
   if (parsed.positionals.length !== 0) {
     throw new AppError("VALIDATION_ERROR", "chat 不接受位置参数，请使用 --prompt。");
   }
   const config = getSoftwareConfig();
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
-  const project = await context.projectService.open(root);
   const providerId =
     optionString(parsed, "provider") ?? config.llm.selectedProvider ?? "openai-compatible";
-  const provider = providerFromArguments(providerId, parsed);
   const model =
     optionString(parsed, "model") ??
     process.env.CLEODOC_MODEL ??
@@ -59,16 +55,32 @@ export async function runChatCommand(
   if (!model) {
     throw new AppError("VALIDATION_ERROR", "请使用 --model 或 CLEODOC_MODEL 指定模型。");
   }
+  const provider = providerServiceFromArguments(providerId, model, parsed);
   const debug = parsed.options.has("debug") ? optionBoolean(parsed, "debug") : config.debug.enabled;
-  const contextBudgetPolicy = resolveContextBudgetPolicy(providerId, model, parsed);
-  const knowledge = await KnowledgeToolService.open(project.root, createMaterialServiceOptions());
-  const chat = await ChatService.open(project.root, chatServiceOptions(), { knowledge }).catch(
-    async (error: unknown) => {
-      await knowledge.close();
-      throw error;
-    },
-  );
-  const debugLogger = debug ? await LlmDebugFileLogger.create(project.root) : undefined;
+  const project = await context.projectService.open(root);
+  const knowledge = await KnowledgeToolService.open(
+    context.projectService,
+    createMaterialServiceOptions(),
+  ).catch(async (error: unknown) => {
+    await context.projectService.close();
+    throw error;
+  });
+  const chat = await ChatService.open(context.projectService, chatServiceOptions(), {
+    knowledge,
+    provider,
+  }).catch(async (error: unknown) => {
+    await knowledge.close();
+    await context.projectService.close();
+    throw error;
+  });
+  const debugLogger = debug
+    ? await LlmDebugFileLogger.create(project.root).catch(async (error: unknown) => {
+        await chat.close();
+        await knowledge.close();
+        await context.projectService.close();
+        throw error;
+      })
+    : undefined;
   const onDebugEvent = debugLogger?.onEvent;
   if (debugLogger !== undefined) {
     context.output.write(`Debug 日志：${debugLogger.filePath}\n`);
@@ -85,29 +97,17 @@ export async function runChatCommand(
     if (prompt !== undefined) {
       await runSinglePrompt(context, chat, {
         projectId: project.manifest.id,
-        provider,
-        model,
         prompt,
         conversationId: initialConversationId,
-        contextBudgetPolicy,
-        parsed,
         ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
       });
       return;
     }
-    if (parsed.options.has("save") || parsed.options.has("overwrite")) {
-      throw new AppError("VALIDATION_ERROR", "--save 和 --overwrite 仅用于 --prompt 单轮模式。");
-    }
     await runInteractiveChat(context, chat, {
       projectId: project.manifest.id,
       provider,
-      model,
       initialConversationId,
-      createProvider: (selectedProviderId) => providerFromArguments(selectedProviderId, parsed),
       documents: new DocumentService(project.root),
-      contextBudgetPolicy,
-      createContextBudgetPolicy: (selectedProviderId, selectedModel) =>
-        resolveContextBudgetPolicy(selectedProviderId, selectedModel, parsed),
       ...(onDebugEvent === undefined ? {} : { onDebugEvent }),
     });
   } finally {
@@ -117,7 +117,11 @@ export async function runChatCommand(
       try {
         await knowledge.close();
       } finally {
-        await debugLogger?.close();
+        try {
+          await debugLogger?.close();
+        } finally {
+          await context.projectService.close();
+        }
       }
     }
   }
@@ -126,34 +130,18 @@ export async function runChatCommand(
 async function runSinglePrompt(
   context: CliCommandContext,
   chat: ChatService,
-  options: Parameters<typeof generateOnce>[2] & {
-    readonly parsed: ParsedArguments;
-  },
+  options: Parameters<typeof generateOnce>[2],
 ): Promise<void> {
-  const { parsed, ...generationInput } = options;
-  const result = await generateOnce(context, chat, generationInput);
-  const budget = chat.getContextStatus(result.conversationId, options.contextBudgetPolicy);
+  const result = await generateOnce(context, chat, options);
+  const budget = await chat.getContextStatus(result.conversationId);
   if (budget.softLimitReached) {
     context.output.write("正在进行上下文压缩……\n");
     await chat.compactConversation({
       conversationId: result.conversationId,
-      provider: options.provider,
-      model: options.model,
-      contextBudgetPolicy: options.contextBudgetPolicy,
       trigger: "automatic",
       signal: new AbortController().signal,
       ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),
     });
     context.output.write("上下文压缩完成。\n");
-  }
-  const savePath = optionString(parsed, "save");
-  if (savePath !== undefined) {
-    printSaved(
-      context,
-      await chat.saveGeneration(savePath, {
-        generationId: result.generationId,
-        overwrite: optionBoolean(parsed, "overwrite"),
-      }),
-    );
   }
 }

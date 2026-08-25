@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import type {
   ConversationSession,
-  ModelUsage,
   SessionSummaryRecord,
   SessionTrigger,
   StoredMessage,
@@ -17,7 +16,7 @@ interface SessionRow {
   status: ConversationSession["status"];
   trigger: SessionTrigger;
   system_prompt_snapshot: string;
-  inherited_summary_id: string | null;
+  inherited_compaction_job_id: string | null;
   estimated_input_tokens: number;
   actual_input_tokens: number | null;
   compaction_required: number;
@@ -27,28 +26,16 @@ interface SessionRow {
 
 interface SummaryRow {
   id: string;
-  conversation_id: string;
   source_session_id: string;
   summary: string;
   first_message_id: string;
   last_message_id: string;
-  message_count: number;
   prompt_version: string;
-  provider_id: string;
-  model: string;
-  usage_json: string | null;
   created_at: string;
 }
 
 interface CompactionJobCompletionRow {
-  conversation_id: string;
   source_session_id: string;
-  prompt_version: string;
-  provider_id: string;
-  model: string;
-  first_message_id: string;
-  last_message_id: string;
-  message_count: number;
 }
 
 interface HistoryRow {
@@ -144,35 +131,25 @@ export class SessionRepository {
     return rows.map(mapHistoryMessage);
   }
 
-  getLatestSummary(conversationId: string): SessionSummaryRecord | null {
-    const row = this.projectDatabase.read(
-      (database) =>
-        database
-          .prepare(
-            "SELECT * FROM session_summaries WHERE conversation_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-          )
-          .get(conversationId) as SummaryRow | undefined,
-    );
-    return row === undefined ? null : mapSummary(row);
-  }
-
   getSummary(id: string): SessionSummaryRecord | null {
     const row = this.projectDatabase.read(
       (database) =>
-        database.prepare("SELECT * FROM session_summaries WHERE id = ?").get(id) as
-          SummaryRow | undefined,
+        database
+          .prepare("SELECT * FROM compaction_jobs WHERE id = ? AND status = 'completed'")
+          .get(id) as SummaryRow | undefined,
     );
     return row === undefined ? null : mapSummary(row);
   }
 
   getInheritedSummary(session: ConversationSession): SessionSummaryRecord | null {
-    if (session.inheritedSummaryId === null) return null;
-    const summary = this.getSummary(session.inheritedSummaryId);
-    if (summary === null || summary.conversationId !== session.conversationId) {
+    if (session.inheritedCompactionJobId === null) return null;
+    const summary = this.getSummary(session.inheritedCompactionJobId);
+    const source = summary === null ? null : this.getSession(summary.sourceSessionId);
+    if (summary === null || source?.conversationId !== session.conversationId) {
       throw new AppError("DATABASE_ERROR", "当前 Session 继承的摘要不存在或归属不匹配。", {
         details: {
           sessionId: session.id,
-          inheritedSummaryId: session.inheritedSummaryId,
+          inheritedCompactionJobId: session.inheritedCompactionJobId,
         },
       });
     }
@@ -184,7 +161,7 @@ export class SessionRepository {
       (database) =>
         database
           .prepare(
-            "SELECT * FROM session_summaries WHERE source_session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            "SELECT * FROM compaction_jobs WHERE source_session_id = ? AND status = 'completed' LIMIT 1",
           )
           .get(sessionId) as SummaryRow | undefined,
     );
@@ -210,13 +187,14 @@ export class SessionRepository {
   async beginCompaction(input: {
     session: ConversationSession;
     trigger: SessionTrigger;
-    providerId: string;
-    model: string;
     promptVersion: string;
     messages: readonly StoredMessage[];
-    previousSummaryId: string | null;
     orchestrationConfig: Readonly<Record<string, unknown>>;
   }): Promise<string> {
+    // Freeze a Session message boundary and start its compaction Job atomically.
+    // 1. Reject an empty Session before changing persistent state.
+    // 2. Move the source Session from active to compacting.
+    // 3. Insert the running Job with prompt and orchestration snapshots.
     if (input.messages.length === 0) {
       throw new AppError("VALIDATION_ERROR", "当前 Session 没有可压缩的消息。");
     }
@@ -234,23 +212,17 @@ export class SessionRepository {
       database
         .prepare(
           `INSERT INTO compaction_jobs
-           (id, conversation_id, source_session_id, previous_summary_id, status, trigger,
-            provider_id, model, prompt_version, first_message_id, last_message_id,
-            message_count, attempt_count, orchestration_config_json, created_at)
-           VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+           (id, source_session_id, status, trigger, prompt_version, first_message_id,
+            last_message_id, orchestration_config_json, created_at)
+           VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
-          input.session.conversationId,
           input.session.id,
-          input.previousSummaryId,
           input.trigger,
-          input.providerId,
-          input.model,
           input.promptVersion,
           input.messages[0]!.id,
           input.messages.at(-1)!.id,
-          input.messages.length,
           JSON.stringify(input.orchestrationConfig),
           now,
         );
@@ -261,16 +233,6 @@ export class SessionRepository {
   async markCompactionValidating(jobId: string): Promise<void> {
     await this.projectDatabase.write((database) => {
       database.prepare("UPDATE compaction_jobs SET status = 'validating' WHERE id = ?").run(jobId);
-    });
-  }
-
-  async recordCompactionAttempt(jobId: string): Promise<void> {
-    await this.projectDatabase.write((database) => {
-      database
-        .prepare(
-          "UPDATE compaction_jobs SET status = 'running', attempt_count = attempt_count + 1 WHERE id = ?",
-        )
-        .run(jobId);
     });
   }
 
@@ -298,50 +260,23 @@ export class SessionRepository {
     jobId: string;
     sourceSession: ConversationSession;
     summary: string;
-    usage?: ModelUsage;
     trigger: SessionTrigger;
     estimatedInputTokens: number;
-  }): Promise<{ summaryId: string; newSessionId: string }> {
-    const summaryId = randomUUID();
+  }): Promise<{ newSessionId: string }> {
+    // Adopt a validated summary and activate the next Session atomically.
+    // 1. Verify the Job still belongs to the expected source Session.
+    // 2. Close the source Session and create its successor linked to the Job.
+    // 3. Mark the Job completed and store the accepted summary on it.
     const newSessionId = randomUUID();
     const now = new Date().toISOString();
     await this.projectDatabase.transaction((database) => {
       const job = database
-        .prepare(
-          `SELECT conversation_id, source_session_id, prompt_version, provider_id, model,
-                  first_message_id, last_message_id, message_count
-           FROM compaction_jobs WHERE id = ?`,
-        )
+        .prepare(`SELECT source_session_id FROM compaction_jobs WHERE id = ?`)
         .get(input.jobId) as CompactionJobCompletionRow | undefined;
-      if (
-        job === undefined ||
-        job.conversation_id !== input.sourceSession.conversationId ||
-        job.source_session_id !== input.sourceSession.id
-      ) {
+      if (job === undefined || job.source_session_id !== input.sourceSession.id) {
         throw new AppError("VALIDATION_ERROR", "压缩任务与来源 Session 不匹配。");
       }
 
-      database
-        .prepare(
-          `INSERT INTO session_summaries
-           (id, conversation_id, source_session_id, summary, first_message_id, last_message_id,
-            message_count, prompt_version, provider_id, model, usage_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          summaryId,
-          job.conversation_id,
-          job.source_session_id,
-          input.summary,
-          job.first_message_id,
-          job.last_message_id,
-          Number(job.message_count),
-          job.prompt_version,
-          job.provider_id,
-          job.model,
-          input.usage === undefined ? null : JSON.stringify(input.usage),
-          now,
-        );
       database
         .prepare(
           `UPDATE conversation_sessions SET status = 'closed', closed_at = ?,
@@ -352,7 +287,7 @@ export class SessionRepository {
         .prepare(
           `INSERT INTO conversation_sessions
            (id, conversation_id, ordinal, status, trigger, system_prompt_snapshot,
-            inherited_summary_id, started_at)
+            inherited_compaction_job_id, started_at)
            VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`,
         )
         .run(
@@ -361,22 +296,17 @@ export class SessionRepository {
           input.sourceSession.ordinal + 1,
           input.trigger,
           input.sourceSession.systemPromptSnapshot,
-          summaryId,
+          input.jobId,
           now,
         );
       database
         .prepare(
-          `UPDATE compaction_jobs SET status = 'completed', summary_id = ?, usage_json = ?,
-           completed_at = ? WHERE id = ?`,
+          `UPDATE compaction_jobs SET status = 'completed', summary = ?, completed_at = ?
+           WHERE id = ?`,
         )
-        .run(
-          summaryId,
-          input.usage === undefined ? null : JSON.stringify(input.usage),
-          now,
-          input.jobId,
-        );
+        .run(input.summary, now, input.jobId);
     });
-    return { summaryId, newSessionId };
+    return { newSessionId };
   }
 
   async recoverInterruptedJobs(): Promise<void> {
@@ -464,7 +394,7 @@ function mapSession(row: SessionRow): ConversationSession {
     status: row.status,
     trigger: row.trigger,
     systemPromptSnapshot: row.system_prompt_snapshot,
-    inheritedSummaryId: row.inherited_summary_id,
+    inheritedCompactionJobId: row.inherited_compaction_job_id,
     estimatedInputTokens: Number(row.estimated_input_tokens),
     actualInputTokens: row.actual_input_tokens === null ? null : Number(row.actual_input_tokens),
     compactionRequired: row.compaction_required === 1,
@@ -476,38 +406,13 @@ function mapSession(row: SessionRow): ConversationSession {
 function mapSummary(row: SummaryRow): SessionSummaryRecord {
   return {
     id: row.id,
-    conversationId: row.conversation_id,
     sourceSessionId: row.source_session_id,
     summary: row.summary,
     firstMessageId: row.first_message_id,
     lastMessageId: row.last_message_id,
-    messageCount: Number(row.message_count),
     promptVersion: row.prompt_version,
-    providerId: row.provider_id,
-    model: row.model,
-    usage: parseModelUsage(row.usage_json),
     createdAt: row.created_at,
   };
-}
-
-function parseModelUsage(value: string | null): ModelUsage | null {
-  if (value === null) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    const record = parsed as Record<string, unknown>;
-    const keys = ["inputTokens", "outputTokens", "reasoningTokens", "totalTokens"] as const;
-    const usage: ModelUsage = {};
-    for (const key of keys) {
-      const count = record[key];
-      if (count === undefined) continue;
-      if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
-      usage[key] = count;
-    }
-    return usage;
-  } catch {
-    return null;
-  }
 }
 
 function mapHistoryMessage(row: HistoryRow): StoredMessage {

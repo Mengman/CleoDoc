@@ -78,6 +78,7 @@ export class ListProjectDocumentsTool implements Tool<EmptyInput, ListProjectDoc
     "列出当前项目 manuscript 目录中的 Markdown 文档。需要了解现有正文、文件路径或选择后续读取目标时使用；本工具不读取正文内容。";
   readonly exposure = "full";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = DOCUMENT_ERRORS;
   readonly inputSchema = emptyInputSchema;
   readonly outputSchema = listProjectDocumentsOutputSchema;
@@ -115,6 +116,7 @@ export class ReadProjectDocumentTool implements Tool<
     "通过 manuscript 下的相对路径分段读取当前项目的一份 Markdown 文档。只在确实需要引用正文内容时使用，不得访问项目外文件。";
   readonly exposure = "full";
   readonly approval = "auto";
+  readonly approvalLabel = "";
   readonly errors = DOCUMENT_ERRORS;
   readonly inputSchema = readProjectDocumentInputSchema;
   readonly outputSchema = readProjectDocumentOutputSchema;
@@ -166,6 +168,7 @@ export class WriteProjectDocumentTool implements Tool<
     "根据用户明确的保存要求，在当前项目 manuscript 目录中创建 Markdown 文档。目标已存在时，只有用户明确要求覆盖才设置 overwrite=true；所有写入都需要用户批准。";
   readonly exposure = "full";
   readonly approval = "ask";
+  readonly approvalLabel = "文件写入";
   readonly errors = WRITE_DOCUMENT_ERRORS;
   readonly inputSchema = writeProjectDocumentInputSchema;
   readonly outputSchema = writeProjectDocumentOutputSchema;

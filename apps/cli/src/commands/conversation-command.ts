@@ -13,14 +13,19 @@ export async function runConversationCommand(
   assertOnlyOptions(parsed, ["project"]);
   const root = await resolveProjectRoot(context, optionString(parsed, "project"));
   const project = await context.projectService.open(root);
-  const chat = await ChatService.open(project.root, chatServiceOptions());
+  const chat = await ChatService.open(context.projectService, chatServiceOptions()).catch(
+    async (error: unknown) => {
+      await context.projectService.close();
+      throw error;
+    },
+  );
   try {
     if (subcommand === "list" && parsed.positionals.length === 1) {
       const conversations = chat.listConversations(project.manifest.id);
       if (conversations.length === 0) context.output.write("尚无聊天记录。\n");
       for (const conversation of conversations) {
         context.output.write(
-          `${conversation.id}\t${conversation.updatedAt}\t${conversation.providerId}/${conversation.model}\t${conversation.messageCount} 条消息\t${conversation.title ?? "未命名"}\n`,
+          `${conversation.id}\t${conversation.updatedAt}\t${conversation.messageCount} 条消息\t${conversation.title ?? "未命名"}\n`,
         );
       }
       return;
@@ -31,6 +36,10 @@ export async function runConversationCommand(
     }
     throw new AppError("VALIDATION_ERROR", "用法：cleo conversation <list|show <conversation-id>>");
   } finally {
-    await chat.close();
+    try {
+      await chat.close();
+    } finally {
+      await context.projectService.close();
+    }
   }
 }

@@ -11,6 +11,8 @@ const appStateSchema = z
   .object({
     schemaVersion: z.literal(1),
     currentProject: z.string().nullable(),
+    recentDirectory: z.string().nullable().default(null),
+    recentProjects: z.array(z.string()).max(10).default([]),
     updatedAt: z.iso.datetime(),
   })
   .strict();
@@ -39,9 +41,56 @@ export class AppStateService {
   }
 
   async setCurrentProject(projectRoot: string): Promise<AppState> {
+    // Remember the current project and move it to the front of the recent-project list.
+    const currentProject = path.resolve(projectRoot);
+    const state = await this.read();
+    return this.writeState(
+      currentProject,
+      path.dirname(currentProject),
+      [
+        currentProject,
+        ...state.recentProjects.filter((project) => project !== currentProject),
+      ].slice(0, 10),
+    );
+  }
+
+  async setRecentDirectory(directory: string): Promise<AppState> {
+    const state = await this.read();
+    return this.writeState(state.currentProject, path.resolve(directory), state.recentProjects);
+  }
+
+  async clearCurrentProject(): Promise<AppState> {
+    const state = await this.read();
+    return this.writeState(null, state.recentDirectory, state.recentProjects);
+  }
+
+  async removeRecentProject(projectRoot: string): Promise<AppState> {
+    // Remove one unusable project while preserving all other application state.
+    const state = await this.read();
+    const currentProject = path.resolve(projectRoot);
+    return this.writeState(
+      state.currentProject,
+      state.recentDirectory,
+      state.recentProjects.filter((project) => project !== currentProject),
+    );
+  }
+
+  async clearRecentProjects(): Promise<AppState> {
+    const state = await this.read();
+    return this.writeState(state.currentProject, state.recentDirectory, []);
+  }
+
+  private async writeState(
+    currentProject: string | null,
+    recentDirectory: string | null,
+    recentProjects: string[],
+  ): Promise<AppState> {
+    // Persist the complete application state after one focused state transition.
     const state: AppState = {
       schemaVersion: 1,
-      currentProject: path.resolve(projectRoot),
+      currentProject,
+      recentDirectory,
+      recentProjects,
       updatedAt: new Date().toISOString(),
     };
     await writeYamlAtomic(this.statePath, state);
@@ -50,5 +99,11 @@ export class AppStateService {
 }
 
 function emptyState(): AppState {
-  return { schemaVersion: 1, currentProject: null, updatedAt: new Date(0).toISOString() };
+  return {
+    schemaVersion: 1,
+    currentProject: null,
+    recentDirectory: null,
+    recentProjects: [],
+    updatedAt: new Date(0).toISOString(),
+  };
 }

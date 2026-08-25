@@ -2,8 +2,8 @@ import type {
   CompactionEvent,
   ConversationSession,
   ContextBudgetPolicy,
+  ModelExecution,
   ModelProtocolDebugHandler,
-  ModelProvider,
   ModelUsage,
   SessionTrigger,
   StoredMessage,
@@ -64,8 +64,7 @@ const COMPACTION_USER_INSTRUCTIONS = `请根据下面的数据生成新的累计
 export interface CompactInput {
   conversationId: string;
   session: ConversationSession;
-  provider: ModelProvider;
-  model: string;
+  execution: ModelExecution;
   contextBudgetPolicy: ContextBudgetPolicy;
   trigger: SessionTrigger;
   signal: AbortSignal;
@@ -117,11 +116,8 @@ export class CompactionService {
     const jobId = await this.sessions.beginCompaction({
       session: input.session,
       trigger: input.trigger,
-      providerId: input.provider.id,
-      model: input.model,
       promptVersion: COMPACTION_PROMPT_VERSION,
       messages,
-      previousSummaryId: previous?.id ?? null,
       orchestrationConfig: {
         algorithmVersion: "session-compaction-v8-turn-segmentation",
         contextWindowTokens: budgetPolicy.contextWindowTokens,
@@ -141,7 +137,6 @@ export class CompactionService {
       estimatedRatio: 0,
     });
 
-    let usage: ModelUsage | undefined;
     let validatingEventEmitted = false;
     let debugCallCount = 0;
 
@@ -152,15 +147,18 @@ export class CompactionService {
       phase: CompactionModelCallPhase,
       segmentIndex?: number,
     ): Promise<string> => {
-      await this.sessions.recordCompactionAttempt(jobId);
       const round = ++debugCallCount;
       const modelCall = await this.modelCalls.beginCompactionCall({
         compactionJobId: jobId,
-        providerId: input.provider.id,
-        model: input.model,
+        providerId: input.execution.providerId,
+        model: input.execution.model,
         requestOptions: {
-          thinking: "disabled",
-          reasoningEffort: "provider_default",
+          thinking: input.execution.parameters.reasoningEnabled ? "enabled" : "disabled",
+          reasoningEffort:
+            input.execution.parameters.reasoningEnabled &&
+            input.execution.parameters.reasoningEffort !== undefined
+              ? input.execution.parameters.reasoningEffort
+              : "provider_default",
           temperature: 0.1,
           maxTokens: null,
           responseFormat: null,
@@ -185,12 +183,10 @@ export class CompactionService {
 
       try {
         const collected = await collect(
-          input.provider,
-          input.model,
+          input.execution,
           requestPayload,
           input.signal,
           (next) => {
-            usage = mergeUsage(usage, next);
             callUsage = mergeUsage(callUsage, next);
           },
           (protocol) =>
@@ -198,8 +194,8 @@ export class CompactionService {
               type: "llm-protocol",
               operation,
               round,
-              providerId: input.provider.id,
-              model: input.model,
+              providerId: input.execution.providerId,
+              model: input.execution.model,
               protocol,
             }),
         );
@@ -216,8 +212,8 @@ export class CompactionService {
           type: "llm-response",
           operation,
           round,
-          providerId: input.provider.id,
-          model: input.model,
+          providerId: input.execution.providerId,
+          model: input.execution.model,
           contextTokens: callUsage?.inputTokens ?? estimatedContextTokens,
           contextSource: callUsage?.inputTokens === undefined ? "estimated" : "provider",
           estimatedContextTokens,
@@ -233,8 +229,8 @@ export class CompactionService {
           type: "llm-assembled-output",
           operation,
           round,
-          providerId: input.provider.id,
-          model: input.model,
+          providerId: input.execution.providerId,
+          model: input.execution.model,
           compactionJobId: jobId,
           content: collected.output,
           characterCount: collected.output.length,
@@ -262,8 +258,8 @@ export class CompactionService {
           type: "llm-response-error",
           operation,
           round,
-          providerId: input.provider.id,
-          model: input.model,
+          providerId: input.execution.providerId,
+          model: input.execution.model,
           errorCode: appError.code,
           message: appError.message,
           details: appError.details ?? null,
@@ -332,7 +328,6 @@ export class CompactionService {
         jobId,
         sourceSession: input.session,
         summary,
-        ...(usage === undefined ? {} : { usage }),
         trigger: input.trigger,
         estimatedInputTokens: estimateTokens(payload),
       });
@@ -706,8 +701,7 @@ export function genericToolEventsForCompaction(
 }
 
 async function collect(
-  provider: ModelProvider,
-  model: string,
+  execution: ModelExecution,
   userPayload: string,
   signal: AbortSignal,
   onUsage: (usage: ModelUsage) => void,
@@ -716,16 +710,14 @@ async function collect(
   let output = "";
   let finishReason: string | null = null;
   let toolCallCount = 0;
-  for await (const event of provider.stream(
+  for await (const event of execution.send(
     {
-      model,
       messages: [
         { role: "system", content: COMPACTION_SYSTEM_PROMPT },
         { role: "user", content: userPayload },
       ],
       tools: [],
       temperature: 0.1,
-      thinking: { type: "disabled" },
       ...(onProtocolEvent === undefined ? {} : { onProtocolEvent }),
     },
     signal,

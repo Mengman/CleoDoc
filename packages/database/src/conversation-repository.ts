@@ -5,9 +5,6 @@ import type {
   ChatMessage,
   ConversationRecord,
   ConversationSummary,
-  GenerationRecord,
-  GenerationStatus,
-  ModelUsage,
   StoredMessage,
 } from "../../contracts/src/index.js";
 import { AppError } from "../../contracts/src/index.js";
@@ -16,8 +13,6 @@ import type { ProjectDatabase } from "./project-database.js";
 interface ConversationRow {
   id: string;
   project_id: string;
-  provider_id: string;
-  model: string;
   title: string | null;
   created_at: string;
   updated_at: string;
@@ -43,28 +38,11 @@ interface MessageRow {
   created_at: string;
 }
 
-interface GenerationRow {
-  id: string;
-  conversation_id: string;
-  provider_id: string;
-  model: string;
-  status: GenerationStatus;
-  content: string;
-  usage_json: string | null;
-  error_code: string | null;
-  saved_document_path: string | null;
-  saved_content_hash: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
 export class ConversationRepository {
   constructor(private readonly projectDatabase: ProjectDatabase) {}
 
   async createConversation(input: {
     projectId: string;
-    providerId: string;
-    model: string;
     title?: string;
   }): Promise<ConversationRecord> {
     const id = randomUUID();
@@ -74,17 +52,15 @@ export class ConversationRepository {
       database
         .prepare(
           `INSERT INTO conversations
-           (id, project_id, provider_id, model, title, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (id, project_id, title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
         )
-        .run(id, input.projectId, input.providerId, input.model, input.title ?? null, now, now);
+        .run(id, input.projectId, input.title ?? null, now, now);
     });
 
     return {
       id,
       projectId: input.projectId,
-      providerId: input.providerId,
-      model: input.model,
       title: input.title ?? null,
       createdAt: now,
       updatedAt: now,
@@ -100,11 +76,7 @@ export class ConversationRepository {
     return row === undefined ? null : mapConversation(row);
   }
 
-  getLatestConversation(input: {
-    projectId: string;
-    providerId: string;
-    model: string;
-  }): ConversationSummary | null {
+  getLatestConversation(projectId: string): ConversationSummary | null {
     const row = this.projectDatabase.read(
       (database) =>
         database
@@ -112,13 +84,12 @@ export class ConversationRepository {
             `SELECT c.*, COUNT(m.id) AS message_count
              FROM conversations c
              LEFT JOIN messages m ON m.conversation_id = c.id
-             WHERE c.project_id = ? AND c.provider_id = ? AND c.model = ?
+             WHERE c.project_id = ?
              GROUP BY c.id
              ORDER BY c.updated_at DESC
              LIMIT 1`,
           )
-          .get(input.projectId, input.providerId, input.model) as
-          ConversationSummaryRow | undefined,
+          .get(projectId) as ConversationSummaryRow | undefined,
     );
     return row === undefined ? null : mapConversationSummary(row);
   }
@@ -150,6 +121,27 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
+  getRecentVisibleMessages(conversationId: string, limit = 20): StoredMessage[] {
+    // Read the newest user-visible messages without loading the complete conversation history.
+    const rows = this.projectDatabase.read(
+      (database) =>
+        database
+          .prepare(
+            `SELECT * FROM messages
+             WHERE conversation_id = ?
+               AND role IN ('user', 'assistant')
+               AND (
+                 TRIM(content) <> ''
+                 OR (role = 'assistant' AND TRIM(COALESCE(reasoning_content, '')) <> '')
+               )
+             ORDER BY sequence DESC
+             LIMIT ?`,
+          )
+          .all(conversationId, limit) as unknown as MessageRow[],
+    );
+    return rows.reverse().map(mapMessage);
+  }
+
   getToolMessages(conversationId: string, toolName: string): StoredMessage[] {
     const rows = this.projectDatabase.read(
       (database) =>
@@ -164,12 +156,12 @@ export class ConversationRepository {
     return rows.map(mapMessage);
   }
 
-  async addMessage(
+  async addMessage<Message extends ChatMessage>(
     conversationId: string,
-    message: ChatMessage,
+    message: Message,
     sessionId: string,
     modelCallId: string | null = null,
-  ): Promise<StoredMessage> {
+  ): Promise<StoredMessage & Message> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const inserted = await this.projectDatabase.transaction((database) => {
@@ -214,147 +206,6 @@ export class ConversationRepository {
     };
   }
 
-  async beginGeneration(input: {
-    conversationId: string;
-    providerId: string;
-    model: string;
-  }): Promise<GenerationRecord> {
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    await this.projectDatabase.write((database) => {
-      database
-        .prepare(
-          `INSERT INTO generations
-           (id, conversation_id, provider_id, model, status, content, created_at)
-           VALUES (?, ?, ?, ?, 'running', '', ?)`,
-        )
-        .run(id, input.conversationId, input.providerId, input.model, now);
-    });
-
-    return {
-      id,
-      conversationId: input.conversationId,
-      providerId: input.providerId,
-      model: input.model,
-      status: "running",
-      content: "",
-      usage: null,
-      errorCode: null,
-      savedDocumentPath: null,
-      savedContentHash: null,
-      createdAt: now,
-      completedAt: null,
-    };
-  }
-
-  async finishGeneration(input: {
-    generationId: string;
-    status: Exclude<GenerationStatus, "running">;
-    content: string;
-    usage?: ModelUsage;
-    errorCode?: string;
-    addAssistantMessage?: boolean;
-    sessionId?: string;
-    reasoningContent?: string;
-    modelCallId?: string;
-  }): Promise<void> {
-    const completedAt = new Date().toISOString();
-    await this.projectDatabase.transaction((database) => {
-      const row = database
-        .prepare("SELECT conversation_id FROM generations WHERE id = ?")
-        .get(input.generationId) as { conversation_id: string } | undefined;
-      if (row === undefined) {
-        throw new AppError("GENERATION_NOT_FOUND", "找不到生成记录。");
-      }
-
-      database
-        .prepare(
-          `UPDATE generations
-           SET status = ?, content = ?, usage_json = ?, error_code = ?, completed_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          input.status,
-          input.content,
-          input.usage === undefined ? null : JSON.stringify(input.usage),
-          input.errorCode ?? null,
-          completedAt,
-          input.generationId,
-        );
-
-      if (input.addAssistantMessage === true) {
-        const sessionId = input.sessionId;
-        if (sessionId === undefined) {
-          throw new AppError("VALIDATION_ERROR", "写入 Assistant 消息时必须指定 Session。");
-        }
-        const sequenceRow = database
-          .prepare(
-            "SELECT COALESCE(MAX(sequence), -1) + 1 AS next_sequence FROM messages WHERE conversation_id = ?",
-          )
-          .get(row.conversation_id) as { next_sequence: number };
-        this.insertMessage(
-          database,
-          row.conversation_id,
-          {
-            role: "assistant",
-            content: input.content,
-            ...(input.reasoningContent === undefined
-              ? {}
-              : { reasoningContent: input.reasoningContent }),
-          },
-          Number(sequenceRow.next_sequence),
-          completedAt,
-          undefined,
-          sessionId,
-          input.modelCallId ?? null,
-        );
-        database
-          .prepare("UPDATE conversations SET updated_at = ? WHERE id = ?")
-          .run(completedAt, row.conversation_id);
-      }
-    });
-  }
-
-  getGeneration(id: string): GenerationRecord | null {
-    const row = this.projectDatabase.read(
-      (database) =>
-        database.prepare("SELECT * FROM generations WHERE id = ?").get(id) as
-          GenerationRow | undefined,
-    );
-    return row === undefined ? null : mapGeneration(row);
-  }
-
-  getLastCompletedGeneration(): GenerationRecord | null {
-    const row = this.projectDatabase.read(
-      (database) =>
-        database
-          .prepare(
-            "SELECT * FROM generations WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1",
-          )
-          .get() as GenerationRow | undefined,
-    );
-    return row === undefined ? null : mapGeneration(row);
-  }
-
-  async markGenerationSaved(
-    generationId: string,
-    relativePath: string,
-    contentHash: string,
-  ): Promise<void> {
-    await this.projectDatabase.write((database) => {
-      const result = database
-        .prepare(
-          `UPDATE generations
-           SET saved_document_path = ?, saved_content_hash = ?
-           WHERE id = ? AND status = 'completed'`,
-        )
-        .run(relativePath, contentHash, generationId);
-      if (Number(result.changes) !== 1) {
-        throw new AppError("GENERATION_NOT_FOUND", "找不到可保存的完整生成结果。");
-      }
-    });
-  }
-
   private insertMessage(
     database: DatabaseSync,
     conversationId: string,
@@ -395,8 +246,6 @@ function mapConversation(row: ConversationRow): ConversationRecord {
   return {
     id: row.id,
     projectId: row.project_id,
-    providerId: row.provider_id,
-    model: row.model,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -427,22 +276,5 @@ function mapMessage(row: MessageRow): StoredMessage {
       ? {}
       : { toolCalls: JSON.parse(row.tool_calls_json) as StoredMessage["toolCalls"] }),
     createdAt: row.created_at,
-  };
-}
-
-function mapGeneration(row: GenerationRow): GenerationRecord {
-  return {
-    id: row.id,
-    conversationId: row.conversation_id,
-    providerId: row.provider_id,
-    model: row.model,
-    status: row.status,
-    content: row.content,
-    usage: row.usage_json === null ? null : (JSON.parse(row.usage_json) as ModelUsage),
-    errorCode: row.error_code,
-    savedDocumentPath: row.saved_document_path,
-    savedContentHash: row.saved_content_hash,
-    createdAt: row.created_at,
-    completedAt: row.completed_at,
   };
 }

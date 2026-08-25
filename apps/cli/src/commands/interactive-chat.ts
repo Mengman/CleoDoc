@@ -8,12 +8,8 @@ import {
   type LlmDebugHandler,
   type ToolApprovalRequest,
 } from "../../../../packages/agent/src/index.js";
-import {
-  asAppError,
-  type ContextBudgetPolicy,
-  type ConversationSummary,
-  type ModelProvider,
-} from "../../../../packages/contracts/src/index.js";
+import { asAppError, type ConversationSummary } from "../../../../packages/contracts/src/index.js";
+import type { ProviderService } from "../../../../packages/model-providers/src/index.js";
 import type { DocumentService } from "../../../../packages/project/src/index.js";
 import type { CliCommandContext } from "./command-context.js";
 import {
@@ -21,22 +17,16 @@ import {
   printRecentConversations,
   printRecoverableChatError,
   sanitizeTerminalMultiline,
-  sanitizeTerminalText,
   selectConversationFromHistory,
-  truncateText,
 } from "./conversation-ui.js";
-import { printDocuments, saveInteractively } from "./document-output.js";
+import { printDocuments } from "./document-output.js";
 import { generateOnce } from "./send-chat-message.js";
 
 export interface InteractiveChatOptions {
   readonly projectId: string;
-  readonly provider: ModelProvider;
-  readonly model: string;
+  readonly provider: ProviderService;
   readonly initialConversationId?: string;
-  readonly createProvider: (providerId: string) => ModelProvider;
   readonly documents: DocumentService;
-  readonly contextBudgetPolicy: ContextBudgetPolicy;
-  readonly createContextBudgetPolicy: (providerId: string, model: string) => ContextBudgetPolicy;
   readonly onDebugEvent?: LlmDebugHandler;
 }
 
@@ -45,18 +35,23 @@ export async function runInteractiveChat(
   chat: ChatService,
   options: InteractiveChatOptions,
 ): Promise<void> {
+  // Run the stateful CLI conversation loop, including navigation, compaction, and Tool approval.
+  // 1. Restore the requested conversation and initialize input and compaction state.
+  // 2. Parse interactive commands while preserving blocked or interrupted drafts.
+  // 3. Send ordinary input through ChatService and update the active conversation.
+  // 4. Coordinate automatic compaction and release terminal resources on exit.
   let readline = createInterface({ input: context.input, output: context.output });
   let conversationId = options.initialConversationId;
-  let provider = options.provider;
-  let model = options.model;
-  let contextBudgetPolicy = options.contextBudgetPolicy;
   const inputController = new ChatInputController();
   let compaction: { promise: Promise<void>; controller: AbortController; hard: boolean } | null =
     null;
   let hardBlocked = false;
   const recentConversations = chat.listConversations(options.projectId).slice(0, 5);
 
-  context.output.write(`已连接 ${provider.displayName} / ${model}。输入 /help 查看命令。\n`);
+  const providerInfo = await options.provider.getCurrentInfo();
+  context.output.write(
+    `已连接 ${providerInfo.providerName} / ${providerInfo.modelName}。输入 /help 查看命令。\n`,
+  );
   printRecentConversations(context, recentConversations);
   if (conversationId !== undefined) {
     context.output.write(`已恢复命令行指定的对话 ${conversationId}。\n`);
@@ -65,12 +60,9 @@ export async function runInteractiveChat(
   }
 
   const resumeConversation = (conversation: ConversationSummary): void => {
-    provider = options.createProvider(conversation.providerId);
-    model = conversation.model;
-    contextBudgetPolicy = options.createContextBudgetPolicy(conversation.providerId, model);
     conversationId = conversation.id;
     context.output.write(
-      `已恢复对话 [${conversation.id}]，使用 ${provider.displayName} / ${model}，共 ${conversation.messageCount} 条消息。\n`,
+      `已恢复对话 [${conversation.id}]，共 ${conversation.messageCount} 条消息。\n`,
     );
   };
 
@@ -88,9 +80,6 @@ export async function runInteractiveChat(
     const promise = chat
       .compactConversation({
         conversationId: targetConversationId,
-        provider,
-        model,
-        contextBudgetPolicy,
         trigger,
         signal: controller.signal,
         ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),
@@ -148,7 +137,7 @@ export async function runInteractiveChat(
       if (line === "/exit") return;
       if (line === "/help") {
         context.output.write(
-          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /instructions [history|restore <revision>]  /save <path>  /read <path>  /documents  /exit\n",
+          "/resume <序号>  /history  /new  /compact  /retry-compact  /sessions  /session <序号>  /context  /instructions [history|restore <revision>]  /read <path>  /documents  /exit\n",
         );
         continue;
       }
@@ -175,8 +164,7 @@ export async function runInteractiveChat(
       }
       if (line === "/context") {
         if (conversationId === undefined) context.output.write("请先发送一条消息创建对话。\n");
-        else
-          printContextStatus(context, chat.getContextStatus(conversationId, contextBudgetPolicy));
+        else printContextStatus(context, await chat.getContextStatus(conversationId));
         continue;
       }
       if (line === "/sessions") {
@@ -221,10 +209,6 @@ export async function runInteractiveChat(
         await restoreProjectInstructions(context, chat, readline, line);
         continue;
       }
-      if (line.startsWith("/save ")) {
-        await saveInteractively(context, chat, readline, line.slice(6).trim());
-        continue;
-      }
       if (line.startsWith("/read ")) {
         if (conversationId === undefined) {
           context.output.write("请先发送一条消息创建对话，再读取文档。\n");
@@ -236,12 +220,7 @@ export async function runInteractiveChat(
         continue;
       }
       if (conversationId !== undefined) {
-        const preflight = chat.getContextStatus(
-          conversationId,
-          contextBudgetPolicy,
-          undefined,
-          line,
-        );
+        const preflight = await chat.getContextStatus(conversationId, undefined, line);
         if (preflight.hardLimitReached || hardBlocked) {
           inputController.captureDraft(rawLine);
           startCompaction("automatic", true);
@@ -252,16 +231,13 @@ export async function runInteractiveChat(
       try {
         const result = await generateOnce(context, chat, {
           projectId: options.projectId,
-          provider,
-          model,
           prompt: line,
           ...(conversationId === undefined ? {} : { conversationId }),
-          approveToolCall: (request) => approveProjectWrite(context, chat, readline, request),
-          contextBudgetPolicy,
+          approveToolCall: (request) => approveProjectWrite(context, readline, request),
           ...(options.onDebugEvent === undefined ? {} : { onDebugEvent: options.onDebugEvent }),
         });
         conversationId = result.conversationId;
-        const budget = chat.getContextStatus(conversationId, contextBudgetPolicy);
+        const budget = await chat.getContextStatus(conversationId);
         if (budget.softLimitReached) startCompaction("automatic", budget.hardLimitReached);
       } catch (error) {
         const appError = asAppError(error);
@@ -285,7 +261,7 @@ export async function runInteractiveChat(
 
 function printContextStatus(
   context: CliCommandContext,
-  status: ReturnType<ChatService["getContextStatus"]>,
+  status: Awaited<ReturnType<ChatService["getContextStatus"]>>,
 ): void {
   context.output.write(`预计输入：${status.estimatedInputTokens} tokens\n`);
   context.output.write(`可用预算：${status.effectiveLimitTokens} tokens\n`);
@@ -342,7 +318,7 @@ function printSession(
   context.output.write(`Session ${session.ordinal} (${session.status})\n`);
   context.output.write(`ID：${session.id}\n触发：${session.trigger}\n开始：${session.startedAt}\n`);
   context.output.write(`结束：${session.closedAt ?? "未结束"}\n`);
-  context.output.write(`继承摘要：${session.inheritedSummaryId ?? "无"}\n`);
+  context.output.write(`继承压缩任务：${session.inheritedCompactionJobId ?? "无"}\n`);
   context.output.write(
     `消息范围：${details.firstMessageId ?? "无"} → ${details.lastMessageId ?? "无"}（${details.messageCount} 条）\n`,
   );
@@ -380,39 +356,11 @@ async function restoreProjectInstructions(
 
 async function approveProjectWrite(
   context: CliCommandContext,
-  chat: ChatService,
   readline: Interface,
   request: ToolApprovalRequest,
 ): Promise<ApprovalChoice> {
-  const toolInput = isRecord(request.input) ? request.input : {};
-  if (request.toolName === "append_project_instructions") {
-    const current = chat.getProjectInstructions()?.content ?? "";
-    const text = typeof toolInput.text === "string" ? toolInput.text : "";
-    context.output.write(`\nLLM 请求追加项目指令（Tool v${request.toolVersion}）：\n`);
-    context.output.write(
-      `${sanitizeTerminalMultiline(createInstructionDiff(current, current + text))}\n`,
-    );
-    return askToolApproval(readline, "允许项目指令追加？");
-  }
-  if (request.toolName === "set_project_instructions") {
-    const current = chat.getProjectInstructions()?.content ?? "";
-    const content = typeof toolInput.content === "string" ? toolInput.content : "";
-    context.output.write(`\nLLM 请求整体替换项目指令（Tool v${request.toolVersion}）：\n`);
-    context.output.write(`${sanitizeTerminalMultiline(createInstructionDiff(current, content))}\n`);
-    return askToolApproval(readline, "允许整体替换项目指令？");
-  }
-  if (request.toolName !== "write_project_document") {
-    context.output.write(`\nLLM 请求执行 ${request.toolName} v${request.toolVersion}。\n`);
-    return askToolApproval(readline, "允许执行？");
-  }
-  const path = typeof toolInput.path === "string" ? toolInput.path : "";
-  const content = typeof toolInput.content === "string" ? toolInput.content : "";
-  const overwrite = toolInput.overwrite === true;
-  context.output.write(`\nLLM 请求${overwrite ? "覆盖" : "创建"}项目文档：${path}\n`);
-  context.output.write(`内容长度：${content.length} 字符\n`);
-  const preview = sanitizeTerminalText(content.slice(0, 240));
-  if (preview !== "") context.output.write(`内容预览：${truncateText(preview, 240)}\n`);
-  return askToolApproval(readline, "允许写入？");
+  context.output.write(`\n请求${request.approvalLabel}\n`);
+  return askToolApproval(readline, "允许？");
 }
 
 async function askToolApproval(readline: Interface, prompt: string): Promise<ApprovalChoice> {
@@ -422,8 +370,4 @@ async function askToolApproval(readline: Interface, prompt: string): Promise<App
   if (answer === "y" || answer === "yes") return "allow_once";
   if (answer === "a" || answer === "always") return "allow_until_exit";
   return "reject";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

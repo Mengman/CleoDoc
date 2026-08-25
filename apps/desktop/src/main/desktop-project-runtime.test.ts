@@ -1,0 +1,421 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { AppStateService } from "../../../../packages/config/src/index.js";
+import { AppError } from "../../../../packages/contracts/src/index.js";
+import { MaterialService } from "../../../../packages/knowledge/src/index.js";
+import type { MaterialServiceOptions } from "../../../../packages/knowledge/src/material-types.js";
+import { ProjectService } from "../../../../packages/project/src/index.js";
+import { FakeModelProvider } from "../../../../packages/model-providers/src/index.js";
+import {
+  createTestMaterialOptions,
+  TEST_CHAT_OPTIONS,
+  TEST_DATABASE_OPTIONS,
+  TEST_MATERIAL_OPTIONS,
+} from "../../../../test/runtime-options.js";
+import { senderForProvider } from "../../../../test/model-sender.js";
+import type { ManuscriptDocumentsChangedEvent } from "../shared/desktop-api.js";
+import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-project-runtime.js";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
+
+describe("DesktopProjectRuntime", () => {
+  // Verify the complete desktop project-session lifecycle and its public safety boundary.
+  // 1. Check safe state projection and single-project switching behavior.
+  // 2. Check restoration, cancellation, cleanup, and remembered-project semantics.
+  // 3. Check that desktop errors expose no internal implementation details.
+  it("exposes a safe project summary without the project path", async () => {
+    // Verify that renderer state contains project metadata but never its absolute path.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(
+      path.join(fixture.root, "private-location", "novel.cleo"),
+      "边界测试",
+    );
+
+    const state = await fixture.runtime.open(project.root);
+
+    expect(state).toEqual({
+      status: "open",
+      project: {
+        id: project.manifest.id,
+        name: "边界测试",
+        folderName: "novel.cleo",
+        language: project.manifest.language,
+        documentCount: 0,
+        database: "ok",
+      },
+    });
+    expect(JSON.stringify(state)).not.toContain(project.root);
+    await fixture.runtime.dispose();
+  });
+
+  it("creates and opens an empty project without replacing the active project on rejection", async () => {
+    // Verify native project creation keeps the previous session until creation succeeds.
+    // 1. Open an existing project and create a new empty directory through the runtime.
+    // 2. Confirm the new project becomes active with a renderer-safe summary.
+    // 3. Reject a non-empty directory and confirm the active project remains unchanged.
+    const fixture = await createRuntimeFixture();
+    const existing = await fixture.projectService.create(path.join(fixture.root, "existing.cleo"));
+    await fixture.runtime.open(existing.root);
+
+    const created = await fixture.runtime.create(path.join(fixture.root, "new-project.cleo"));
+    expect(created).toMatchObject({
+      status: "open",
+      project: {
+        name: "new-project",
+        folderName: "new-project.cleo",
+        documentCount: 0,
+        database: "ok",
+      },
+    });
+    const newProject = await ProjectService.readProject(
+      path.join(fixture.root, "new-project.cleo"),
+    );
+    expect(newProject).toMatchObject({
+      manifest: { name: "new-project" },
+    });
+    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(path.dirname(newProject.root));
+    await fixture.runtime.setRecentDirectory(path.join(fixture.root, "materials"));
+    await expect(fixture.runtime.getRecentDirectory()).resolves.toBe(
+      path.join(fixture.root, "materials"),
+    );
+
+    const rejectedDirectory = path.join(fixture.root, "non-empty.cleo");
+    await mkdir(rejectedDirectory);
+    await writeFile(path.join(rejectedDirectory, "notes.txt"), "保留文件");
+    await expect(fixture.runtime.create(rejectedDirectory)).rejects.toMatchObject({
+      code: "PROJECT_DIRECTORY_NOT_EMPTY",
+    });
+    expect(fixture.runtime.getState()).toEqual(created);
+    await fixture.runtime.dispose();
+  });
+
+  it("publishes manuscript list changes from the active project watcher", async () => {
+    // Verify native manuscript events update only the currently open project's path list.
+    // 1. Add a readable file and wait for the active project's incremental list event.
+    // 2. Switch projects so the first watcher is stopped.
+    // 3. Change both projects and confirm only the new active project publishes an event.
+    const fixture = await createRuntimeFixture();
+    const first = await fixture.projectService.create(
+      path.join(fixture.root, "watched-first.cleo"),
+    );
+    await fixture.runtime.open(first.root);
+
+    const firstEvent = await waitForManuscriptChange(
+      fixture.runtime,
+      () => writeFile(path.join(first.root, "manuscript", "chapter-001.md"), "第一章\n"),
+      (event) =>
+        event.outcome === "success" && event.documents.includes("manuscript/chapter-001.md"),
+    );
+    expect(firstEvent).toEqual({
+      outcome: "success",
+      documents: ["manuscript/chapter-001.md"],
+    });
+
+    const second = await fixture.projectService.create(
+      path.join(fixture.root, "watched-second.cleo"),
+    );
+    await fixture.runtime.open(second.root);
+    const observedAfterSwitch: ManuscriptDocumentsChangedEvent[] = [];
+    const secondEvent = await waitForManuscriptChange(
+      fixture.runtime,
+      () =>
+        Promise.all([
+          writeFile(path.join(first.root, "manuscript", "stale.md"), "旧项目\n"),
+          writeFile(path.join(second.root, "manuscript", "current.txt"), "新项目\n"),
+        ]).then(() => undefined),
+      (event) => event.outcome === "success" && event.documents.includes("manuscript/current.txt"),
+      observedAfterSwitch,
+    );
+    expect(secondEvent).toEqual({
+      outcome: "success",
+      documents: ["manuscript/current.txt"],
+    });
+    expect(
+      observedAfterSwitch.every(
+        (event) => event.outcome === "error" || !event.documents.includes("manuscript/stale.md"),
+      ),
+    ).toBe(true);
+    await fixture.runtime.dispose();
+  });
+
+  it("lists imported materials from the active project", async () => {
+    // Verify the desktop material list remains bound to the active project.
+    // 1. Import two materials through the existing material application service.
+    // 2. Load their titles through the desktop runtime.
+    // 3. Switch projects and confirm the previous titles are no longer visible.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "materials.cleo"));
+    const materials = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    await materials.addText("灯塔守卫名册", { title: "人物名册" });
+    await materials.addText("潮汐与港口记录", { title: "港口资料", format: "markdown" });
+    await materials.close();
+
+    await fixture.runtime.open(project.root);
+
+    expect((await fixture.runtime.listMaterials()).map(({ title }) => title).sort()).toEqual([
+      "人物名册",
+      "港口资料",
+    ]);
+    await expect(fixture.runtime.readMaterial("人物名册")).resolves.toMatchObject({
+      source: { title: "人物名册" },
+      content: "灯塔守卫名册",
+    });
+    await expect(fixture.runtime.readMaterial("不存在的资料")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
+    const inputPath = path.join(fixture.root, "harbor-notes.md");
+    await writeFile(inputPath, "# 港口笔记\n\n潮汐在黎明前转向。\n", "utf8");
+    await expect(fixture.runtime.importMaterial(inputPath)).resolves.toMatchObject({
+      imported: {
+        created: true,
+        inputEncoding: "utf-8",
+        source: { title: "harbor-notes", format: "markdown" },
+      },
+      embeddingFailure: null,
+    });
+    const importedMaterials = await MaterialService.open(project.root, TEST_MATERIAL_OPTIONS);
+    try {
+      await expect(importedMaterials.getIndexStatus()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            title: "harbor-notes",
+            embeddedChunkCount: 1,
+            pendingEmbeddingCount: 0,
+          }),
+        ]),
+      );
+    } finally {
+      await importedMaterials.close();
+    }
+    await expect(fixture.runtime.readMaterial("harbor-notes")).resolves.toMatchObject({
+      content: "# 港口笔记\n\n潮汐在黎明前转向。\n",
+    });
+    await expect(fixture.runtime.renameMaterial("人物名册", "灯塔人物名册")).resolves.toMatchObject(
+      {
+        title: "灯塔人物名册",
+      },
+    );
+    await expect(fixture.runtime.readMaterial("灯塔人物名册")).resolves.toMatchObject({
+      content: "灯塔守卫名册",
+    });
+    await expect(fixture.runtime.readMaterial("人物名册")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
+    await expect(fixture.runtime.deleteMaterial("港口资料")).resolves.toMatchObject({
+      title: "港口资料",
+    });
+    await expect(fixture.runtime.listMaterials()).resolves.toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ title: "港口资料" })]),
+    );
+    await expect(fixture.runtime.readMaterial("港口资料")).rejects.toMatchObject({
+      code: "MATERIAL_NOT_FOUND",
+    });
+
+    const second = await fixture.projectService.create(
+      path.join(fixture.root, "empty-materials.cleo"),
+    );
+    await fixture.runtime.open(second.root);
+    await expect(fixture.runtime.listMaterials()).resolves.toEqual([]);
+    await fixture.runtime.dispose();
+  });
+
+  it("keeps an imported material when automatic embedding cannot complete", async () => {
+    // Verify an embedding failure is reported separately and never rolls back imported material facts.
+    const materials = createTestMaterialOptions();
+    const fixture = await createRuntimeFixture({
+      materials: {
+        ...materials,
+        embeddingModels: {
+          ...materials.embeddingModels,
+          zh: {
+            ...materials.embeddingModels.zh,
+            async runEmbeddingTask() {
+              throw new AppError("EMBEDDING_GENERATION_FAILED", "Embedding 推理失败。");
+            },
+          },
+        },
+      },
+    });
+    const project = await fixture.projectService.create(path.join(fixture.root, "embedding.cleo"));
+    await fixture.runtime.open(project.root);
+    const inputPath = path.join(fixture.root, "lighthouse.txt");
+    await writeFile(inputPath, "灯塔守卫在黎明前更换煤油灯。", "utf8");
+
+    await expect(fixture.runtime.importMaterial(inputPath)).resolves.toMatchObject({
+      imported: { source: { title: "lighthouse" } },
+      embeddingFailure: { code: "EMBEDDING_GENERATION_FAILED" },
+    });
+    await expect(fixture.runtime.readMaterial("lighthouse")).resolves.toMatchObject({
+      content: "灯塔守卫在黎明前更换煤油灯。",
+    });
+    await fixture.runtime.dispose();
+  });
+
+  it("closes the previous project and cancels its tasks before switching", async () => {
+    // Verify that switching waits for old project tasks before publishing the new session.
+    // 1. Open two projects and start a cancellable task under the first project.
+    // 2. Switch to the second project and wait for the first task to observe cancellation.
+    // 3. Confirm that memory and persisted state both reference only the second project.
+    const fixture = await createRuntimeFixture();
+    const first = await fixture.projectService.create(path.join(fixture.root, "first.cleo"), "甲");
+    const second = await fixture.projectService.create(
+      path.join(fixture.root, "second.cleo"),
+      "乙",
+    );
+    await fixture.runtime.open(first.root);
+
+    let observedProjectId = "";
+    const task = fixture.runtime.startTask(async ({ projectId, signal }) => {
+      // Record the bound project and resolve only after project shutdown cancels the task.
+      observedProjectId = projectId;
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) return resolve();
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return signal.aborted;
+    });
+
+    const switched = await fixture.runtime.open(second.root);
+
+    await expect(task.promise).resolves.toBe(true);
+    expect(observedProjectId).toBe(first.manifest.id);
+    expect(switched).toMatchObject({ status: "open", project: { id: second.manifest.id } });
+    expect((await fixture.appStateService.read()).currentProject).toBe(second.root);
+    await fixture.runtime.dispose();
+  });
+
+  it("keeps the current project active when a switch target is invalid", async () => {
+    // Verify that a failed switch never releases the existing project session.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "valid.cleo"));
+    await fixture.runtime.open(project.root);
+
+    await expect(
+      fixture.runtime.open(path.join(fixture.root, "missing.cleo")),
+    ).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
+
+    expect(fixture.runtime.getState()).toMatchObject({
+      status: "open",
+      project: { id: project.manifest.id },
+    });
+    expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
+    await fixture.runtime.dispose();
+  });
+
+  it("restores the last project and clears a stale project reference", async () => {
+    // Verify successful restoration and removal of a remembered path that no longer exists.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "restore.cleo"));
+    await fixture.appStateService.setCurrentProject(project.root);
+
+    await expect(fixture.runtime.restorePreviousProject()).resolves.toMatchObject({
+      status: "open",
+      project: { id: project.manifest.id },
+    });
+    await fixture.runtime.close();
+    await fixture.appStateService.setCurrentProject(path.join(fixture.root, "gone.cleo"));
+
+    await expect(fixture.runtime.restorePreviousProject()).rejects.toMatchObject({
+      code: "PROJECT_NOT_FOUND",
+    });
+    expect((await fixture.appStateService.read()).currentProject).toBeNull();
+  });
+
+  it("releases resources on application exit while remembering the last project", async () => {
+    // Verify that application disposal closes resources without clearing restart state.
+    const fixture = await createRuntimeFixture();
+    const project = await fixture.projectService.create(path.join(fixture.root, "remember.cleo"));
+    await fixture.runtime.open(project.root);
+
+    await fixture.runtime.dispose();
+
+    expect(fixture.runtime.getState()).toEqual({ status: "closed" });
+    expect((await fixture.appStateService.read()).currentProject).toBe(project.root);
+  });
+
+  it("returns only stable error fields across the desktop boundary", () => {
+    // Verify that unexpected errors are reduced to stable public fields without private paths.
+    const safeError = toDesktopOperationError(new Error("D:\\private\\secret.txt"));
+
+    expect(safeError).toEqual({
+      code: "INTERNAL_ERROR",
+      message: "发生未预期的内部错误。",
+    });
+    expect(safeError).not.toHaveProperty("stack");
+    expect(safeError).not.toHaveProperty("details");
+  });
+});
+
+async function createRuntimeFixture(
+  options: { readonly materials?: MaterialServiceOptions } = {},
+): Promise<{
+  root: string;
+  runtime: DesktopProjectRuntime;
+  projectService: ProjectService;
+  appStateService: AppStateService;
+}> {
+  // Create isolated project, state, and runtime services for one lifecycle test.
+  const root = await mkdtemp(path.join(tmpdir(), "cleodoc-desktop-project-"));
+  temporaryDirectories.push(root);
+  const appStateService = new AppStateService({ CLEODOC_HOME: path.join(root, "app-state") });
+  return {
+    root,
+    appStateService,
+    projectService: new ProjectService(TEST_DATABASE_OPTIONS),
+    runtime: new DesktopProjectRuntime({
+      ...TEST_DATABASE_OPTIONS,
+      appStateService,
+      chat: {
+        maxToolRounds: TEST_CHAT_OPTIONS.maxToolRounds,
+        context: TEST_CHAT_OPTIONS.context,
+        compaction: TEST_CHAT_OPTIONS.compaction,
+      },
+      materials: options.materials ?? TEST_MATERIAL_OPTIONS,
+      provider: senderForProvider(new FakeModelProvider("ok")),
+    }),
+  };
+}
+
+async function waitForManuscriptChange(
+  runtime: DesktopProjectRuntime,
+  action: () => Promise<void>,
+  predicate: (event: ManuscriptDocumentsChangedEvent) => boolean,
+  observed: ManuscriptDocumentsChangedEvent[] = [],
+): Promise<ManuscriptDocumentsChangedEvent> {
+  // Wait for one functional watcher result while bounding failures and cleanup.
+  // 1. Subscribe before changing the file system so the event cannot be missed.
+  // 2. Resolve only when the expected manuscript list snapshot arrives.
+  // 3. Remove the listener and timeout after success or action failure.
+  return await new Promise<ManuscriptDocumentsChangedEvent>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      dispose();
+      reject(new Error("Timed out waiting for a manuscript watcher event."));
+    }, 5_000);
+    const dispose = runtime.onManuscriptDocumentsChanged((event) => {
+      observed.push(event);
+      if (!predicate(event)) return;
+      clearTimeout(timeout);
+      dispose();
+      resolve(event);
+    });
+    void action().catch((error: unknown) => {
+      clearTimeout(timeout);
+      dispose();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  });
+}

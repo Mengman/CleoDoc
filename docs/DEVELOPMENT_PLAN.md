@@ -2,157 +2,215 @@
 
 > 本文件是实施状态、任务顺序和发布门的唯一来源。
 >
-> 产品范围见 [PRD](./PRD.md)，系统边界见[技术架构](./TECHNICAL_ARCHITECTURE.md)。
+> 产品范围见 [PRD](./PRD.md)，系统边界见 [技术架构](./TECHNICAL_ARCHITECTURE.md)，桌面结构和组件技术方案见 [桌面 UI 结构设计](./DESKTOP_UI_STRUCTURE_DESIGN.md)。
 
 ## 1. 版本策略
 
-- **v0.1：CLI 核心 MVP。** 用命令行验证 LLM 创作、资料管理、本地 RAG 和持久化恢复的完整闭环。
-- **v0.2：Electron 桌面产品。** 在同一套 Core 上增加 React、TipTap、CDM 正文、版本与 Diff、知识图和可恢复工作流。
+- **v0.1：CLI 核心 MVP，已完成。** 已通过 LLM 创作、资料管理、本地 RAG、持久化恢复和跨平台 CLI 发行闭环验收。
+- **v0.2：Electron 桌面产品收尾，已完成。** 已以现有 Electron + React 界面完成稳定性、安全性与 Windows 安装包验证；不再用当前手写 UI 体系新增复杂页面或交互。
+- **v0.3：桌面 UI 基础与能力迁移。** 接入 Tailwind CSS、shadcn/ui 和 Radix UI，迁移现有 v0.2 页面，并完成原 v0.2 尚未实现的长任务、上下文、Tool 状态、索引与检索界面。
+- **v0.4：创作工作室。** 接入 TipTap 与 CDM 编辑适配，并引入 Git 版本控制、版本历史、恢复与语义 Diff。
 
-v0.1 作为后续开发的基线，不再保留其内部步骤的实施日记。除修复发布阻塞问题外，新产品能力进入 v0.2。
+v0.2 至 v0.4 都复用同一套 Core/Application Service。Renderer 不复制项目、数据库、RAG、Provider 或模型调用逻辑。
 
-## 2. v0.1 基线状态
+## 2. 已完成基线
 
-| 能力 | 状态 | 当前边界 |
+| 能力 | 当前状态 | 后续安排 |
 | --- | --- | --- |
-| CLI、项目与安全文件读写 | 完成 | 模块化命令；正文限定在 `manuscript/`；原子写入 |
-| SQLite | 完成 | Schema v10、WAL、FTS5、写入队列、v8→v9→v10 升级 |
-| LLM Provider | 完成 | OpenAI-compatible、Ollama、流式输出、独立超时、Reasoning 与 Debug 日志 |
-| Conversation / Session | 完成 | 历史恢复、自动与手动压缩、失败重试、同 Conversation 历史回查 |
-| 模型调用审计 | 完成 | Message 保存 Content/Reasoning；ModelCall 保存请求选项和 Token 用量 |
-| 项目指令 | 完成 | SQLite Revision 为唯一事实源；读取、追加、整体替换和恢复 |
-| Tool Runtime | 完成 | 无状态 Tool、项目级 Catalog、Conversation 级 Runtime、临时审批 |
-| 资料管理 | 完成 | TXT/Markdown 文件或粘贴导入、编码检测、唯一 title、重命名和删除 |
-| 资料解析与切片 | 完成 | 临时 CDM、语言检测、GGUF Tokenizer 驱动的确定性 Chunk |
-| 本地检索 | 完成 | trigram FTS5、GGUF Embedding、sqlite-vec 精确余弦、Exact/FTS/Vector 混合 RAG |
-| RAG Tool | 完成 | `list_materials`、`search_knowledge`、`read_material_context` v2；以唯一 title 选择资料 |
-| CLI 打包 | 完成 | Windows、macOS、Linux 原生平台分别构建发行包 |
-| 最终发布验收 | 待完成 | 人工执行完整垂直闭环并确认发行制品 |
+| CLI、项目与安全文件读写 | 完成 | Desktop 与 CLI 继续复用同一 Application Service。 |
+| SQLite、资料解析、Chunk、FTS、Embedding、RAG | 完成 | v0.3 补索引状态、检索和恢复界面。 |
+| OpenAI-compatible Provider 与安全密钥保存 | 完成 | v0.3 迁移设置界面；新 Provider 另行规划。 |
+| Conversation、Session、Reasoning 与流式输出 | 基础桌面界面完成 | v0.3 补压缩、Session、重试与上下文状态界面。 |
+| Tool Runtime 与 `ask` 授权 | 基础桌面交互完成 | v0.3 补 Tool 执行状态展示。 |
+| Markdown/TXT 作品与资料阅读 | 完成 | v0.4 与编辑器一起重新规划写入与编辑。 |
+| 资料导入、重命名、删除与自动索引 | 完成 | v0.3 补任务状态、重建、检索和失败恢复界面。 |
+| 当前 Electron + React 桌面外壳 | v0.2 完成 | Windows 安装包已完成构建、安装和实际使用验证；v0.3 迁移至统一 UI 框架。 |
 
-### 2.1 v0.1 发布门
+## 3. v0.2：Electron 桌面产品收尾（已完成）
 
-发布前必须在至少一个真实项目完成：
+### 3.1 版本目标与边界
 
-1. 创建项目并导入中英文 TXT/Markdown 资料。
-2. 重建 Chunk、FTS 和 Embedding，验证状态和失败恢复。
-3. 与真实 LLM 对话，让模型主动调用本地 RAG Tool。
-4. 经用户审批保存生成文档。
-5. 触发 Session 压缩，退出并重启 CLI，恢复 Conversation 后继续创作。
-6. 删除一份资料，确认其 Chunk、FTS 和向量均不可再检索。
-7. 从发行包而非源码运行同一核心流程。
+v0.2 已完成以下可稳定使用的 Windows 桌面闭环：
 
-验收要求：没有跨项目检索泄漏；失败不会损坏原始资料、正文或已保存消息；Tool Result Message 可以还原实际发给模型的证据；Windows、macOS、Linux 制品均能启动。
+```text
+创建或打开项目
+→ 查看 Markdown/TXT 作品
+→ 导入并查看 Markdown/TXT 资料
+→ 配置 OpenAI-compatible Provider
+→ 与主笔对话并使用现有 Tool 授权
+→ 重启应用并恢复项目与 Conversation
+```
 
-### 2.2 v0.1 明确不做
+v0.2 不再新增需要复杂交互或新视觉组件的界面，包括长任务详情、取消与重试界面、Session 与压缩界面、Tool 执行状态、索引状态、手动检索和检索结果浏览。这些内容统一迁移至 v0.3，在 UI 框架稳定后开发。
 
-- Electron、React 和 TipTap。
-- CDM 正文迁移与节点级编辑。
-- Draft 自动写入和文本统计。
-- Git 版本管理与文档语义 Diff。
-- 关系图、自动事实抽取和设定审批。
-- 持久化阶段 Agent、自动长篇生成和多 Agent。
-- DOCX、PDF、EPUB、OCR、云同步和多人协作。
-- ANN 向量索引。
+正文编辑、TipTap、CDM 正式迁移、Draft、文本统计、Git、版本历史和语义 Diff 不属于 v0.2。
 
-## 3. v0.2 实施顺序
+### 3.2 Electron 兼容性、隔离与安装包
 
-### 3.1 冻结 v0.1 Core 边界
+**状态：已完成。** 已完成 Electron + React 工程、开发版启动、桌面构建、Renderer/Preload/Main 分层、sandbox、context isolation、Typed IPC、单活动项目生命周期和项目级资源释放。
 
-- 完成 v0.1 发布验收，记录已知限制。
-- 将 CLI 对 Core 的直接组合整理为可供 Desktop 调用的 Application Service。
-- 明确 Project 打开、关闭、数据库连接、Conversation Runtime 和 Worker 的生命周期。
-- 为 GUI 所需操作定义稳定的领域输入输出，不让 Renderer 访问 Repository。
+已完成的发行与验证：
 
-验收：CLI 行为不回退；Desktop 不需要复制项目、数据库、RAG 或 Agent 逻辑。
+- 已接入 `electron-builder`，并提供 `npm run package:desktop` 与 `npm run package:desktop:dir`。
+- 已配置 Windows NSIS、macOS DMG 和 Linux AppImage 目标，以及 `release/desktop` 输出目录。
+- 已将默认配置与两个 GGUF Embedding 模型作为 `extraResources` 放入安装版 `resources` 目录。
+- 已将 `node-llama-cpp`、sqlite-vec 及其平台原生依赖纳入生产依赖和 ASAR unpack 规则。
+- Windows x64 目录包已验证包含默认配置、模型和解包后的原生依赖，并成功完成一次隐藏窗口启动检查。
+- Windows x64 NSIS 安装器已成功生成，启用确认安装与安装目录选择；当前安装器约 438 MB，未签名。
+- 已新增跨平台桌面制品 CI 工作流，在 Windows、macOS 和 Linux 原生 Runner 上构建并归档各自的默认制品。
+- 已由用户在 Windows 上完成安装包构建、安装和实际使用验证。
 
-### 3.2 Electron 安全壳与 Typed IPC
+macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属于本次 v0.2 完成依据；进入相应平台的正式发行时再单独验证。
 
-- 建立 Electron Main、Preload、Renderer 和 Core Utility Process。
-- 启用 sandbox、context isolation、严格 CSP，关闭 Node integration。
-- Preload 只暴露经过 Schema 校验的白名单 Typed IPC。
-- 使用操作系统凭据存储 Provider 密钥。
-- 决定应用采用单项目进程还是多项目切换；该决定会影响 Runtime、审批和资源释放。
+### 3.3 现有界面稳定性与发布验证
 
-### 3.3 React 作品工作室
+**状态：已完成。** 已完成项目创建、打开、最近项目、独立项目首页、作品/资料阅读、资料管理、Provider 配置、Conversation、流式 Reasoning、Tool 授权和底部状态栏布局，并完成 Windows 安装版实际使用验证。
 
-- 实现作品、正文和主笔对话三栏基础布局。
-- 提供资料中心：单文件导入、文件夹批量导入、冲突清单、重命名、删除、索引状态和失败恢复。
-- 提供项目指令页面，复用 SQLite Revision 服务。
-- 展示流式 Content/Reasoning、Tool 审批、任务状态和简洁证据标记；不直接展示普通 Tool 原始 JSON。
+已验证的行为：
 
-### 3.4 CDM 正文与 TipTap 编辑器
+- 现有 v0.1 项目可原样打开，不静默迁移或改写作品与资料。
+- `.md`、`.txt` 作品与资料正确显示中文、英文、Emoji 和原始换行，不执行 Markdown 中的危险内容。
+- 资料导入、重命名、删除、自动切片和 Embedding 保持现有业务语义。
+- Conversation、草稿、Reasoning 与 Tool 审批在重启、切换项目和失败时保持既有隔离与恢复规则。
 
-- 确认 CDM v1 根元素、元数据、标签白名单和 Revision 方案。
-- 确定当前 Markdown 正文到 CDM 的迁移方式。
-- 将 CDM Node/Mark 映射到 TipTap Node/Mark，并保留稳定 Node ID。
-- 实现节点级读取、插入、替换、删除和移动；不使用视觉行号。
-- 支持批注、自动保存、外部修改检测和崩溃恢复。
+### 3.4 v0.2 完成确认
 
-### 3.5 Draft 写入与文本统计
+已使用真实 Windows 桌面发行物完成：
 
-- 实现 `write_draft`：主笔决定产出正文时直接调用 Tool，不在聊天 Content 中复制文稿。
-- Tool Result 返回本次写入和当前文档的字符数、字数和标点数，不回传正文。
-- 完整拼接流式 Tool 参数后再校验和写入；使用 Revision 和幂等键避免重复追加。
-- 模型停止调用 Tool 即结束写作回合，不增加 `finish_draft`。
-- Draft 通过 ChangeSet 和用户审批进入正式正文。
+1. 创建或打开现有项目，并查看 Markdown/TXT 作品。
+2. 导入、查看、重命名和删除中英文 Markdown/TXT 资料。
+3. 配置 OpenAI-compatible Provider，与真实模型对话并恢复 Conversation。
+4. 让模型调用既有 RAG/文档 Tool，并完成一次需要授权的写入 Tool 决策。
+5. Windows 安装包完成构建、安装和实际使用验证。
 
-实施前必须先解决[文档处理设计](./文档处理设计.md)中关于 Draft 文档引用、Revision、写入模式和统计范围的开放问题。
+完成确认：没有跨项目泄漏；未经授权的操作不会写入；失败、取消和退出不会损坏事实源；Desktop 不复制 v0.1 Core 逻辑；CLI 行为不回退。
 
-### 3.6 Git 版本与语义 Diff
+## 4. v0.3：UI 框架接入与能力迁移
 
-- 使用 isomorphic-git 作为隐藏版本引擎。
-- 用户只看到自动修改记录、命名版本、比较和恢复。
-- 恢复生成新的历史记录，不改写既有历史。
-- Diff 基于 CDM Node ID、结构和中文句子/字符差异，支持行内与左右对比。
-- Agent ChangeSet 与用户版本比较共用同一 Diff 能力。
+### 4.1 UI 框架基线
 
-### 3.7 设定、关系图与知识审批
+**状态：未开始。**
 
-- 建立人物、地点、组织、物品、事件、关系、状态和叙事对象。
-- 抽取候选事实并让用户批量审批；冲突逐项处理。
-- 增加一致性检查、人物知识状态和修改影响分析。
-- Graph Retriever 作为现有混合 RAG 的新召回通道，不替换 FTS 与向量检索。
+技术方案固定为 **Tailwind CSS + shadcn/ui + Radix UI**：
 
-### 3.8 可恢复作品 Agent 工作流
+- Tailwind CSS 提供构建期样式生成、响应式布局与 token 消费。
+- shadcn/ui 将实际组件源码纳入仓库，作为 CleoDoc 可维护的基础组件层；按需添加，不批量引入页面模板。
+- Radix UI 提供菜单、弹窗、Popover、Tabs、ScrollArea、Select、Tooltip 等无障碍交互原语；不另行维护与 shadcn 重复的通用组件体系。
+- 使用语义 CSS token 建立 Light、Dark 和 System 三种主题选择；所有页面使用语义 token，不直接绑定具体颜色。
+- “毛玻璃感”使用不透明渐变 surface、边框和阴影实现；不以真实透明或 `backdrop-filter` 作为产品基础视觉，避免性能和跨平台渲染差异。
 
-- 持久化 AgentJob、ChangeSet、Checkpoint 和审批决定。
-- 实现委托书、故事方案、作品圣经与总纲、样章、分卷、全稿修订和完稿阶段。
-- 支持暂停、取消、重试、断网恢复和补丁冲突处理。
-- 保持一个对外主笔；内部能力不表现为多个聊天人格。
+需要实现：
 
-### 3.9 导入导出与桌面发布
+- 建立主题、颜色、字体、圆角、间距、层级和动效 token。
+- 建立最小基础组件集：Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge、Toast。
+- 确定 React/Electron 下的主题初始化与持久化方式，避免启动时闪烁错误主题。
+- 为组件增加键盘导航、焦点管理、屏幕阅读器语义和高对比度验证。
 
-- 增加 DOCX、带文本层 PDF 的解析；OCR 继续延后。
-- 导出 Markdown、TXT、DOCX 和 EPUB，并保持章节结构一致。
-- 完成项目备份、数据库健康检查和可视化索引重建。
-- 生成 Windows/macOS 安装包；Linux 保持构建和核心流程验证。
+检查点：
 
-## 4. 依赖与验收门
+- Dark、Light 与跟随系统主题均可切换且重启后恢复。
+- 组件仅从 Renderer 使用，不向 Main 或 Core 引入 DOM、Tailwind 或 UI 依赖。
+- 弹窗、菜单、焦点陷阱和快捷键不破坏 Electron 窗口菜单与 TipTap 未来的编辑器焦点。
+- 产物不包含未使用的整套视觉组件库或页面模板。
+
+### 4.2 现有 v0.2 页面迁移
+
+**状态：未开始。**
+
+需要迁移：窗口标题栏、导航区、项目首页、项目菜单、作品/资料左栏、共享文档阅读区、聊天区、设置页、授权控件和状态栏。
+
+迁移原则：
+
+- 先迁移基础组件和主题，再迁移页面；不在同一页面长期混用旧手写通用控件与新组件体系。
+- 保留既有 Application Service、Typed IPC、项目隔离和业务行为；迁移不引入平行状态模型。
+- 不依据组件库的模板自动增加导航、按钮、空状态、数据卡或功能入口；新增可见元素仍需用户授权。
+- 迁移完成后删除被替代的通用 CSS 与重复组件，避免双重主题和样式优先级冲突。
+
+检查点：现有 v0.2 端到端闭环、项目切换、草稿保持、资料操作和 Tool 授权行为不回退。
+
+### 4.3 长任务、上下文与 Tool 状态界面
+
+**状态：未开始。** 该阶段承接原 v0.2 的长任务界面化。
+
+需要实现：
+
+- 为聊天生成、上下文压缩、Chunk/FTS 重建和 Embedding 建立统一的项目内任务状态、进度、取消与完成/失败事件。
+- 状态栏显示当前简短任务状态；详情、错误和重试使用统一的组件交互，不建设独立任务中心。
+- 显示上下文预算、自动/手动压缩、压缩中状态、取消、失败重试和 Conversation 下的 Session。
+- 显示 Tool 的简洁执行中、成功、失败、取消和拒绝状态；不展示原始 Tool JSON。
+
+检查点：
+
+- 项目切换或退出时，任务、审批和 Conversation Runtime 不跨项目遗留。
+- 取消、压缩失败或 Tool 拒绝不删除已保存消息、旧 Session、资料或原文。
+- Tool 授权仍仅限当前 Project、Conversation 和相同 Tool 版本；退出后持续允许失效。
+
+### 4.4 索引、Embedding 与检索界面
+
+**状态：未开始。**
+
+需要实现：
+
+- 展示总体和单份资料的索引状态、Embedding 状态及必要错误信息。
+- 触发现有 Chunk/FTS 重建和 Embedding 生成，显示进度、取消与重试。
+- 提供当前项目范围内的普通、语义和混合检索界面，展示资料、命中范围、相关度和必要来源信息。
+- 展示 Embedding 模型信息并提供现有测试能力。
+
+检查点：
+
+- 精确名称、资料原文和近义描述均可召回对应资料，且严格限定当前项目和 material 范围。
+- 删除资料后 Chunk、FTS 和向量均不可再检索。
+- 普通 UI 检索不持久化为模型证据审计；失败、取消和重建不修改原资料。
+
+### 4.5 v0.3 发布门
+
+1. Light、Dark 和 System 主题在安装版中正确恢复。
+2. 所有既有 v0.2 页面已迁移至统一组件和 token 体系，业务行为不回退。
+3. 可从 UI 观察、取消和重试聊天、压缩、索引与 Embedding 的相应任务。
+4. 可完成资料导入、索引、普通/语义/混合检索闭环。
+5. 可查看 Conversation 的 Session、上下文状态和简洁 Tool 执行状态。
+
+## 5. v0.4：编辑器与 Git 版本控制
+
+### 5.1 TipTap、CDM 与安全写入
+
+**状态：未开始。**
+
+需要重新评审并实现：正式 CDM v1、现有 Markdown 迁移策略、TipTap/ProseMirror 编辑器、CDM 双向适配、Draft、自动保存、文本统计、用户确认后的安全写入，以及作品创建和删除入口。
+
+TipTap 是编辑器内核；shadcn/ui 和 Radix UI 只负责编辑器周边的工具栏、下拉菜单、浮层、标签页、确认框和状态反馈，不替代编辑器选区、命令或文档状态。
+
+### 5.2 Git 版本、历史与语义 Diff
+
+**状态：未开始。**
+
+需要重新评审并实现：隐藏 Git 版本引擎、命名版本、安全恢复、版本历史、项目指令与 Revision 历史界面、CDM 语义 Diff 计算和对比/恢复界面。
+
+Git Application Service 可独立于 UI 开发；版本列表、恢复确认和 Diff 浏览必须复用 v0.3 的 Dialog、AlertDialog、Tabs、ScrollArea、Toast 和主题 token，不再建立新的组件体系。
+
+### 5.3 v0.4 发布门
+
+1. 作品可以在 TipTap 中编辑并安全写回事实源，失败不损坏原文。
+2. CDM、编辑器与 Markdown 过渡策略可验证、可恢复且不静默丢失内容。
+3. 用户可创建、查看、比较和安全恢复版本。
+4. 语义 Diff 可解释地展示 CDM 级变化，不以文本 Diff 冒充语义结果。
+
+## 6. 版本依赖与顺序
 
 ```mermaid
 flowchart LR
-    A["v0.1 发布验收"] --> B["Core 生命周期与 IPC"]
-    B --> C["Electron + React 工作室"]
-    C --> D["CDM + TipTap"]
-    D --> E["Draft 写入"]
-    E --> F["Git + 语义 Diff"]
-    F --> G["知识图 + 设定审批"]
-    G --> H["阶段 Agent 工作流"]
-    H --> I["导入导出 + v0.2 发布"]
+    A["v0.2 稳定性与发行验证"] --> B["v0.3 UI 框架与主题"]
+    B --> C["v0.3 现有页面迁移"]
+    C --> D["v0.3 长任务、上下文、Tool 状态"]
+    D --> E["v0.3 索引与检索界面"]
+    E --> F["v0.4 TipTap 与 CDM"]
+    F --> G["v0.4 Git 版本与语义 Diff"]
 ```
 
-- v0.1 发布验收未通过前，不把 Electron UI 作为正式产品入口。
-- CDM v1 和 Revision 未确定前，不实现长期节点级写入或语义 Diff。
-- Draft 自动写入必须建立在可恢复 Revision 和用户审批上。
-- 阶段 Agent 必须复用已经验证的 Tool、RAG、ModelCall 和故障恢复机制。
+- v0.2 发布后不再扩展旧手写 UI，除缺陷修复和发布阻塞问题外不新增复杂界面。
+- v0.3 基础组件和主题稳定前，不开始新的复杂页面；业务层和 Typed IPC 可先行，但不得以临时页面替代正式交互。
+- v0.4 的 TipTap 和 Git 领域设计可在 v0.3 期间研究，但正式产品开发必须在 v0.3 UI 基线稳定后重新确认范围。
 
-## 5. 后续版本延后项
+## 7. 后续版本候选范围
 
-- 跨 Conversation 历史检索的完整产品语义。
-- 同一多语言资料使用多套 Embedding 的选择与融合。
-- 资料更新后的 Chunk ID 继承和引用迁移。
-- 云同步、账号系统和多人实时协作。
-- Git 远程仓库和用户可见分支。
-- OCR、插件系统和独立图数据库。
-- 超大资料库 ANN 后端。
-- 应用级全项目加密和永久清除历史。
+以下能力不因本文件列出而自动获得版本范围，实施前必须重新规划：新 Provider 接入、跨厂商模型调用记录、统一问题诊断、知识图、事实抽取、阶段 Agent、文件夹批量导入、DOCX/PDF/EPUB、个人资料库、云同步、多人协作、OCR、插件和 ANN。

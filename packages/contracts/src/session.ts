@@ -1,5 +1,3 @@
-import type { ModelUsage } from "./model.js";
-
 export type SessionStatus = "active" | "compacting" | "closed";
 export type SessionTrigger = "conversation_started" | "automatic" | "manual";
 
@@ -10,7 +8,7 @@ export interface ConversationSession {
   status: SessionStatus;
   trigger: SessionTrigger;
   systemPromptSnapshot: string;
-  inheritedSummaryId: string | null;
+  inheritedCompactionJobId: string | null;
   estimatedInputTokens: number;
   actualInputTokens: number | null;
   compactionRequired: boolean;
@@ -20,16 +18,11 @@ export interface ConversationSession {
 
 export interface SessionSummaryRecord {
   id: string;
-  conversationId: string;
   sourceSessionId: string;
   summary: string;
   firstMessageId: string;
   lastMessageId: string;
-  messageCount: number;
   promptVersion: string;
-  providerId: string;
-  model: string;
-  usage: ModelUsage | null;
   createdAt: string;
 }
 

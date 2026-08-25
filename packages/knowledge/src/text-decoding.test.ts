@@ -33,7 +33,7 @@ describe("material text encoding", () => {
       expect.objectContaining({ code: "VALIDATION_ERROR" }),
     );
     expect(() => decodeMaterialText(Uint8Array.from([0x81]))).toThrow(
-      expect.objectContaining({ code: "VALIDATION_ERROR" }),
+      "该文件不是文本文件，无法导入。",
     );
     expect(() => decodeMaterialText(Uint8Array.from([0x00, 0x01]))).toThrow(
       expect.objectContaining({ code: "VALIDATION_ERROR" }),

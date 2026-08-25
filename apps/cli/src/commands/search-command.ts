@@ -72,7 +72,11 @@ export async function executeSearchCommand(
     }
     await semanticSearch(materials, root, query, limit, debug, dependencies.output);
   } finally {
-    await materials.close();
+    try {
+      await materials.close();
+    } finally {
+      await dependencies.closeProject?.();
+    }
   }
 }
 

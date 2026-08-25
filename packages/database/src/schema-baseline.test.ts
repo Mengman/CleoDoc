@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 describe("current database schema baseline", () => {
-  it("creates the complete v10 schema directly and preserves current FTS invariants", async () => {
+  it("creates the complete v12 schema directly and preserves current FTS invariants", async () => {
     const root = await createTemporaryProject("cleodoc-schema-baseline-test-");
     const database = await ProjectDatabase.open(root, TEST_DATABASE_OPTIONS);
     try {
@@ -53,8 +53,6 @@ describe("current database schema baseline", () => {
           "conversation_message_fts",
           "conversation_sessions",
           "conversations",
-          "generation_model_call_mapping",
-          "generations",
           "embedding_models",
           "knowledge_chunk_fts",
           "knowledge_chunks",
@@ -62,10 +60,19 @@ describe("current database schema baseline", () => {
           "model_calls",
           "project_instruction_revisions",
           "schema_migrations",
-          "session_summaries",
           "sources",
         ]),
       );
+      expect(tableNames).not.toContain("session_summaries");
+      expect(tableNames).not.toContain("generations");
+      expect(tableNames).not.toContain("generation_model_call_mapping");
+      expect(getColumnNames(database, "conversations")).not.toEqual(
+        expect.arrayContaining(["provider_id", "model"]),
+      );
+      expect(getColumnNames(database, "compaction_jobs")).not.toEqual(
+        expect.arrayContaining(["provider_id", "model", "summary_id"]),
+      );
+      expect(getColumnNames(database, "compaction_jobs")).toContain("summary");
 
       const messageColumns = getColumnNames(database, "messages");
       expect(messageColumns).toEqual(
@@ -137,8 +144,6 @@ describe("current database schema baseline", () => {
       const conversations = new ConversationRepository(database);
       const conversation = await conversations.createConversation({
         projectId: "project-1",
-        providerId: "fake",
-        model: "model",
       });
       const sessions = new SessionRepository(database);
       const session = await sessions.createInitialSession({

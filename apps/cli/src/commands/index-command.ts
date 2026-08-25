@@ -44,7 +44,11 @@ export async function executeIndexCommand(
     }
     await embedIndex(materials, root, resolveDebug(parsed, dependencies), dependencies.output);
   } finally {
-    await materials.close();
+    try {
+      await materials.close();
+    } finally {
+      await dependencies.closeProject?.();
+    }
   }
 }
 

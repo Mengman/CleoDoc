@@ -7,7 +7,7 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo config
 
   cleo provider list
-  cleo provider test <openai-compatible|ollama> [--base-url <url>]
+  cleo provider test openai-compatible [--base-url <url>]
 
   cleo chat [--project <directory>] --model <model> [选项]
     --provider <id>       覆盖软件配置选择的 Provider
@@ -21,14 +21,11 @@ export const helpText = `CleoDoc v0.1 CLI
     --conversation <id>   继续指定对话
     --new                 不恢复最近对话，开始新对话
     --prompt <text>       单轮非交互调用
-    --save <path>         单轮调用成功后保存结果
-    --overwrite           明确允许覆盖 --save 指定的文档
 
   cleo document list [--project <directory>]
-  cleo document show <document-id|path> [--project <directory>]
+  cleo document show <path> [--project <directory>]
   cleo document create <path> [--content <text>] [--project <directory>]
-  cleo document save-last <path> [--overwrite] [--project <directory>]
-  cleo document delete <document-id|path> [--project <directory>]
+  cleo document delete <path> [--project <directory>]
 
   cleo material add <file> [--title <标题>]
     [--encoding <utf-8|gb2312|gbk|gb18030>]
@@ -53,7 +50,6 @@ export const helpText = `CleoDoc v0.1 CLI
   cleo conversation show <conversation-id> [--project <directory>]
 
 交互式 chat 命令：
-  /save manuscript/chapter-001.md
   /read manuscript/chapter-001.md
   /documents
   /history
@@ -72,7 +68,6 @@ export const helpText = `CleoDoc v0.1 CLI
 环境变量：
   CLEODOC_API_KEY   当前 Provider 的 API Key（不会写入配置或项目）
   OPENAI_BASE_URL   OpenAI-compatible API 根地址
-  OLLAMA_BASE_URL   Ollama 地址，默认 http://127.0.0.1:11434
   CLEODOC_MODEL     未提供 --model 时使用的模型
   CLEODOC_LLM_CONNECT_TIMEOUT_MS      连接/首响应超时
   CLEODOC_LLM_STREAM_IDLE_TIMEOUT_MS  流连续无数据超时

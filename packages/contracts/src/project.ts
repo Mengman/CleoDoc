@@ -21,7 +21,6 @@ export interface ProjectStatus {
 }
 
 export interface DocumentSummary {
-  id: string;
   relativePath: string;
   contentHash: string;
   size: number;
