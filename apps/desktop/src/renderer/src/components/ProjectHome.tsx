@@ -2,6 +2,8 @@ import { FolderOpen, KeyRound, Plus, Save } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import type { DesktopLlmApiSettings } from "../../../shared/desktop-api.js";
+import { Button } from "./ui/button.js";
+import { Input } from "./ui/input.js";
 
 function createSavedApiKeyMask(length: number | null): string {
   return "•".repeat(length ?? 0);
@@ -94,107 +96,131 @@ export function ProjectHome(): ReactNode {
   }
 
   return (
-    <main className="project-home">
-      <section className="project-home-content" aria-labelledby="project-home-title">
-        <header className="project-home-heading">
-          <p className="eyebrow">CLEODOC</p>
-          <h1 id="project-home-title">开始使用 CleoDoc</h1>
-          <p>本地优先的中文小说 AI 主笔</p>
+    <main className="grid h-full min-h-0 min-w-0 overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,var(--surface-raised)_0%,var(--background)_48%)] px-7 py-14 max-[840px]:px-5 max-[840px]:py-8">
+      <section className="m-auto w-full max-w-[780px]" aria-labelledby="project-home-title">
+        <header className="mb-[30px] text-center">
+          <p className="mb-2.5 text-[10px] font-bold tracking-[0.2em] text-primary">CLEODOC</p>
+          <h1 id="project-home-title" className="m-0 text-4xl tracking-tight text-foreground">
+            开始使用 CleoDoc
+          </h1>
+          <p className="mt-3 text-[13px] text-muted-foreground">本地优先的中文小说 AI 主笔</p>
         </header>
 
         {showProviderSetup ? (
           <section
-            className="project-home-card provider-setup"
+            className="mt-4 rounded-[14px] border border-border bg-surface p-6 shadow-md"
             aria-labelledby="provider-setup-title"
           >
-            <div className="project-home-card-heading">
-              <KeyRound />
+            <div className="mb-[22px] flex items-center gap-3">
+              <KeyRound className="size-[22px] text-primary" />
               <div>
-                <h2 id="provider-setup-title">LLM API 配置</h2>
-                <p>选择当前支持的 Provider 并保存 API Key。</p>
+                <h2 id="provider-setup-title" className="m-0 text-base text-foreground">
+                  LLM API 配置
+                </h2>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  选择当前支持的 Provider 并保存 API Key。
+                </p>
               </div>
             </div>
-            <form onSubmit={(event) => void saveProvider(event)}>
-              <label>
+            <form className="grid gap-4" onSubmit={(event) => void saveProvider(event)}>
+              <label className="grid gap-[7px] text-[11px] text-foreground">
                 <span>Provider</span>
-                <select value="deepseek" onChange={() => undefined} aria-label="Provider">
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  value="deepseek"
+                  onChange={() => undefined}
+                  aria-label="Provider"
+                >
                   <option value="deepseek">DeepSeek</option>
                 </select>
               </label>
-              <label>
+              <label className="grid gap-[7px] text-[11px] text-foreground">
                 <span>API Key</span>
-                <input
+                <Input
                   type="password"
                   value={apiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                   onFocus={() => {
-                    if (apiKey === createSavedApiKeyMask(settings?.apiKeyLength ?? null))
+                    if (apiKey === createSavedApiKeyMask(settings?.apiKeyLength ?? null)) {
                       setApiKey("");
+                    }
                   }}
                   placeholder="请输入 DeepSeek API Key"
                   autoComplete="new-password"
                   disabled={settings !== null && !settings.secureStorageAvailable}
                 />
               </label>
-              <div className="project-home-form-footer">
+              <div className="flex items-center justify-between gap-4 pt-1">
                 <p
-                  className={
+                  className={`m-0 text-[10px] ${
                     providerStatus.includes("无法") || providerStatus.includes("请输入")
-                      ? "error"
-                      : ""
-                  }
+                      ? "text-destructive"
+                      : "text-success"
+                  }`}
                 >
                   {providerStatus}
                 </p>
-                <button type="submit" disabled={settings === null || saving}>
+                <Button type="submit" size="sm" disabled={settings === null || saving}>
                   <Save />
                   {saving ? "保存中…" : "保存配置"}
-                </button>
+                </Button>
               </div>
               {settings !== null && !settings.secureStorageAvailable ? (
-                <p className="project-home-warning">当前系统无法安全保存 API Key。</p>
+                <p className="m-0 text-[10px] text-destructive">当前系统无法安全保存 API Key。</p>
               ) : null}
             </form>
           </section>
         ) : null}
 
         <section
-          className="project-home-card project-actions"
+          className="mt-4 rounded-[14px] border border-border bg-surface p-6 shadow-md"
           aria-labelledby="project-actions-title"
         >
-          <div className="project-home-card-heading">
-            <FolderOpen />
+          <div className="mb-[22px] flex items-center gap-3">
+            <FolderOpen className="size-[22px] text-primary" />
             <div>
-              <h2 id="project-actions-title">项目</h2>
-              <p>创建新作品，或打开已有的 CleoDoc 项目。</p>
+              <h2 id="project-actions-title" className="m-0 text-base text-foreground">
+                项目
+              </h2>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                创建新作品，或打开已有的 CleoDoc 项目。
+              </p>
             </div>
           </div>
-          <div className="project-action-list">
-            <button
+          <div className="grid grid-cols-2 gap-3.5 max-[840px]:grid-cols-1">
+            <Button
+              variant="outline"
+              className="h-[100px] justify-start gap-3.5 px-[18px] py-[18px] text-left text-foreground hover:border-primary hover:bg-accent"
               type="button"
               onClick={() => void runProjectAction("create")}
               disabled={openingProject}
             >
-              <Plus />
-              <span>
-                <strong>新建项目</strong>
-                <small>从空白目录创建新的作品项目</small>
+              <Plus className="size-7 text-primary" />
+              <span className="grid gap-[5px]">
+                <strong className="text-sm">新建项目</strong>
+                <small className="text-[10px] leading-normal text-muted-foreground">
+                  从空白目录创建新的作品项目
+                </small>
               </span>
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              className="h-[100px] justify-start gap-3.5 px-[18px] py-[18px] text-left text-foreground hover:border-primary hover:bg-accent"
               type="button"
               onClick={() => void runProjectAction("open")}
               disabled={openingProject}
             >
-              <FolderOpen />
-              <span>
-                <strong>打开项目</strong>
-                <small>打开本地已有的 CleoDoc 项目</small>
+              <FolderOpen className="size-7 text-primary" />
+              <span className="grid gap-[5px]">
+                <strong className="text-sm">打开项目</strong>
+                <small className="text-[10px] leading-normal text-muted-foreground">
+                  打开本地已有的 CleoDoc 项目
+                </small>
               </span>
-            </button>
+            </Button>
           </div>
           {projectStatus !== "" ? (
-            <p className="project-home-action-error">{projectStatus}</p>
+            <p className="mt-3.5 text-[10px] text-destructive">{projectStatus}</p>
           ) : null}
         </section>
       </section>
