@@ -102,7 +102,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 阶段一实现约束：
 
 - Tailwind 的 Vite 插件只注册到 Electron Renderer；Main、Preload、CLI 和 `packages/*` 不引入 UI 运行时依赖。
-- `components.json` 与 `apps/desktop/src/renderer/src/components/ui/` 作为后续 shadcn 源码的唯一配置和目录位置；尚未按需引入任何可见组件。
+- `components.json` 与 `apps/desktop/src/renderer/src/components/ui/` 作为 shadcn 源码的唯一配置和目录位置；基础组件只在得到明确 UI 授权后按需接入业务页面。
 - Renderer 使用 `@` 指向 `apps/desktop/src/renderer/src` 的构建与 TypeScript 别名；`cn()` 位于 `lib/utils.ts`。
 - Tailwind 样式继续由 `index.html` 外链加载，以保持严格 CSP；仅导入 theme 与 utilities，暂不导入 Preflight，避免全局重置改变尚未迁移的手写页面。
 
@@ -133,6 +133,18 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - 组件仅从 Renderer 使用，不向 Main 或 Core 引入 DOM、Tailwind 或 UI 依赖。
 - 弹窗、菜单、焦点陷阱和快捷键不破坏 Electron 窗口菜单与 TipTap 未来的编辑器焦点。
 - 产物不包含未使用的整套视觉组件库或页面模板。
+
+### 4.1.1 阶段五：验证、文档与迁移交接
+
+**状态：已完成。** 已完成 UI 框架基线的静态检查、完整自动化测试与桌面构建，并同步本计划和桌面 UI 结构设计。
+
+交接结论：
+
+- Renderer 在严格 CSP 下继续以 HTML 外链方式加载既有 CSS 与 Tailwind CSS；自动化测试确认 Tailwind 样式未改为 Renderer 注入。
+- Renderer 在首次 React 渲染前从 Main 读取已解析的主题并写入 `data-theme`；自动化测试确认主题启动顺序，避免首次渲染使用错误 token。
+- 后续页面迁移只能从 `components/ui/` 按需引入基础组件，继续复用既有业务组件、Application Service 和 Typed IPC；不得为迁移复制项目、资料、聊天或主题状态。
+- 目前唯一的业务页面接入是已获授权的设置页主题下拉菜单；其余页面仍保留手写 UI，按 4.2 的顺序和单页验收迁移。
+- 每个页面迁移完成前至少执行 `npm run format:check`、`npm run lint`、`npm run typecheck`、相关功能测试、`npm test`、`npm run build` 与 `npm run desktop:build`。
 
 ### 4.2 现有 v0.2 页面迁移
 

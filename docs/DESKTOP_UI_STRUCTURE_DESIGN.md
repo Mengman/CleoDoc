@@ -85,7 +85,7 @@ Renderer 在现有 Electron + React + TypeScript 基础上采用以下组合：
 
 阶段一已完成 Renderer 构建接入：Tailwind 通过 Renderer Vite 插件处理，并继续由 `index.html` 外链加载；`components.json` 和 `components/ui/` 是 shadcn 源码的唯一配置与目录位置。Renderer 的 `@` 别名指向其 `src` 目录，供组件源码使用。当前只导入 Tailwind 的 theme 与 utilities，不导入 Preflight，避免其全局重置影响尚未迁移的手写页面。
 
-阶段三已按需生成 Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 和 Toast（Sonner）。这些组件使用 Radix UI、`class-variance-authority`、`clsx`、`tailwind-merge` 与 `tw-animate-css`，但尚未导入任何业务页面。Tailwind 的 `dark:` 变体由 Renderer 的 `data-theme="dark"` 驱动；Toast 同样读取该属性，不使用 `next-themes` 或浏览器存储。
+阶段三已按需生成 Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 和 Toast（Sonner）。这些组件使用 Radix UI、`class-variance-authority`、`clsx`、`tailwind-merge` 与 `tw-animate-css`。除已获授权的设置页主题下拉菜单外，它们尚未导入业务页面。Tailwind 的 `dark:` 变体由 Renderer 的 `data-theme="dark"` 驱动；Toast 同样读取该属性，不使用 `next-themes` 或浏览器存储。
 
 ### 主题与视觉 token
 
@@ -113,6 +113,7 @@ v0.3 首先只引入以下最小组件集：Button、Input、Textarea、Select�
 2. 页面迁移保持现有 Application Service、Typed IPC、项目隔离和业务状态，不创建平行数据模型。
 3. 单个页面完成迁移后删除被替代的手写通用样式与重复组件；不得长期混用两套通用按钮、表单、弹窗或主题系统。
 4. 组件库模板不授权增加功能入口、导航、占位卡或模拟数据；所有新增可见 UI 仍需用户明确授权。
+5. UI 框架基线完成后，页面按本文件的结构顺序单独迁移和验收。每次迁移继续复用现有业务组件、Application Service 与 Typed IPC，只替换通用视觉和无障碍交互层，不复制项目、资料、聊天或主题状态。
 
 ### 编辑器与版本控制边界
 
