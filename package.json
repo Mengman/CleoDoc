@@ -21,6 +21,8 @@
     "desktop:build": "electron-vite build",
     "desktop:dev": "electron-vite dev",
     "desktop:preview": "electron-vite preview",
+    "package:desktop": "npm run desktop:build && electron-builder --publish never",
+    "package:desktop:dir": "npm run desktop:build && electron-builder --dir --publish never",
     "package:cli": "npm run build && node scripts/package-cli.mjs",
     "cleo": "tsx apps/cli/src/main.ts",
     "format": "prettier --write .",
@@ -32,8 +34,10 @@
   },
   "dependencies": {
     "lucide-react": "^1.31.0",
+    "node-llama-cpp": "^3.19.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "sqlite-vec": "0.1.9",
     "yaml": "^2.9.0",
     "zod": "^4.0.17"
   },
@@ -44,6 +48,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "43.1.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^10.8.0",
     "prettier": "^3.6.2",

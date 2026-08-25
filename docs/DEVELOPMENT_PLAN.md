@@ -47,7 +47,41 @@ v0.2 不再新增需要复杂交互或新视觉组件的界面，包括长任务
 
 ### 3.2 Electron 兼容性、隔离与安装包
 
-**状态：进行中。** 已完成 Electron + React 工程、开发版启动、桌面构建、Renderer/Preload/Main 分层、sandbox、context isolation、Typed IPC、单活动项目生命周期和项目级资源释放。
+**状态：发行实现进行中。** 已完成 Electron + React 工程、开发版启动、桌面构建、Renderer/Preload/Main 分层、sandbox、context isolation、Typed IPC、单活动项目生命周期和项目级资源释放。
+
+审计结论：
+
+- 当前 `npm run desktop:build` 只生成 `out/main`、`out/preload` 和 `out/renderer`，可以验证开发构建，但不生成可安装或可分发的 Electron 制品。
+- 仓库当前没有 `electron-builder`、Electron Forge 或等价打包依赖、配置文件、`package:desktop` 脚本，以及桌面制品 CI 工作流。
+- 已有 `resolveDesktopDefaultConfigPath` 明确了安装版默认配置应位于 `process.resourcesPath/config/software-default.yaml`；打包配置必须将 `resources/config` 复制到该位置。
+- 本地 Embedding 模型当前作为仓库开发资源存在，`resources/models/embedding/README.md` 尚未确定是否随安装包分发、首次使用下载或保存至模型缓存。v0.2 发布门要求安装版可执行本地索引，因此必须在发行实现前确定该策略。
+- `node-llama-cpp` 被主进程构建显式 external，sqlite-vec 与平台原生依赖也不能假定会进入 ASAR；发行配置必须按目标平台携带运行时依赖，并为无法从 ASAR 加载的模块设置 unpack 规则。
+- Embedding Worker 已作为 `out/main/chunks/embedding-worker.js` 构建；发行制品必须保留该输出路径，使其与主进程中的 `import.meta.url` 相对解析保持一致。
+- 当前 CI 只执行通用 build 和 CLI 打包；尚未构建、安装、启动或上传任何桌面制品。
+
+已完成的发行实现：
+
+- 已接入 `electron-builder`，并提供 `npm run package:desktop` 与 `npm run package:desktop:dir`。
+- 已配置 Windows NSIS、macOS DMG 和 Linux AppImage 目标，以及 `release/desktop` 输出目录。
+- 已将默认配置与两个 GGUF Embedding 模型作为 `extraResources` 放入安装版 `resources` 目录。
+- 已将 `node-llama-cpp`、sqlite-vec 及其平台原生依赖纳入生产依赖和 ASAR unpack 规则。
+- Windows x64 目录包已验证包含默认配置、模型和解包后的原生依赖，并成功完成一次隐藏窗口启动检查。
+- Windows x64 NSIS 安装器已成功生成；当前安装器约 438 MB，未签名，尚未执行实际安装与卸载验证。
+- 已新增跨平台桌面制品 CI 工作流，在 Windows、macOS 和 Linux 原生 Runner 上构建并归档各自的默认制品。
+
+当前发布阻塞项：
+
+- 尚未提供 CleoDoc 的 Windows、macOS、Linux 应用图标；electron-builder 当前回退使用 Electron 默认图标，不能作为正式发行物。
+- 尚未在真实安装路径中验证 Windows NSIS 的安装、启动、卸载与用户数据保留；macOS DMG 和 Linux AppImage 也尚未在各自原生 Runner 产出并验证。
+- 尚未在打包应用中执行真实资料导入/Embedding、sqlite-vec 加载和 Provider 对话冒烟。
+- 尚未接入桌面制品 CI、代码签名或 macOS 公证；签名与公证需要发布凭据和相应外部权限。
+
+发行实现顺序：
+
+1. 选择并接入唯一的 Electron 打包工具，新增可重复的 `package:desktop` 脚本及目标平台配置。
+2. 定义安装包内 `app`、`resources/config`、`resources/models`、主进程 Worker 和平台原生依赖的精确位置与 ASAR/unpack 规则。
+3. 为每个平台生成制品并在源码目录之外启动；验证默认配置、Provider 安全凭据、项目路径、Worker、SQLite、sqlite-vec 与 Embedding 模型。
+4. 新增桌面制品 CI：构建、安装版冒烟、归档制品；签名、公证和发布凭据在具备相应外部权限后单独接入。
 
 需要完成：
 
