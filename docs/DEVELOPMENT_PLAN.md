@@ -89,7 +89,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 
 ### 4.1 UI 框架基线
 
-**状态：阶段一、阶段二已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置和组件目录；主题 token、启动初始化与持久化基础已完成。基础组件与页面迁移尚未开始。
+**状态：阶段一至阶段三已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置、主题 token、启动初始化和最小基础组件集；页面迁移尚未开始。
 
 技术方案固定为 **Tailwind CSS + shadcn/ui + Radix UI**：
 
@@ -113,9 +113,15 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - Renderer 在首次 React 渲染前设置 `data-theme`，避免未来消费 token 的页面出现错误主题首屏。
 - Tailwind CSS 已定义 Light/Dark 语义颜色、字体、字号、行高、圆角、间距、阴影、层级与动效 token；视觉 token 不依赖透明背景或 `backdrop-filter`。
 
+已完成的基础组件：
+
+- 已按需生成 Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 与 Toast（Sonner）源码，并集中放在 `components/ui/`。
+- 已引入 Radix UI、`class-variance-authority`、`tailwind-merge`、`clsx`、Sonner 与 `tw-animate-css`；不导入组件库模板、页面或示例数据。
+- Toast 监听 CleoDoc 已有的 `data-theme`，不使用 `next-themes` 或浏览器存储建立第二套主题状态。
+- 组件尚未导入现有业务页面，因此不产生新的可见 UI；现有手写页面继续保持原状。
+
 仍需实现：
 
-- 建立最小基础组件集：Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge、Toast。
 - 在获得明确 UI 授权后，将主题选择控件放入设置界面。
 - 为组件增加键盘导航、焦点管理、屏幕阅读器语义和高对比度验证。
 

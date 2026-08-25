@@ -85,6 +85,8 @@ Renderer 在现有 Electron + React + TypeScript 基础上采用以下组合：
 
 阶段一已完成 Renderer 构建接入：Tailwind 通过 Renderer Vite 插件处理，并继续由 `index.html` 外链加载；`components.json` 和 `components/ui/` 是 shadcn 源码的唯一配置与目录位置。Renderer 的 `@` 别名指向其 `src` 目录，供组件源码使用。当前只导入 Tailwind 的 theme 与 utilities，不导入 Preflight，避免其全局重置影响尚未迁移的手写页面。
 
+阶段三已按需生成 Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 和 Toast（Sonner）。这些组件使用 Radix UI、`class-variance-authority`、`clsx`、`tailwind-merge` 与 `tw-animate-css`，但尚未导入任何业务页面。Tailwind 的 `dark:` 变体由 Renderer 的 `data-theme="dark"` 驱动；Toast 同样读取该属性，不使用 `next-themes` 或浏览器存储。
+
 ### 主题与视觉 token
 
 主题使用语义 CSS variables，而非在页面中直接使用具体颜色。最少定义：
