@@ -1,11 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { app, BrowserWindow, dialog, Menu, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeTheme, safeStorage } from "electron";
 
 import {
+  AppStateService,
   getSoftwareUserConfigPath,
   initializeSoftwareConfig,
+  type AppThemePreference,
 } from "../../../../packages/config/src/index.js";
 import { DesktopCredentialStore } from "./desktop-credential-store.js";
 import { ProviderService } from "../../../../packages/model-providers/src/index.js";
@@ -15,10 +17,19 @@ import { DesktopProjectRuntime, toDesktopOperationError } from "./desktop-projec
 import { createDesktopMaterialServiceOptions } from "./desktop-material-service-options.js";
 import { resolveDesktopDefaultConfigPath } from "./desktop-resource-paths.js";
 import { registerDesktopIpc } from "./desktop-ipc.js";
+import { desktopChannels, type DesktopTheme } from "../shared/desktop-api.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-function createMainWindow(): BrowserWindow {
+function resolveDesktopTheme(preference: AppThemePreference): DesktopTheme {
+  return preference === "system"
+    ? nativeTheme.shouldUseDarkColors
+      ? "dark"
+      : "light"
+    : preference;
+}
+
+function createMainWindow(theme: DesktopTheme): BrowserWindow {
   // Create and load the hardened primary CleoDoc window.
   // 1. Configure the native window and disable renderer Node.js access.
   // 2. Block new windows and renderer-driven navigation.
@@ -30,14 +41,14 @@ function createMainWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     title: "CleoDoc",
-    backgroundColor: "#0b111a",
+    backgroundColor: theme === "dark" ? "#0b111a" : "#f5f7fb",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
     ...(process.platform === "darwin"
       ? {}
       : {
           titleBarOverlay: {
-            color: "#121822",
-            symbolColor: "#d8deea",
+            color: theme === "dark" ? "#121822" : "#f5f7fb",
+            symbolColor: theme === "dark" ? "#d8deea" : "#1e293b",
             height: 40,
           },
         }),
@@ -78,6 +89,9 @@ async function startDesktop(): Promise<void> {
     isPackaged: app.isPackaged,
   });
   const loadedConfig = await initializeSoftwareConfig({ defaultConfigPath });
+  const appStateService = new AppStateService();
+  const appState = await appStateService.read();
+  let currentTheme = resolveDesktopTheme(appState.themePreference);
   const credentialStore = new DesktopCredentialStore(
     path.join(path.dirname(getSoftwareUserConfigPath()), "credentials", "openai-compatible.bin"),
     {
@@ -95,6 +109,7 @@ async function startDesktop(): Promise<void> {
   );
   const providerService = new ProviderService({ credentials: credentialStore });
   const projectRuntime = new DesktopProjectRuntime({
+    appStateService,
     busyTimeoutMs: loadedConfig.config.database.busyTimeoutMs,
     chat: createDesktopChatServiceOptions(),
     materials: createDesktopMaterialServiceOptions(
@@ -115,7 +130,7 @@ async function startDesktop(): Promise<void> {
   let mainWindow: BrowserWindow | null = null;
   const openMainWindow = (): BrowserWindow => {
     // Create the only main window and clear its reference after native destruction.
-    const window = createMainWindow();
+    const window = createMainWindow(currentTheme);
     mainWindow = window;
     window.once("closed", () => {
       if (mainWindow === window) mainWindow = null;
@@ -123,8 +138,22 @@ async function startDesktop(): Promise<void> {
     return window;
   };
 
-  registerDesktopIpc(projectRuntime, llmSettings, desktopChat, () => mainWindow);
+  registerDesktopIpc(
+    projectRuntime,
+    llmSettings,
+    desktopChat,
+    () => mainWindow,
+    () => currentTheme,
+  );
   const window = openMainWindow();
+  nativeTheme.on("updated", () => {
+    // Follow operating-system changes while the saved preference remains System.
+    if (appState.themePreference !== "system") return;
+    currentTheme = resolveDesktopTheme(appState.themePreference);
+    if (mainWindow === null || mainWindow.isDestroyed()) return;
+    mainWindow.setBackgroundColor(currentTheme === "dark" ? "#0b111a" : "#f5f7fb");
+    mainWindow.webContents.send(desktopChannels.themeChanged, { theme: currentTheme });
+  });
   if (restoreError !== undefined) {
     window.once("ready-to-show", () => {
       void dialog.showMessageBox(window, {

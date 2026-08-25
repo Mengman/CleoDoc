@@ -52,6 +52,21 @@ describe("AppStateService", () => {
     await expect(service.read()).resolves.toEqual(cleared);
   });
 
+  it("persists the selected theme preference without changing project state", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "cleodoc-state-"));
+    temporaryDirectories.push(home);
+    const service = new AppStateService({ CLEODOC_HOME: home });
+    await service.setCurrentProject(path.join(home, "novel.cleo"));
+
+    const updated = await service.setThemePreference("light");
+
+    expect(updated).toMatchObject({
+      currentProject: path.resolve(home, "novel.cleo"),
+      themePreference: "light",
+    });
+    await expect(service.read()).resolves.toMatchObject({ themePreference: "light" });
+  });
+
   it("keeps the ten most recently opened projects without duplicates", async () => {
     // Verify reopening a project moves it to the front while the list remains bounded.
     // 1. Store more projects than the list permits.

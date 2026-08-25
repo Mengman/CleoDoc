@@ -1,2 +1,102 @@
 @import "tailwindcss/theme" layer(theme);
 @import "tailwindcss/utilities" layer(utilities);
+
+:root {
+  color-scheme: light;
+  --background: oklch(0.98 0.005 260);
+  --foreground: oklch(0.2 0.02 260);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(0.96 0.008 260);
+  --muted: oklch(0.94 0.01 260);
+  --muted-foreground: oklch(0.48 0.025 260);
+  --border: oklch(0.88 0.015 260);
+  --input: oklch(0.88 0.015 260);
+  --primary: oklch(0.55 0.2 285);
+  --primary-foreground: oklch(0.99 0.005 285);
+  --accent: oklch(0.93 0.035 285);
+  --accent-foreground: oklch(0.3 0.08 285);
+  --destructive: oklch(0.58 0.22 28);
+  --destructive-foreground: oklch(0.99 0.005 28);
+  --warning: oklch(0.72 0.16 78);
+  --warning-foreground: oklch(0.27 0.05 78);
+  --success: oklch(0.63 0.12 165);
+  --success-foreground: oklch(0.16 0.04 165);
+  --ring: oklch(0.55 0.2 285);
+  --app-font-sans: Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --app-font-size-xs: 0.75rem;
+  --app-font-size-sm: 0.875rem;
+  --app-font-size-base: 1rem;
+  --app-line-height-tight: 1.25;
+  --app-line-height-normal: 1.5;
+  --app-line-height-relaxed: 1.7;
+  --app-radius: 0.625rem;
+  --app-space-1: 0.25rem;
+  --app-space-2: 0.5rem;
+  --app-space-3: 0.75rem;
+  --app-space-4: 1rem;
+  --app-shadow-sm: 0 1px 2px rgb(15 23 42 / 8%);
+  --app-shadow-md: 0 12px 28px rgb(15 23 42 / 12%);
+  --app-shadow-lg: 0 24px 56px rgb(15 23 42 / 16%);
+  --app-z-base: 0;
+  --app-z-dropdown: 30;
+  --app-z-dialog: 50;
+  --app-z-toast: 70;
+  --app-duration-fast: 120ms;
+  --app-duration-normal: 180ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.14 0.015 260);
+  --foreground: oklch(0.93 0.01 260);
+  --surface: oklch(0.18 0.018 260);
+  --surface-raised: oklch(0.22 0.02 260);
+  --muted: oklch(0.24 0.02 260);
+  --muted-foreground: oklch(0.67 0.02 260);
+  --border: oklch(0.3 0.02 260);
+  --input: oklch(0.3 0.02 260);
+  --primary: oklch(0.71 0.18 285);
+  --primary-foreground: oklch(0.18 0.02 285);
+  --accent: oklch(0.31 0.07 285);
+  --accent-foreground: oklch(0.91 0.035 285);
+  --destructive: oklch(0.68 0.18 28);
+  --destructive-foreground: oklch(0.2 0.03 28);
+  --warning: oklch(0.78 0.14 78);
+  --warning-foreground: oklch(0.22 0.045 78);
+  --success: oklch(0.73 0.1 165);
+  --success-foreground: oklch(0.17 0.035 165);
+  --ring: oklch(0.71 0.18 285);
+  --app-shadow-sm: 0 1px 2px rgb(0 0 0 / 22%);
+  --app-shadow-md: 0 12px 28px rgb(0 0 0 / 30%);
+  --app-shadow-lg: 0 24px 56px rgb(0 0 0 / 42%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-ring: var(--ring);
+  --font-sans: var(--app-font-sans);
+  --radius-sm: calc(var(--app-radius) - 4px);
+  --radius-md: calc(var(--app-radius) - 2px);
+  --radius-lg: var(--app-radius);
+  --radius-xl: calc(var(--app-radius) + 4px);
+  --shadow-sm: var(--app-shadow-sm);
+  --shadow-md: var(--app-shadow-md);
+  --shadow-lg: var(--app-shadow-lg);
+}

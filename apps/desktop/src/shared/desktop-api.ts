@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const desktopChannels = {
   getRuntimeInfo: "desktop:get-runtime-info",
+  getThemeBootstrap: "desktop:get-theme-bootstrap",
+  themeChanged: "desktop:theme-changed",
   showWindowMenu: "desktop:show-window-menu",
   getProjectState: "desktop:get-project-state",
   chooseAndOpenProject: "desktop:choose-and-open-project",
@@ -44,6 +46,12 @@ export const desktopRuntimeInfoSchema = z
     platform: z.string().min(1),
   })
   .strict();
+
+export const desktopThemeSchema = z.enum(["light", "dark"]);
+
+export const desktopThemeBootstrapSchema = z.object({ theme: desktopThemeSchema }).strict();
+
+export const desktopThemeChangedEventSchema = desktopThemeBootstrapSchema;
 
 export const desktopProjectSummarySchema = z
   .object({
@@ -333,6 +341,8 @@ export const desktopToolApprovalResultSchema = z.discriminatedUnion("outcome", [
 ]);
 
 export type DesktopRuntimeInfo = z.infer<typeof desktopRuntimeInfoSchema>;
+export type DesktopTheme = z.infer<typeof desktopThemeSchema>;
+export type DesktopThemeBootstrap = z.infer<typeof desktopThemeBootstrapSchema>;
 export type DesktopProjectState = z.infer<typeof desktopProjectStateSchema>;
 export type DesktopProjectOperationResult = z.infer<typeof desktopProjectOperationResultSchema>;
 export type ManuscriptListResult = z.infer<typeof manuscriptListResultSchema>;
@@ -369,6 +379,8 @@ export type DesktopToolApprovalResult = z.infer<typeof desktopToolApprovalResult
 
 export interface CleoDocDesktopApi {
   readonly getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
+  readonly getThemeBootstrap: () => Promise<DesktopThemeBootstrap>;
+  readonly onThemeChanged: (listener: (theme: DesktopThemeBootstrap) => void) => () => void;
   readonly showWindowMenu: (input: ShowWindowMenuInput) => Promise<void>;
   readonly getProjectState: () => Promise<DesktopProjectState>;
   readonly chooseAndOpenProject: () => Promise<DesktopProjectOperationResult>;

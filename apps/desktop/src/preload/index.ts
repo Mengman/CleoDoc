@@ -10,6 +10,8 @@ import {
   desktopToolApprovalResultSchema,
   desktopConversationListResultSchema,
   desktopChatMessageEventSchema,
+  desktopThemeBootstrapSchema,
+  desktopThemeChangedEventSchema,
   manuscriptListResultSchema,
   manuscriptDocumentsChangedEventSchema,
   materialListResultSchema,
@@ -36,6 +38,15 @@ import {
 const desktopApi: CleoDocDesktopApi = {
   getRuntimeInfo: async () =>
     desktopRuntimeInfoSchema.parse(await ipcRenderer.invoke(desktopChannels.getRuntimeInfo)),
+  getThemeBootstrap: async () =>
+    desktopThemeBootstrapSchema.parse(await ipcRenderer.invoke(desktopChannels.getThemeBootstrap)),
+  onThemeChanged: (listener) => {
+    const handleThemeChanged = (_event: Electron.IpcRendererEvent, rawTheme: unknown): void => {
+      listener(desktopThemeChangedEventSchema.parse(rawTheme));
+    };
+    ipcRenderer.on(desktopChannels.themeChanged, handleThemeChanged);
+    return () => ipcRenderer.removeListener(desktopChannels.themeChanged, handleThemeChanged);
+  },
   showWindowMenu: async (input) => {
     await ipcRenderer.invoke(
       desktopChannels.showWindowMenu,

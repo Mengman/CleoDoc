@@ -23,6 +23,7 @@ import {
   desktopLlmApiSettingsSchema,
   desktopProjectOperationResultSchema,
   desktopRuntimeInfoSchema,
+  desktopThemeBootstrapSchema,
   getDesktopConversationHistoryInputSchema,
   createDesktopConversationInputSchema,
   resolveDesktopToolApprovalInputSchema,
@@ -33,6 +34,7 @@ import {
   renameDesktopMaterialInputSchema,
   type DesktopProjectOperationResult,
   type DesktopProjectState,
+  type DesktopTheme,
 } from "../shared/desktop-api.js";
 import { toDesktopOperationError } from "./desktop-project-runtime.js";
 import type { DesktopProjectRuntime } from "./desktop-project-runtime.js";
@@ -222,6 +224,7 @@ export function registerDesktopIpc(
   llmSettings: DesktopLlmSettingsService,
   chat: DesktopChatService,
   resolveMainWindow: MainWindowResolver,
+  resolveTheme: () => DesktopTheme,
 ): void {
   // Register the complete whitelist of IPC capabilities exposed to the renderer.
   // 1. Register targeted project and manuscript events plus read-only state queries.
@@ -245,6 +248,11 @@ export function registerDesktopIpc(
       nodeVersion: process.versions.node,
       platform: process.platform,
     });
+  });
+
+  ipcMain.handle(desktopChannels.getThemeBootstrap, (event) => {
+    requireMainWindow(event, resolveMainWindow);
+    return desktopThemeBootstrapSchema.parse({ theme: resolveTheme() });
   });
 
   ipcMain.handle(desktopChannels.getProjectState, (event) => {

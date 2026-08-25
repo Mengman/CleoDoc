@@ -89,7 +89,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 
 ### 4.1 UI 框架基线
 
-**状态：阶段一已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置和组件目录，当前页面保持原有手写样式；主题 token、基础组件与页面迁移尚未开始。
+**状态：阶段一、阶段二已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置和组件目录；主题 token、启动初始化与持久化基础已完成。基础组件与页面迁移尚未开始。
 
 技术方案固定为 **Tailwind CSS + shadcn/ui + Radix UI**：
 
@@ -106,16 +106,24 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - Renderer 使用 `@` 指向 `apps/desktop/src/renderer/src` 的构建与 TypeScript 别名；`cn()` 位于 `lib/utils.ts`。
 - Tailwind 样式继续由 `index.html` 外链加载，以保持严格 CSP；仅导入 theme 与 utilities，暂不导入 Preflight，避免全局重置改变尚未迁移的手写页面。
 
-需要实现：
+已完成的主题基础：
 
-- 建立主题、颜色、字体、圆角、间距、层级和动效 token。
+- `state.yaml` 保存 `light`、`dark` 或 `system` 的主题偏好，缺省为 `system`；它与当前项目、最近目录和最近项目保持同一应用状态事实源。
+- Main 在创建窗口前解析主题并设置窗口背景；Preload 只暴露经过 Schema 校验的主题启动信息与系统主题变化事件。
+- Renderer 在首次 React 渲染前设置 `data-theme`，避免未来消费 token 的页面出现错误主题首屏。
+- Tailwind CSS 已定义 Light/Dark 语义颜色、字体、字号、行高、圆角、间距、阴影、层级与动效 token；视觉 token 不依赖透明背景或 `backdrop-filter`。
+
+仍需实现：
+
 - 建立最小基础组件集：Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge、Toast。
-- 确定 React/Electron 下的主题初始化与持久化方式，避免启动时闪烁错误主题。
+- 在获得明确 UI 授权后，将主题选择控件放入设置界面。
 - 为组件增加键盘导航、焦点管理、屏幕阅读器语义和高对比度验证。
+
+当前手写页面将在 4.2 的页面迁移时开始消费 token；本阶段不为旧页面重复替换颜色或布局。
 
 检查点：
 
-- Dark、Light 与跟随系统主题均可切换且重启后恢复。
+- 主题偏好可持久化，System 模式在启动和操作系统主题变化时解析为 Light 或 Dark；主题选择控件在获得授权后补充。
 - 组件仅从 Renderer 使用，不向 Main 或 Core 引入 DOM、Tailwind 或 UI 依赖。
 - 弹窗、菜单、焦点陷阱和快捷键不破坏 Electron 窗口菜单与 TipTap 未来的编辑器焦点。
 - 产物不包含未使用的整套视觉组件库或页面模板。

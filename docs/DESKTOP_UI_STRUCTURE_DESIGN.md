@@ -93,7 +93,9 @@ Renderer 在现有 Electron + React + TypeScript 基础上采用以下组合：
 - `primary`、`accent`、`destructive`、`warning`、`success` 及相应前景色。
 - 字体、字号、行高、圆角、间距、阴影、层级和动效时长。
 
-同一套 token 在 `:root`、`.dark` 和系统主题初始化中分别定义 Light、Dark 与 System 模式。启动前必须应用已保存或系统选择的主题，避免 Electron Renderer 首屏出现错误主题闪烁。
+同一套 token 在 `:root` 与 `:root[data-theme="dark"]` 中分别定义 Light 与 Dark 模式；System 偏好由 Main 根据操作系统主题解析为其中一种模式。启动时 Main 先设置窗口背景，Renderer 在首次 React 渲染前设置 `data-theme`，避免未来消费 token 的页面出现错误主题闪烁。
+
+主题偏好保存于应用状态的 `state.yaml`，取值为 `light`、`dark` 或 `system`，缺省为 `system`。Preload 只暴露 Schema 校验后的启动主题和系统主题变化事件；主题选择控件仍需在获得明确 UI 授权后添加。旧手写页面在迁移前不强行改用 token，避免重复样式改造。
 
 “毛玻璃感”使用不透明渐变 surface、细边框、柔和阴影和层级色差实现。不得依赖真实透明背景或 `backdrop-filter`；阅读区、编辑器和长列表优先保证文字对比度、滚动性能和跨平台一致性。
 
