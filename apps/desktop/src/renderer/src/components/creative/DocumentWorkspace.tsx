@@ -34,7 +34,7 @@ export function DocumentWorkspace({
   const activeTab = tabs.find((tab) => documentTabKey(tab) === activeTabKey) ?? null;
 
   return (
-    <main className="reader-panel document-workspace">
+    <main className="document-workspace grid min-h-0 min-w-0 grid-rows-[52px_minmax(0,1fr)] overflow-hidden bg-background">
       <div className="reader-tabs document-tab-bar">
         <div className="document-tabs" role="tablist" aria-label="已打开文档">
           {tabs.map((tab) => (

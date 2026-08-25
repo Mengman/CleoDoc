@@ -30,17 +30,6 @@ svg {
   height: 20px;
 }
 
-.creative-workspace {
-  display: grid;
-  grid-template-columns: 292px minmax(480px, 1fr) 370px;
-  grid-template-rows: minmax(0, 1fr);
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .panel-heading,
 .reader-tabs,
 .reader-meta,
@@ -54,16 +43,6 @@ svg {
   white-space: nowrap;
 }
 
-.library-panel {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 18px 14px;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
 .panel-heading {
   justify-content: space-between;
   margin-bottom: 16px;
@@ -307,17 +286,6 @@ svg {
 .works-list-state.error {
   color: #d28a8a;
 }
-.reader-panel {
-  grid-column: 2;
-  grid-row: 1;
-  display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) 42px;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: #0a111a;
-}
 .reader-tabs {
   justify-content: space-between;
   padding: 0 20px;
@@ -508,16 +476,6 @@ svg {
 .supported-formats svg {
   width: 15px;
   color: #8e7dff;
-}
-.chat-panel {
-  grid-column: 3;
-  grid-row: 1;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  min-height: 0;
-  min-width: 0;
-  border-left: 1px solid var(--border);
-  background: #0c141f;
 }
 .chat-panel-closed,
 .conversation-list-empty {
@@ -904,9 +862,6 @@ svg {
 @media (max-width: 1320px) {
   .app-body {
     grid-template-columns: 64px minmax(0, 1fr);
-  }
-  .creative-workspace {
-    grid-template-columns: 260px minmax(430px, 1fr) 330px;
   }
   .document-surface {
     padding: 44px;

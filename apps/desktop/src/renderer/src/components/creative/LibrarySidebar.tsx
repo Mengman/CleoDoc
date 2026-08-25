@@ -23,7 +23,7 @@ export function LibrarySidebar({
   // 1. Show the current feature heading and list summary.
   // 2. Render feature-owned content or the existing empty state.
   return (
-    <aside className="library-panel">
+    <aside className="flex min-h-0 flex-col border-r border-border bg-surface px-3.5 py-[18px]">
       <div className="panel-heading">
         <div>
           <h1>{title}</h1>

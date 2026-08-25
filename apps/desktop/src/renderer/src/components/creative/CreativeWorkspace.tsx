@@ -37,7 +37,7 @@ export function CreativeWorkspace({
   // 2. Forward manuscript and material selection, activation, and closing to shared tab state.
   // 3. Keep the chat panel bound to the current project session.
   return (
-    <div className="creative-workspace">
+    <div className="grid size-full min-h-0 min-w-0 grid-cols-[292px_minmax(480px,1fr)_370px] overflow-hidden max-[1320px]:grid-cols-[260px_minmax(430px,1fr)_330px]">
       {activeSidebar === "works" ? (
         <WorksSidebar
           projectState={projectState}

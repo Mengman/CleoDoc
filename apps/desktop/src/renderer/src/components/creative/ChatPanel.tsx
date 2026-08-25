@@ -286,7 +286,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
 
   if (projectState.status === "closed") {
     return (
-      <aside className="chat-panel chat-panel-closed">
+      <aside className="chat-panel-closed grid min-h-0 min-w-0 border-l border-border bg-surface">
         <MessageSquareText />
         <strong>尚未打开项目</strong>
         <span>通过文件菜单打开项目后，这里将展示项目对话。</span>
@@ -295,7 +295,7 @@ export function ChatPanel({ projectState }: ChatPanelProps): ReactNode {
   }
 
   return (
-    <aside className="chat-panel">
+    <aside className="grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] border-l border-border bg-surface">
       {selected === null ? (
         <ConversationList
           conversations={conversations}
