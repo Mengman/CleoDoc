@@ -32,12 +32,14 @@ export function ConversationMessage({
   }, [reasoningStreaming]);
 
   return (
-    <article className={`conversation-message ${message.role}`}>
+    <article
+      className={`mb-4 grid ${message.role === "user" ? "justify-items-end" : "justify-items-start"}`}
+    >
       {message.role === "assistant" && reasoning !== "" ? (
-        <div className="message-reasoning-wrap">
+        <div className="mb-1.5 w-[88%]">
           <button
             type="button"
-            className="message-reasoning-toggle"
+            className="flex items-center gap-1 bg-transparent p-0 text-[7.33px] text-muted-foreground hover:text-foreground"
             aria-expanded={displayedReasoningExpanded}
             aria-controls={`reasoning-${message.id}`}
             onClick={() => setReasoningExpanded((expanded) => !expanded)}
@@ -46,14 +48,25 @@ export function ConversationMessage({
             <span aria-hidden="true">{displayedReasoningExpanded ? "▾" : "▸"}</span>
           </button>
           {displayedReasoningExpanded ? (
-            <div id={`reasoning-${message.id}`} className="message-reasoning-content">
+            <div
+              id={`reasoning-${message.id}`}
+              className="mt-[7px] border-l border-border pl-2 text-[9px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words"
+            >
               {reasoning}
             </div>
           ) : null}
         </div>
       ) : null}
       {message.content.trim() !== "" ? (
-        <div className="conversation-message-bubble">{message.content}</div>
+        <div
+          className={`max-w-[88%] whitespace-pre-wrap break-words border px-3 py-2.5 text-[11px] leading-relaxed ${
+            message.role === "user"
+              ? "rounded-[13px_4px_13px_13px] border-primary/60 bg-primary text-primary-foreground"
+              : "rounded-[4px_13px_13px_13px] border-border bg-secondary text-foreground"
+          }`}
+        >
+          {message.content}
+        </div>
       ) : null}
     </article>
   );

@@ -1,13 +1,14 @@
 import { ArrowUp, ChevronDown } from "lucide-react";
+import { useLayoutEffect, useRef, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+
+import { Button } from "../ui/button.js";
 import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu.js";
+import { Textarea } from "../ui/textarea.js";
 
 export interface ChatApprovalActions {
   readonly approvalLabel: string;
@@ -37,12 +38,7 @@ export function ChatComposer({
   // 1. Keep the textarea value owned by the parent so conversation drafts can be switched.
   // 2. Submit on Enter while preserving Shift+Enter for multiline prompts.
   // 3. Disable sending while a request is active or the draft is empty.
-  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    if (approval === null) setApprovalMenuOpen(false);
-  }, [approval]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -69,24 +65,25 @@ export function ChatComposer({
   }
 
   function allowOnce(): void {
-    setApprovalMenuOpen(false);
     approval?.onAllowOnce();
   }
 
   function reject(): void {
-    setApprovalMenuOpen(false);
     approval?.onReject();
   }
 
   function allowUntilExit(): void {
-    setApprovalMenuOpen(false);
     approval?.onAllowUntilExit();
   }
 
   return (
-    <form className="chat-composer" onSubmit={submit}>
-      <textarea
+    <form
+      className="m-3 mb-3 grid grid-rows-[minmax(72px,auto)_auto] gap-1.5 rounded-[14px] border border-border bg-surface-raised p-2"
+      onSubmit={submit}
+    >
+      <Textarea
         ref={textareaRef}
+        className="min-h-[72px] max-h-64 resize-none border-0 bg-transparent px-2 py-[7px] text-[11px] leading-relaxed shadow-none focus-visible:border-0 focus-visible:ring-0"
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -95,41 +92,45 @@ export function ChatComposer({
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <div className="chat-composer-actions">
+      <div className="flex min-h-[34px] items-center justify-end gap-2">
         {approval === null ? null : (
-          <div className="chat-approval-control">
-            <button type="button" className="chat-approval-allow" onClick={allowOnce}>
-              请求{approval.approvalLabel}：允许
-            </button>
-            <button
+          <div className="flex items-center overflow-hidden rounded-md">
+            <Button
               type="button"
-              className="chat-approval-expand"
-              aria-label="展开授权选项"
-              aria-expanded={approvalMenuOpen}
-              onClick={() => setApprovalMenuOpen((open) => !open)}
+              size="sm"
+              className="h-[34px] rounded-r-none px-3 text-[11px]"
+              onClick={allowOnce}
             >
-              <ChevronDown />
-            </button>
-            {!approvalMenuOpen ? null : (
-              <div className="chat-approval-menu">
-                <button type="button" onClick={reject}>
+              请求{approval.approvalLabel}：允许
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  className="h-[34px] w-7 rounded-l-none border-l border-primary-foreground/20"
+                  aria-label="展开授权选项"
+                >
+                  <ChevronDown className="size-[14px]" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="end">
+                <DropdownMenuItem variant="destructive" onSelect={reject}>
                   拒绝
-                </button>
-                <button type="button" onClick={allowUntilExit}>
-                  总是允许
-                </button>
-              </div>
-            )}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={allowUntilExit}>总是允许</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
-        <button
+        <Button
           type="submit"
-          className="chat-send-button"
+          size="icon"
           disabled={disabled || value.trim().length === 0}
           aria-label="发送消息"
         >
           <ArrowUp />
-        </button>
+        </Button>
       </div>
     </form>
   );

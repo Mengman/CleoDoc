@@ -14,7 +14,7 @@ describe("desktop renderer entry", () => {
     expect(html).toContain('<link rel="stylesheet" href="/src/styles.css" />');
     expect(html).not.toContain('href="/src/titlebar.css"');
     expect(html).not.toContain('href="/src/project-home.css"');
-    expect(html).toContain('<link rel="stylesheet" href="/src/chat-approval.css" />');
+    expect(html).not.toContain('href="/src/chat-approval.css"');
     expect(html).toContain('<link rel="stylesheet" href="/src/tailwind.css" />');
     expect(html).toContain("style-src 'self'");
     expect(rendererEntry).not.toContain('import "./styles.css"');
