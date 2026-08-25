@@ -7,6 +7,8 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { DesktopProjectState } from "../../../../shared/desktop-api.js";
+import { Button } from "../ui/button.js";
+import { Input } from "../ui/input.js";
 import { LibrarySidebar } from "./LibrarySidebar.js";
 
 export function MaterialsSidebar({
@@ -122,15 +124,15 @@ export function MaterialsSidebar({
       content={content}
       action={
         projectId === null ? undefined : (
-          <button
+          <Button
             type="button"
-            className="material-import-button"
+            size="xs"
             disabled={importing}
             onClick={() => void importMaterial()}
           >
             <UploadIcon />
             {importing ? "正在导入…" : "导入资料"}
-          </button>
+          </Button>
         )
       }
     />
@@ -185,18 +187,19 @@ export function MaterialList({
   }
 
   return (
-    <ul className="material-list">
+    <ul className="m-0 grid min-h-0 flex-1 content-start gap-1 overflow-auto p-0">
       {materials.map((title) => (
         <li key={title}>
           {editingTitle === title ? (
             <form
-              className="material-rename-form"
+              className="m-0 flex"
               onSubmit={(event) => {
                 event.preventDefault();
                 void submitRename(title);
               }}
             >
-              <input
+              <Input
+                className="h-auto rounded-lg px-2.5 py-[9px] text-[11px]"
                 autoFocus
                 required
                 maxLength={200}
@@ -210,17 +213,25 @@ export function MaterialList({
               />
             </form>
           ) : (
-            <div className={`material-list-entry${title === activeMaterialTitle ? " active" : ""}`}>
+            <div
+              className={`material-list-entry${title === activeMaterialTitle ? " active" : ""} flex items-center overflow-hidden rounded-lg transition-colors ${
+                title === activeMaterialTitle ? "bg-accent" : "bg-surface-raised hover:bg-accent"
+              }`}
+            >
               <button
                 type="button"
-                className="material-list-item"
+                className={`flex min-w-0 flex-1 items-center rounded-lg px-2.5 py-[9px] text-left text-[11px] ${
+                  title === activeMaterialTitle
+                    ? "text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
                 onClick={() => onOpenMaterial(title)}
               >
-                <span>{title}</span>
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">{title}</span>
               </button>
               <button
                 type="button"
-                className="material-rename-button"
+                className="mr-1 grid size-[30px] flex-none place-items-center rounded-md text-muted-foreground hover:bg-primary hover:text-primary-foreground [&>svg]:size-[13px]"
                 aria-label={`重命名 ${title}`}
                 title="重命名资料"
                 onClick={() => {
@@ -232,7 +243,7 @@ export function MaterialList({
               </button>
               <button
                 type="button"
-                className="material-delete-button"
+                className="mr-1 grid size-[30px] flex-none place-items-center rounded-md text-muted-foreground hover:bg-destructive hover:text-destructive-foreground disabled:cursor-default disabled:opacity-50 [&>svg]:size-[13px]"
                 aria-label={`删除 ${title}`}
                 title="删除资料"
                 disabled={deletingTitle !== null}
@@ -256,7 +267,9 @@ function MaterialsListState({
   error?: boolean;
 }): ReactNode {
   return (
-    <div className={`works-list-state${error ? " error" : ""}`}>
+    <div
+      className={`px-3 py-6 text-center text-[10px] ${error ? "text-destructive" : "text-muted-foreground"}`}
+    >
       <span>{message}</span>
     </div>
   );

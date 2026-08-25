@@ -103,12 +103,16 @@ export function ManuscriptList({
 }): ReactNode {
   // Display each manuscript path and open the selected file in the shared document workspace.
   return (
-    <ul className="manuscript-list">
+    <ul className="m-0 grid min-h-0 flex-1 content-start gap-1 overflow-auto p-0">
       {documents.map((relativePath) => (
         <li key={relativePath}>
           <button
             type="button"
-            className={`manuscript-list-item${relativePath === activeDocumentPath ? " active" : ""}`}
+            className={
+              relativePath === activeDocumentPath
+                ? "manuscript-list-item active"
+                : "manuscript-list-item"
+            }
             onClick={() => onOpenDocument(relativePath)}
           >
             <DocumentIcon />
@@ -128,7 +132,9 @@ function WorksListState({
   error?: boolean;
 }): ReactNode {
   return (
-    <div className={`works-list-state${error ? " error" : ""}`}>
+    <div
+      className={`px-3 py-6 text-center text-[10px] ${error ? "text-destructive" : "text-muted-foreground"}`}
+    >
       <span>{message}</span>
     </div>
   );

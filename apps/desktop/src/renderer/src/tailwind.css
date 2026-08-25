@@ -122,3 +122,21 @@
   --shadow-md: var(--app-shadow-md);
   --shadow-lg: var(--app-shadow-lg);
 }
+
+@layer components {
+  .manuscript-list-item {
+    @apply flex w-full min-w-0 items-center gap-2.5 rounded-lg bg-surface-raised px-2.5 py-[9px] text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground;
+  }
+
+  .manuscript-list-item.active {
+    @apply bg-accent text-accent-foreground;
+  }
+
+  .manuscript-list-item svg {
+    @apply size-4 shrink-0 text-primary;
+  }
+
+  .manuscript-list-item span {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+}
