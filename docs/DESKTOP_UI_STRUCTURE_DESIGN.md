@@ -4,6 +4,8 @@
 >
 > 本文只确定界面层级、区域职责和共享关系，不冻结视觉样式、尺寸、颜色、间距或具体控件。任何设计图仍然只是阶段性参考。
 
+> v0.2 收尾阶段只维护当前界面。v0.3 才引入本文件第 4.6 节的 UI 技术方案并迁移已有页面；任何新增可见元素仍需得到用户明确授权。
+
 ## 1. 设计目标
 
 CleoDoc 桌面界面分为四个层级：窗口标题栏、全局导航区、功能区和状态栏。
@@ -69,6 +71,49 @@ CleoDoc 桌面窗口
 
 聊天生成、上下文压缩、索引和 Embedding 等长任务进入界面化后，其进度、可取消状态和结果提示统一显示在状态栏中。状态栏不替代任务中心，当前阶段不增加独立面板、历史记录或新的操作入口。
 
+## 4.6 UI 技术方案（v0.3）
+
+### 技术栈与职责
+
+Renderer 在现有 Electron + React + TypeScript 基础上采用以下组合：
+
+- **Tailwind CSS**：构建期样式工具和语义 token 的消费层，负责布局、响应式规则与页面级样式组合。
+- **shadcn/ui**：按需生成并维护在仓库中的基础组件源码。它是 CleoDoc 的通用组件层，不作为外部黑盒主题库使用。
+- **Radix UI**：提供 Dialog、AlertDialog、DropdownMenu、Popover、Select、Tabs、ScrollArea、Tooltip 等无障碍交互原语；shadcn 已采用的 Radix primitive 直接复用，不建立重复的通用组件体系。
+
+三者只能位于 `apps/desktop` Renderer。Main、Preload、CLI 和 `packages/*` 不得依赖 DOM、Tailwind、shadcn/ui 或 Radix UI。
+
+### 主题与视觉 token
+
+主题使用语义 CSS variables，而非在页面中直接使用具体颜色。最少定义：
+
+- `background`、`surface`、`surface-raised`、`foreground`、`muted-foreground`、`border`。
+- `primary`、`accent`、`destructive`、`warning`、`success` 及相应前景色。
+- 字体、字号、行高、圆角、间距、阴影、层级和动效时长。
+
+同一套 token 在 `:root`、`.dark` 和系统主题初始化中分别定义 Light、Dark 与 System 模式。启动前必须应用已保存或系统选择的主题，避免 Electron Renderer 首屏出现错误主题闪烁。
+
+“毛玻璃感”使用不透明渐变 surface、细边框、柔和阴影和层级色差实现。不得依赖真实透明背景或 `backdrop-filter`；阅读区、编辑器和长列表优先保证文字对比度、滚动性能和跨平台一致性。
+
+### 基础组件范围
+
+v0.3 首先只引入以下最小组件集：Button、Input、Textarea、Select、Tabs、Dialog、AlertDialog、DropdownMenu、Popover、Tooltip、ScrollArea、Progress、Badge 和 Toast。
+
+组件应保留业务无关性：它们只接收显示、焦点、键盘和回调状态；项目路径、数据库、模型密钥、任务逻辑和 IPC 调用仍由现有业务组件及 Typed IPC 边界负责。
+
+### 迁移策略
+
+1. 先建立主题 token 和基础组件，再迁移窗口标题栏、导航、项目首页、阅读区、聊天、设置、授权控件和状态栏。
+2. 页面迁移保持现有 Application Service、Typed IPC、项目隔离和业务状态，不创建平行数据模型。
+3. 单个页面完成迁移后删除被替代的手写通用样式与重复组件；不得长期混用两套通用按钮、表单、弹窗或主题系统。
+4. 组件库模板不授权增加功能入口、导航、占位卡或模拟数据；所有新增可见 UI 仍需用户明确授权。
+
+### 编辑器与版本控制边界
+
+TipTap 不属于通用 UI 组件层。v0.4 中 TipTap/ProseMirror 负责编辑器文档状态、选区、命令和扩展；shadcn/ui 与 Radix UI 只负责其周边工具栏、菜单、浮层、标签页、确认框和状态反馈。
+
+Git 版本服务也不依赖 UI 框架，但版本列表、恢复确认、Diff 浏览与错误反馈必须复用 v0.3 的基础组件和主题 token。
+
 ## 5. 功能区
 
 功能区位于导航区右侧，占据应用主体其余全部空间。功能区根据当前导航状态切换为作品界面、资料界面或设置界面。
@@ -119,7 +164,7 @@ CleoDoc 桌面窗口
 
 当前 Conversation 采用列表与当前对话两级视图。项目打开后，列表按最近活动顺序展示当前项目全部 Conversation；点击一项进入可继续交流的当前对话视图，顶部显示返回箭头和数据库 `conversations.title`。当前对话视图只加载最近 20 条 `user` 与 `assistant` 可见消息，User 气泡居右，Assistant 气泡居左。
 
-当前阶段暂不开放新建 Conversation，因此 Conversation 列表不显示输入框。用户打开已有 Conversation 后，输入框固定在当前对话视图底部，用于继续该 Conversation。每个已打开 Conversation 分别维护临时输入草稿；切换 Conversation 时不清空，切回后恢复。草稿只保存在当前 Renderer 生命周期内，发送成功后清空，发送失败则恢复。
+Conversation 列表与当前对话视图都保留聊天输入区：列表提交首条消息时创建并进入新 Conversation，当前对话视图用于继续所选 Conversation。每个已打开 Conversation 和列表新建输入分别维护临时草稿；切换时不清空，切回后恢复。草稿只保存在当前 Renderer 生命周期内，发送成功后清空，发送失败则恢复。
 
 Assistant 的 `reasoning_content` 去除首尾空白后非空时，在正文气泡上方显示“思考 ▸”控制项，小三角位于文字右侧。Reasoning 默认折叠，用户展开前不渲染正文；展开后显示“思考 ▾”，正文使用灰色文字且不包含在聊天气泡中。“思考”控制项使用亮灰色，字号为聊天内容字号的三分之二。每条 Assistant 消息独立维护折叠状态，离开当前对话视图后恢复默认折叠。
 
@@ -238,6 +283,8 @@ DesktopShell
 └─ StatusBar
 ```
 
+v0.3 的组件目录可在上述结构之外增加 `components/ui/`，用于放置 shadcn/ui 生成并由本仓库维护的基础组件。业务组件不得反向放入该目录。
+
 其中 `CreativeWorkspace` 表示作品和资料共用的工作区外壳。作品与资料的差异只存在于左侧导航块；`DocumentWorkspace` 和 `ChatPanel` 不消费当前选择的是作品还是资料，始终保持同一实例和同一状态来源。
 
 ## 11. 结构约束
@@ -261,4 +308,4 @@ DesktopShell
 - 查询能力最终位于顶级导航、资料界面还是其他入口。
 - AI 聊天窗口是否允许折叠或调整宽度。
 - 设置分类的具体列表和排列顺序。
-- v0.3 编辑器进入共享文档工作区后的具体交互。
+- v0.4 编辑器进入共享文档工作区后的具体交互。

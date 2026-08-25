@@ -49,15 +49,19 @@ v0.1 按重要性排序只有三个核心目标：
 
 v0.1 明确不做：Electron、React、TipTap、Git 版本界面、语义 Diff、关系图、自动事实抽取、完整阶段审批、多人协作、云同步、OCR、ANN 向量索引和自动长篇生成。接口可以为后续能力预留，但不得因此阻塞核心闭环。
 
-### v0.2：Electron 桌面产品
+### v0.2：Electron 桌面产品收尾
 
-v0.2 在同一套 Core 上增加 Electron + React 桌面界面，将 v0.1 已完成的项目、文档、资料、配置、对话、Session、Tool、RAG 和项目指令能力 UI 化。除补充 Markdown/TXT 作品与资料只读展示外，v0.2 不增加新的文档格式、创作流程、知识语义或版本能力。
+v0.2 在同一套 Core 上完成现有 Electron + React 桌面界面的稳定、安全、真实安装包和跨平台发行验证。v0.2 不再使用当前手写 UI 体系新增复杂页面或交互；长任务、上下文、Tool 状态、索引和检索等未完成桌面界面统一迁移到 v0.3。
 
 GUI 必须消费 v0.1 已验证的 Application Service；不得在 Renderer 中复制项目、数据库、RAG 或模型调用逻辑。
 
-### v0.3：创作工作室能力扩展
+### v0.3：UI 框架接入与能力迁移
 
-原先规划在 v0.2 的 CDM/TipTap、Draft 与文本统计、Git 版本与语义 Diff、知识图与设定审批、阶段 Agent、新 Provider 和新格式导入导出统一顺延到 v0.3。列入顺延范围不代表已经冻结 v0.3 设计；进入实施前必须重新规划。
+v0.3 接入 Tailwind CSS、shadcn/ui 和 Radix UI，建立 Light、Dark 与 System 主题及统一的无障碍基础组件，并迁移已有 v0.2 页面。原 v0.2 未完成的长任务、上下文、Tool 状态、索引和检索界面在此版本完成。
+
+### v0.4：创作工作室
+
+v0.4 才进入正式 CDM v1、TipTap/ProseMirror、Draft、文本统计、Git 版本控制、版本历史、安全恢复和语义 Diff。知识图、阶段 Agent、新 Provider 和新格式导入导出仍需在进入版本范围前重新规划。
 
 ## 3. 架构不变量
 
@@ -85,10 +89,10 @@ packages/project     项目格式和安全文件读写
 packages/database    SQLite、当前 Schema 基线和 Repository
 packages/knowledge   资料与知识模型
 packages/rag         Chunk/Source、FTS、Embedding、检索、融合和上下文组装
-packages/agent       LLM Tool Loop；v0.3 再评估持久化工作流
+packages/agent       LLM Tool Loop；后续版本再评估持久化工作流
 packages/model-providers
-packages/versioning  v0.3
-packages/diff        v0.3
+packages/versioning  v0.4
+packages/diff        v0.4
 ```
 
 底层 package 不得反向依赖 `apps/cli`、`apps/desktop` 或 UI。
@@ -132,7 +136,7 @@ v0.1 检索路径为：
 - Tool 参数必须经过 Schema 校验；Tool 只能读取当前任务被授权的项目范围。
 - Tool Loop 必须设置最大轮数、上下文预算、超时和取消信号，避免无限循环。
 - 自动批准的 Tool 在 CLI 中静默执行；只有需要用户授权的 Tool 才显示审批界面。原始 Tool Result 返回 LLM 并按既有 Message 协议持久化，不直接作为普通 CLI 输出展示给用户。
-- LLM 生成内容不能直接覆盖正式文档。v0.1 和 v0.2 都需要用户明确执行保存或确认覆盖；ChangeSet 留到 v0.3 重新规划。
+- LLM 生成内容不能直接覆盖正式文档。v0.1 至 v0.3 都需要用户明确执行保存或确认覆盖；ChangeSet 留到 v0.4 重新规划。
 - RAG Tool 的版本化 Tool Result Message 用于还原实际发送的检索证据；普通 CLI 检索的 Query、候选和结果不写入数据库。
 - 日志默认不记录正文、资料原文、完整 Prompt、模型响应或密钥。
 
@@ -155,7 +159,7 @@ v0.1 检索路径为：
 
 - 按照当前已经确认的需求选择最简单、直接的设计；不要为尚未进入范围的假设需求过度设计，也不要增加不必要的抽象和封装。
 - 防御性检查应针对真实的外部输入、已知失败路径或确实可能出现的业务状态；不要为业务上不可能发生的情况增加限制、分支和恢复逻辑。
-- 单个源代码文件原则上不应超过 500 行。文件过长时应按照明确的功能职责拆分；确有必要的特殊情况可以例外，但应能说明不能合理拆分的原因。
+- 单个源代码文件原则上不应超过 1000 行。文件过长时应按照明确的功能职责拆分；确有必要的特殊情况可以例外，但应能说明不能合理拆分的原因。
 - 先阅读现有实现、测试和 package scripts，再选择修改位置；不要创建重复服务或平行数据模型。
 - 代码注释统一使用英文。
 - 函数注释按照函数体的代码行数编写：
