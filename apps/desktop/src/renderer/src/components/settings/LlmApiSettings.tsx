@@ -2,6 +2,8 @@ import { KeyRound } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import type { DesktopLlmApiSettings } from "../../../../shared/desktop-api.js";
+import { Button } from "../ui/button.js";
+import { Input } from "../ui/input.js";
 
 function createSavedApiKeyMask(length: number | null): string {
   return "•".repeat(length ?? 0);
@@ -82,20 +84,27 @@ export function LlmApiSettings(): ReactNode {
   }
 
   return (
-    <section className="llm-api-settings" aria-labelledby="llm-api-settings-title">
-      <div className="settings-section-heading">
-        <div className="settings-section-icon">
+    <section
+      className="mt-8 max-w-[680px] rounded-[14px] border border-border bg-surface p-6 shadow-md"
+      aria-labelledby="llm-api-settings-title"
+    >
+      <div className="mb-6 flex items-center gap-3">
+        <div className="grid size-10 place-items-center rounded-[10px] bg-accent text-accent-foreground">
           <KeyRound />
         </div>
         <div>
-          <h3 id="llm-api-settings-title">DeepSeek API</h3>
-          <p>当前通过 OpenAI-compatible 接口用于开发调试。</p>
+          <h3 id="llm-api-settings-title" className="m-0 text-[15px] text-foreground">
+            DeepSeek API
+          </h3>
+          <p className="mb-0 mt-[5px] text-[11px] text-muted-foreground">
+            当前通过 OpenAI-compatible 接口用于开发调试。
+          </p>
         </div>
       </div>
-      <form onSubmit={(event) => void handleSubmit(event)}>
-        <label>
+      <form className="grid gap-[18px]" onSubmit={(event) => void handleSubmit(event)}>
+        <label className="grid gap-2 text-[11px] text-foreground">
           <span>Base URL</span>
-          <input
+          <Input
             type="url"
             required
             value={baseUrl}
@@ -104,9 +113,9 @@ export function LlmApiSettings(): ReactNode {
             autoComplete="url"
           />
         </label>
-        <label>
+        <label className="grid gap-2 text-[11px] text-foreground">
           <span>API Key</span>
-          <input
+          <Input
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -123,9 +132,9 @@ export function LlmApiSettings(): ReactNode {
             disabled={settings !== null && !settings.secureStorageAvailable}
           />
         </label>
-        <label>
+        <label className="grid gap-2 text-[11px] text-foreground">
           <span>Model Name</span>
-          <input
+          <Input
             type="text"
             required
             value={modelName}
@@ -133,22 +142,24 @@ export function LlmApiSettings(): ReactNode {
             pattern="deepseek-v4-flash"
           />
         </label>
-        <div className="settings-form-footer">
+        <div className="flex items-center justify-between gap-4 pt-1">
           <p
-            className={
+            className={`m-0 text-[10px] ${
               status.includes("无法") || status.includes("请输入") || status.includes("当前仅支持")
-                ? "error"
-                : ""
-            }
+                ? "text-destructive"
+                : "text-success"
+            }`}
           >
             {status}
           </p>
-          <button type="submit" disabled={settings === null || saving}>
+          <Button type="submit" disabled={settings === null || saving}>
             {saving ? "保存中…" : "保存配置"}
-          </button>
+          </Button>
         </div>
         {settings !== null && !settings.secureStorageAvailable ? (
-          <p className="settings-warning">当前操作系统安全凭据存储不可用，无法保存 API Key。</p>
+          <p className="m-0 text-[10px] text-destructive">
+            当前操作系统安全凭据存储不可用，无法保存 API Key。
+          </p>
         ) : null}
       </form>
     </section>
