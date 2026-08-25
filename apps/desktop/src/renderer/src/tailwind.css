@@ -1,4 +1,5 @@
 @import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/preflight" layer(base);
 @import "tailwindcss/utilities" layer(utilities);
 @import "tw-animate-css";
 
@@ -121,6 +122,12 @@
   --shadow-sm: var(--app-shadow-sm);
   --shadow-md: var(--app-shadow-md);
   --shadow-lg: var(--app-shadow-lg);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
 }
 
 @layer components {

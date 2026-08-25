@@ -104,7 +104,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - Tailwind 的 Vite 插件只注册到 Electron Renderer；Main、Preload、CLI 和 `packages/*` 不引入 UI 运行时依赖。
 - `components.json` 与 `apps/desktop/src/renderer/src/components/ui/` 作为 shadcn 源码的唯一配置和目录位置；基础组件只在得到明确 UI 授权后按需接入业务页面。
 - Renderer 使用 `@` 指向 `apps/desktop/src/renderer/src` 的构建与 TypeScript 别名；`cn()` 位于 `lib/utils.ts`。
-- Tailwind 样式继续由 `index.html` 外链加载，以保持严格 CSP；仅导入 theme 与 utilities，暂不导入 Preflight，避免全局重置改变尚未迁移的手写页面。
+- Tailwind 样式继续由 `index.html` 外链加载，以保持严格 CSP；页面迁移完成后导入 Preflight，并以语义 token 统一原生控件的基础重置和边框颜色。
 
 已完成的主题基础：
 
@@ -148,7 +148,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 
 ### 4.2 现有 v0.2 页面迁移
 
-**状态：阶段一“应用窗口骨架”、阶段二“项目首页与项目级入口”、阶段三“创作工作区大框架”、阶段四“作品、资料与文档阅读模块”、阶段五“聊天与 Tool 授权模块”和阶段六“设置页面”已完成；迁移收尾验证待进行。**
+**状态：已完成。** 阶段一至阶段七“收尾、清理与发布验证”的自动验证已完成；安装版的人工视觉与交互检查继续作为 v0.3 发布门执行。
 
 已完成的窗口级迁移：
 
@@ -160,8 +160,8 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - 作品目录、资料列表、资料导入/重命名/删除控件、共享标签栏和 Markdown/TXT 纯文本阅读区已迁移至语义 token 与 Tailwind；文件读取、目录监听、资料操作和标签页状态保持既有逻辑。阅读区继续由自身滚动容器承载长文档。
 - Conversation 列表、当前对话消息流、Reasoning 折叠、聊天输入与发送、Tool 授权按钮及其选项菜单已迁移至语义 token、Textarea、Button 与 DropdownMenu；Conversation、流式消息与 Tool 审批业务链路保持既有逻辑。
 - 设置导航、当前 DeepSeek API 配置表单和主题选择已迁移至语义 token、Button、Input 与 Select；API Key 掩码、保存状态、系统安全存储提示和主题持久化保持既有逻辑。
-
-需要迁移：窗口标题栏、导航区、项目首页、项目菜单、作品/资料左栏、共享文档阅读区、聊天区、设置页、授权控件和状态栏。
+- 已删除被替代的页面级手写样式与旧资源引用；`styles.css` 仅保留 Tailwind 未启用 Preflight 时所需的根节点尺寸、字体继承和窄窗口导航宽度基线，避免重复主题与页面视觉体系。
+- 已通过 `npm run format:check`、`npm run lint`、`npm run typecheck`、`npm test`（52 个测试文件、206 个测试）、`npm run build`、`npm run desktop:build` 和 `git diff --check` 自动验证。
 
 迁移原则：
 
@@ -170,7 +170,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - 不依据组件库的模板自动增加导航、按钮、空状态、数据卡或功能入口；新增可见元素仍需用户授权。
 - 迁移完成后删除被替代的通用 CSS 与重复组件，避免双重主题和样式优先级冲突。
 
-检查点：现有 v0.2 端到端闭环、项目切换、草稿保持、资料操作和 Tool 授权行为不回退。
+检查点：现有 v0.2 端到端闭环、项目切换、草稿保持、资料操作和 Tool 授权行为不回退；发布前还需在安装版中人工确认 Light、Dark、System 主题和各工作区的实际视觉与交互表现。
 
 ### 4.3 长任务、上下文与 Tool 状态界面
 
