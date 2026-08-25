@@ -89,7 +89,7 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 
 ### 4.1 UI 框架基线
 
-**状态：未开始。**
+**状态：阶段一已完成。** Renderer 已接入 Tailwind CSS 构建插件、shadcn CLI 配置和组件目录，当前页面保持原有手写样式；主题 token、基础组件与页面迁移尚未开始。
 
 技术方案固定为 **Tailwind CSS + shadcn/ui + Radix UI**：
 
@@ -98,6 +98,13 @@ macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属
 - Radix UI 提供菜单、弹窗、Popover、Tabs、ScrollArea、Select、Tooltip 等无障碍交互原语；不另行维护与 shadcn 重复的通用组件体系。
 - 使用语义 CSS token 建立 Light、Dark 和 System 三种主题选择；所有页面使用语义 token，不直接绑定具体颜色。
 - “毛玻璃感”使用不透明渐变 surface、边框和阴影实现；不以真实透明或 `backdrop-filter` 作为产品基础视觉，避免性能和跨平台渲染差异。
+
+阶段一实现约束：
+
+- Tailwind 的 Vite 插件只注册到 Electron Renderer；Main、Preload、CLI 和 `packages/*` 不引入 UI 运行时依赖。
+- `components.json` 与 `apps/desktop/src/renderer/src/components/ui/` 作为后续 shadcn 源码的唯一配置和目录位置；尚未按需引入任何可见组件。
+- Renderer 使用 `@` 指向 `apps/desktop/src/renderer/src` 的构建与 TypeScript 别名；`cn()` 位于 `lib/utils.ts`。
+- Tailwind 样式继续由 `index.html` 外链加载，以保持严格 CSP；仅导入 theme 与 utilities，暂不导入 Preflight，避免全局重置改变尚未迁移的手写页面。
 
 需要实现：
 

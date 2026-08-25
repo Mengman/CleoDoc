@@ -83,6 +83,8 @@ Renderer 在现有 Electron + React + TypeScript 基础上采用以下组合：
 
 三者只能位于 `apps/desktop` Renderer。Main、Preload、CLI 和 `packages/*` 不得依赖 DOM、Tailwind、shadcn/ui 或 Radix UI。
 
+阶段一已完成 Renderer 构建接入：Tailwind 通过 Renderer Vite 插件处理，并继续由 `index.html` 外链加载；`components.json` 和 `components/ui/` 是 shadcn 源码的唯一配置与目录位置。Renderer 的 `@` 别名指向其 `src` 目录，供组件源码使用。当前只导入 Tailwind 的 theme 与 utilities，不导入 Preflight，避免其全局重置影响尚未迁移的手写页面。
+
 ### 主题与视觉 token
 
 主题使用语义 CSS variables，而非在页面中直接使用具体颜色。最少定义：
