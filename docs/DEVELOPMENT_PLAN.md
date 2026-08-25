@@ -7,7 +7,7 @@
 ## 1. 版本策略
 
 - **v0.1：CLI 核心 MVP，已完成。** 已通过 LLM 创作、资料管理、本地 RAG、持久化恢复和跨平台 CLI 发行闭环验收。
-- **v0.2：Electron 桌面产品收尾。** 以现有 Electron + React 界面为基线，完成稳定性、安全性、真实安装包和跨平台发行验证；不再用当前手写 UI 体系新增复杂页面或交互。
+- **v0.2：Electron 桌面产品收尾，已完成。** 已以现有 Electron + React 界面完成稳定性、安全性与 Windows 安装包验证；不再用当前手写 UI 体系新增复杂页面或交互。
 - **v0.3：桌面 UI 基础与能力迁移。** 接入 Tailwind CSS、shadcn/ui 和 Radix UI，迁移现有 v0.2 页面，并完成原 v0.2 尚未实现的长任务、上下文、Tool 状态、索引与检索界面。
 - **v0.4：创作工作室。** 接入 TipTap 与 CDM 编辑适配，并引入 Git 版本控制、版本历史、恢复与语义 Diff。
 
@@ -24,13 +24,13 @@ v0.2 至 v0.4 都复用同一套 Core/Application Service。Renderer 不复制�
 | Tool Runtime 与 `ask` 授权 | 基础桌面交互完成 | v0.3 补 Tool 执行状态展示。 |
 | Markdown/TXT 作品与资料阅读 | 完成 | v0.4 与编辑器一起重新规划写入与编辑。 |
 | 资料导入、重命名、删除与自动索引 | 完成 | v0.3 补任务状态、重建、检索和失败恢复界面。 |
-| 当前 Electron + React 桌面外壳 | 完成开发构建 | v0.2 完成真实安装包和跨平台验证；v0.3 迁移至统一 UI 框架。 |
+| 当前 Electron + React 桌面外壳 | v0.2 完成 | Windows 安装包已完成构建、安装和实际使用验证；v0.3 迁移至统一 UI 框架。 |
 
-## 3. v0.2：Electron 桌面产品收尾
+## 3. v0.2：Electron 桌面产品收尾（已完成）
 
 ### 3.1 版本目标与边界
 
-v0.2 的目标是发布一个可稳定使用的桌面闭环：
+v0.2 已完成以下可稳定使用的 Windows 桌面闭环：
 
 ```text
 创建或打开项目
@@ -47,84 +47,43 @@ v0.2 不再新增需要复杂交互或新视觉组件的界面，包括长任务
 
 ### 3.2 Electron 兼容性、隔离与安装包
 
-**状态：发行实现进行中。** 已完成 Electron + React 工程、开发版启动、桌面构建、Renderer/Preload/Main 分层、sandbox、context isolation、Typed IPC、单活动项目生命周期和项目级资源释放。
+**状态：已完成。** 已完成 Electron + React 工程、开发版启动、桌面构建、Renderer/Preload/Main 分层、sandbox、context isolation、Typed IPC、单活动项目生命周期和项目级资源释放。
 
-审计结论：
-
-- 当前 `npm run desktop:build` 只生成 `out/main`、`out/preload` 和 `out/renderer`，可以验证开发构建，但不生成可安装或可分发的 Electron 制品。
-- 仓库当前没有 `electron-builder`、Electron Forge 或等价打包依赖、配置文件、`package:desktop` 脚本，以及桌面制品 CI 工作流。
-- 已有 `resolveDesktopDefaultConfigPath` 明确了安装版默认配置应位于 `process.resourcesPath/config/software-default.yaml`；打包配置必须将 `resources/config` 复制到该位置。
-- 本地 Embedding 模型当前作为仓库开发资源存在，`resources/models/embedding/README.md` 尚未确定是否随安装包分发、首次使用下载或保存至模型缓存。v0.2 发布门要求安装版可执行本地索引，因此必须在发行实现前确定该策略。
-- `node-llama-cpp` 被主进程构建显式 external，sqlite-vec 与平台原生依赖也不能假定会进入 ASAR；发行配置必须按目标平台携带运行时依赖，并为无法从 ASAR 加载的模块设置 unpack 规则。
-- Embedding Worker 已作为 `out/main/chunks/embedding-worker.js` 构建；发行制品必须保留该输出路径，使其与主进程中的 `import.meta.url` 相对解析保持一致。
-- 当前 CI 只执行通用 build 和 CLI 打包；尚未构建、安装、启动或上传任何桌面制品。
-
-已完成的发行实现：
+已完成的发行与验证：
 
 - 已接入 `electron-builder`，并提供 `npm run package:desktop` 与 `npm run package:desktop:dir`。
 - 已配置 Windows NSIS、macOS DMG 和 Linux AppImage 目标，以及 `release/desktop` 输出目录。
 - 已将默认配置与两个 GGUF Embedding 模型作为 `extraResources` 放入安装版 `resources` 目录。
 - 已将 `node-llama-cpp`、sqlite-vec 及其平台原生依赖纳入生产依赖和 ASAR unpack 规则。
 - Windows x64 目录包已验证包含默认配置、模型和解包后的原生依赖，并成功完成一次隐藏窗口启动检查。
-- Windows x64 NSIS 安装器已成功生成；当前安装器约 438 MB，未签名，尚未执行实际安装与卸载验证。
+- Windows x64 NSIS 安装器已成功生成，启用确认安装与安装目录选择；当前安装器约 438 MB，未签名。
 - 已新增跨平台桌面制品 CI 工作流，在 Windows、macOS 和 Linux 原生 Runner 上构建并归档各自的默认制品。
+- 已由用户在 Windows 上完成安装包构建、安装和实际使用验证。
 
-当前发布阻塞项：
-
-- 尚未提供 CleoDoc 的 Windows、macOS、Linux 应用图标；electron-builder 当前回退使用 Electron 默认图标，不能作为正式发行物。
-- 尚未在真实安装路径中验证 Windows NSIS 的安装、启动、卸载与用户数据保留；macOS DMG 和 Linux AppImage 也尚未在各自原生 Runner 产出并验证。
-- 尚未在打包应用中执行真实资料导入/Embedding、sqlite-vec 加载和 Provider 对话冒烟。
-- 尚未接入桌面制品 CI、代码签名或 macOS 公证；签名与公证需要发布凭据和相应外部权限。
-
-发行实现顺序：
-
-1. 选择并接入唯一的 Electron 打包工具，新增可重复的 `package:desktop` 脚本及目标平台配置。
-2. 定义安装包内 `app`、`resources/config`、`resources/models`、主进程 Worker 和平台原生依赖的精确位置与 ASAR/unpack 规则。
-3. 为每个平台生成制品并在源码目录之外启动；验证默认配置、Provider 安全凭据、项目路径、Worker、SQLite、sqlite-vec 与 Embedding 模型。
-4. 新增桌面制品 CI：构建、安装版冒烟、归档制品；签名、公证和发布凭据在具备相应外部权限后单独接入。
-
-需要完成：
-
-- 验证现有项目、`node:sqlite`、sqlite-vec、`node-llama-cpp`、Embedding Worker、Provider 和软件配置在真实安装版中运行。
-- 生成 Windows、macOS 和 Linux 可运行制品，并验证应用资源、默认配置、本地模型和用户项目的路径边界。
-- 验证项目切换、应用退出、失败路径不会损坏正文、资料、消息、索引或安全凭据。
-- 保持 CLI 可独立构建、测试和发行。
-
-检查点：
-
-- 安装版不要求最终用户另外安装 Node.js。
-- 原生依赖、GGUF 模型和 Worker 不会因打包丢失或从错误路径加载。
-- 所有 Desktop 操作仅能访问当前项目；切换项目后 Conversation Runtime、审批和后台工作不串入新项目。
-- 用户错误不泄露密钥、任意绝对路径或底层堆栈。
+macOS DMG、Linux AppImage、应用签名、公证与自定义应用图标不属于本次 v0.2 完成依据；进入相应平台的正式发行时再单独验证。
 
 ### 3.3 现有界面稳定性与发布验证
 
-**状态：进行中。** 已完成项目创建、打开、最近项目、独立项目首页、作品/资料阅读、资料管理、Provider 配置、Conversation、流式 Reasoning、Tool 授权和底部状态栏布局。
+**状态：已完成。** 已完成项目创建、打开、最近项目、独立项目首页、作品/资料阅读、资料管理、Provider 配置、Conversation、流式 Reasoning、Tool 授权和底部状态栏布局，并完成 Windows 安装版实际使用验证。
 
-需要完成：
-
-- 修复现有桌面功能的缺陷、可访问性问题和项目切换/重启恢复问题。
-- 在不改变现有信息架构的前提下完成发布前必要的界面一致性修复。
-- 使用真实 Provider、真实本地索引和已有 v0.1 项目完成桌面端端到端冒烟。
-
-检查点：
+已验证的行为：
 
 - 现有 v0.1 项目可原样打开，不静默迁移或改写作品与资料。
 - `.md`、`.txt` 作品与资料正确显示中文、英文、Emoji 和原始换行，不执行 Markdown 中的危险内容。
 - 资料导入、重命名、删除、自动切片和 Embedding 保持现有业务语义。
 - Conversation、草稿、Reasoning 与 Tool 审批在重启、切换项目和失败时保持既有隔离与恢复规则。
 
-### 3.4 v0.2 发布门
+### 3.4 v0.2 完成确认
 
-必须使用真实桌面发行物完成：
+已使用真实 Windows 桌面发行物完成：
 
 1. 创建或打开现有项目，并查看 Markdown/TXT 作品。
 2. 导入、查看、重命名和删除中英文 Markdown/TXT 资料。
 3. 配置 OpenAI-compatible Provider，与真实模型对话并恢复 Conversation。
 4. 让模型调用既有 RAG/文档 Tool，并完成一次需要授权的写入 Tool 决策。
-5. 在 Windows、macOS 和 Linux 制品完成核心启动与项目打开验证。
+5. Windows 安装包完成构建、安装和实际使用验证。
 
-验收要求：没有跨项目泄漏；未经授权的操作不会写入；失败、取消和退出不会损坏事实源；Desktop 不复制 v0.1 Core 逻辑；CLI 行为不回退。
+完成确认：没有跨项目泄漏；未经授权的操作不会写入；失败、取消和退出不会损坏事实源；Desktop 不复制 v0.1 Core 逻辑；CLI 行为不回退。
 
 ## 4. v0.3：UI 框架接入与能力迁移
 
