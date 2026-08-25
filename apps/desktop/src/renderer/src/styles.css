@@ -1,7 +1,7 @@
 :root {
-  color: #e9edf7;
-  background: #0b111a;
-  font-family: Inter, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--app-font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -30,58 +30,6 @@ svg {
   height: 20px;
 }
 
-.app-shell {
-  --line: #202a39;
-  --muted: #8390a5;
-  --panel: #0e1622;
-  --panel-soft: #111b29;
-  --purple: #7b66ff;
-  --purple-soft: #2c2450;
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-template-rows: 40px minmax(0, 1fr) 22px;
-  width: 100%;
-  height: 100%;
-  min-width: 1120px;
-  background: #0b111a;
-}
-.app-body {
-  grid-column: 1;
-  grid-row: 2;
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
-  min-width: 0;
-  min-height: 0;
-}
-.status-bar {
-  grid-column: 1;
-  grid-row: 3;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 0 12px;
-  color: #f3f1ff;
-  background: #5d4b97;
-  font-size: 10px;
-}
-.status-bar-idle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.status-bar-idle i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #77e1c3;
-}
-.feature-area {
-  grid-column: 2;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
 .creative-workspace {
   display: grid;
   grid-template-columns: 292px minmax(480px, 1fr) 370px;
@@ -106,59 +54,6 @@ svg {
   white-space: nowrap;
 }
 
-.rail {
-  grid-column: 1;
-  grid-row: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  border-right: 1px solid var(--line);
-  background: #0c131d;
-}
-.rail-items {
-  display: grid;
-  gap: 8px;
-  padding: 16px 8px;
-}
-.rail-bottom {
-  padding-top: 8px;
-  padding-bottom: 16px;
-}
-.rail-item {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 5px;
-  padding: 10px 4px;
-  border: 0;
-  border-radius: 10px;
-  color: #748196;
-  background: transparent;
-  cursor: pointer;
-  font-size: 10px;
-}
-.rail-item:hover {
-  color: #c8d1e1;
-  background: #121c2a;
-}
-.rail-item.active {
-  color: #a899ff;
-  background: #18172c;
-}
-.rail-item.active::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--purple);
-}
-.rail-item svg {
-  width: 22px;
-  height: 22px;
-}
 .library-panel {
   grid-column: 1;
   grid-row: 1;
@@ -166,8 +61,8 @@ svg {
   flex-direction: column;
   min-height: 0;
   padding: 18px 14px;
-  border-right: 1px solid var(--line);
-  background: var(--panel);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
 .panel-heading {
   justify-content: space-between;
@@ -180,7 +75,7 @@ svg {
 }
 .panel-heading p {
   margin: 5px 0 0;
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 .material-import-button {
@@ -426,7 +321,7 @@ svg {
 .reader-tabs {
   justify-content: space-between;
   padding: 0 20px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border);
   background: #0d151f;
 }
 .document-tabs {
@@ -449,7 +344,7 @@ svg {
 }
 .reader-tab.active {
   color: #ddd9ff;
-  border-bottom-color: var(--purple);
+  border-bottom-color: var(--primary);
 }
 .reader-tab-label {
   min-width: 0;
@@ -621,7 +516,7 @@ svg {
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
   min-width: 0;
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--border);
   background: #0c141f;
 }
 .chat-panel-closed,
@@ -665,7 +560,7 @@ svg {
   align-items: center;
   min-height: 52px;
   padding: 0 18px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border);
   background: #0d151f;
 }
 .conversation-list-header h2,
@@ -869,8 +764,8 @@ svg {
 }
 .settings-navigation {
   padding: 24px 16px;
-  border-right: 1px solid var(--line);
-  background: var(--panel);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
 .settings-heading {
   display: flex;
@@ -944,7 +839,7 @@ svg {
 }
 .settings-section-heading p {
   margin-top: 5px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 .llm-api-settings form {

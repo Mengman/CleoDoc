@@ -174,7 +174,7 @@ export function FeatureArea({ activeNavigation, projectState }: FeatureAreaProps
   }
 
   return (
-    <section className="feature-area">
+    <section className="feature-area h-full min-h-0 min-w-0 overflow-hidden bg-background">
       {projectState.status === "closed" ? (
         <ProjectHome />
       ) : activeNavigation === "settings" ? (
